@@ -1,4 +1,141 @@
 services:
+  client_0:
+    build:
+      context: ./src/
+      dockerfile: client/Dockerfile
+    container_name: client_0
+    depends_on:
+    - gateway
+    environment:
+    - PYTHONUNBUFFERED=1
+    - SERVER_HOST=gateway
+    - SERVER_PORT=5678
+
+  # System general elements
+  gateway:
+    build:
+      context: ./src/
+      dockerfile: gateway/Dockerfile
+    container_name: gateway
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - INPUT_QUEUE=results_queue
+    - MOM_HOST=rabbitmq
+    - TRANSACTIONS_QUEUE=transactions_queue
+    - ACCOUNTS_QUEUE=accounts_queue
+    - PYTHONUNBUFFERED=1
+    - SERVER_HOST=gateway
+    - SERVER_PORT=5678
+
+  filter_usd_0:
+    build:
+      context: ./src/
+      dockerfile: filter/Dockerfile
+    container_name: filter_usd_0
+    depends_on:
+    - client_0
+    environment:
+    - INPUT_QUEUE=transactions_queue
+    - MOM_HOST=rabbitmq
+    - OUTPUT_QUEUES=[q1_queue, q2_queue, q5_queue, date_filter_queue]
+    - PYTHONUNBUFFERED=1
+
+  filter_date_0:
+    build:
+      context: ./src/
+      dockerfile: filter/Dockerfile
+    container_name: filter_date_0
+    depends_on:
+    - filter_usd_0
+    environment:
+    - INPUT_QUEUE=date_filter_queue
+    - MOM_HOST=rabbitmq
+    - OUTPUT_QUEUES=[q3_queue, q4_queue]
+    - PYTHONUNBUFFERED=1
+
+  # Query 1 elemnts
+  q1_filter_less_than_fifty_0:
+    build:
+      context: ./src/
+      dockerfile: filter/Dockerfile
+    container_name: q1_filter_less_than_fifty_0
+    depends_on:
+    - filter_date_0
+    environment:
+    - INPUT_QUEUE=q1_queue
+    - MOM_HOST=rabbitmq
+    - OUTPUT_QUEUES=result_queue
+    - PYTHONUNBUFFERED=1
+
+  # Query 5 elements
+  q5_filter_date_0:
+    build:
+      context: ./src/
+      dockerfile: filter/Dockerfile
+    container_name: q5_filter_date_0
+    depends_on:
+    # - 
+    environment:
+    - INPUT_QUEUE=q5_queue
+    - MOM_HOST=rabbitmq
+    - OUTPUT_QUEUES=wire_ach_queue
+    - PYTHONUNBUFFERED=1
+
+  q5_filter_wire_ach_0:
+    build:
+      context: ./src/
+      dockerfile: filter/Dockerfile
+    container_name: q5_filter_wire_ach_0
+    depends_on:
+    # - 
+    environment:
+    - INPUT_QUEUE=wire_ach_queue
+    - MOM_HOST=rabbitmq
+    - OUTPUT_QUEUES=currency_converter_queue
+    - PYTHONUNBUFFERED=1
+
+  q5_currency_converter_0:
+    build:
+      context: ./src/
+      dockerfile: currency_converter/Dockerfile
+    container_name: q5_currency_converter_0
+    depends_on:
+    # - 
+    environment:
+    - INPUT_QUEUE=currency_converter_queue
+    - MOM_HOST=rabbitmq
+    - OUTPUT_QUEUES=avg_filter_queue
+    - PYTHONUNBUFFERED=1
+
+  q5_filter_avg_0:
+    build:
+      context: ./src/
+      dockerfile: filter/Dockerfile
+    container_name: q5_filter_avg_0
+    depends_on:
+    # - 
+    environment:
+    - INPUT_QUEUE=avg_filter_queue
+    - MOM_HOST=rabbitmq
+    - OUTPUT_QUEUES=q5_join_queue
+    - PYTHONUNBUFFERED=1
+
+  q5_join_0:
+    build:
+      context: ./src/
+      dockerfile: joiner/Dockerfile
+    container_name: q5_join_0
+    depends_on:
+    # - 
+    environment:
+    - INPUT_QUEUE=q5_join_queue
+    - MOM_HOST=rabbitmq
+    - OUTPUT_QUEUES=result_queue
+    - PYTHONUNBUFFERED=1
+
+  # Middleware
   rabbitmq:
     build:
       context: ./src/rabbitmq

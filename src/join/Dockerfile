@@ -3,6 +3,6 @@ FROM python:3.11-slim
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1
 
-COPY filter/main.py /app/main.py
+COPY join/main.py /app/main.py
 
 CMD ["python", "/app/main.py"]

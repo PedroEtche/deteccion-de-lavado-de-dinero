@@ -1,0 +1,10 @@
+mom_host: rabbitmq
+
+input_queue: transactions_queue
+
+output_queue: queue # q1_queue, q2_queue, q5_queue, date_filter_queue
+
+strategy:
+  type: currency
+  params:
+    target_currency: USD

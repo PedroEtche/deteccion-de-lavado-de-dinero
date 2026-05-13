@@ -36,6 +36,8 @@ services:
     container_name: filter_usd_0
     depends_on:
     - client_0
+    volumes:
+      - ./src/filter/config/usd_config.yaml:/app/config.yaml
     environment:
     - INPUT_QUEUE=transactions_queue
     - MOM_HOST=rabbitmq
@@ -49,6 +51,8 @@ services:
     container_name: filter_date_0
     depends_on:
     - filter_usd_0
+    volumes:
+      - ./src/filter/config/1-9_to_5-9_date_config.yaml:/app/config.yaml
     environment:
     - INPUT_QUEUE=date_filter_queue
     - MOM_HOST=rabbitmq

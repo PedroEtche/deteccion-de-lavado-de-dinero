@@ -1,0 +1,11 @@
+mom_host: rabbitmq
+
+input_queue: transactions_queue
+
+output_queue: queue # q3_queue, q4_queue
+
+strategy:
+  type: date
+  params:
+    from: 2022-09-01
+    to: 2022-09-05

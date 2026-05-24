@@ -9,18 +9,14 @@ from typing import Dict
 import threading
 
 from .strategies import GroupStrategy, NoStrategy
+from common import communication_protocol
 
 import yaml
 
 CONFIG_PATH = "./config.yaml"
-QUEUE_PROTOCOL_DIR = (
-    Path(__file__).resolve().parents[1] / "communication" / "protocols" / "queue-protocol"
-)
 
-if str(QUEUE_PROTOCOL_DIR) not in sys.path:
-    sys.path.append(str(QUEUE_PROTOCOL_DIR))
-
-import internal
+#Tipos de groups:
+# - 
 
 # @dataclass
 # class AccountRow(Payload):
@@ -112,17 +108,22 @@ class GroupService:
         # control_exchange.start_consuming(self._process_eof_message)
 
     def process_data_messsage(self, message, ack, nack):
-        fields = internal.deserialize(message)
+        message = communication_protocol.deserialize(message)
         with self.lock:
-            if len(fields) == 3:
-                client_id, fruit, amount = fields
-                
-                self._process_data(client_id, fruit, amount)
+            if message["type"] == "eof":
+                logging.info("Received EOF message from client %s", message["client"])
+                eof_message = communication_protocol.build_eof_message(client=message["client"], msg_id=message["msg_id"])
+                self.control_exchange.send(communication_protocol.serialize(eof_message))
 
-            elif len(fields) == 1:
-                client_id = fields[0]
-                self.control_exchange.send(internal.serialize([client_id]))
+            else: # aca ver condicion para procesar otros mensajes                
+                self._process_data(message["client"], message["payload"]["batch"])
+
         ack()
+
+    def _process_data(self, client_id, batch):
+        logging.info("Processing data message from client %s", client_id)
+
+        # Placeholder for actual processing logic.
         
 
 def main() -> int:

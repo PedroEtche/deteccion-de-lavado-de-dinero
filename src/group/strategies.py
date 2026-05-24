@@ -50,11 +50,11 @@ class BankMaxAmountStrategy(GroupStrategy):
             amount = tx.amount_paid or 0.0
             current = max_per_bank.get(bank)
 
-            if current is None or amount > current["Amount Paid"]:
+            if current is None or amount > current["amout_paid"]:
                 max_per_bank[bank] = {
-                    "From Bank": tx.from_bank,
-                    "Account": tx.from_account,
-                    "Amount Paid": amount,
+                    "from_bank": tx.from_bank,
+                    "from_account": tx.from_account,
+                    "amount_paid": amount,
                 }
 
         return list(max_per_bank.values())

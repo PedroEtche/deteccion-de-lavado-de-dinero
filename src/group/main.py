@@ -1,22 +1,17 @@
 import logging
 import os
 import signal
-import sys
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Dict
+from typing import Any, Dict
 
 import threading
 
-from .strategies import GroupStrategy, NoStrategy
+from .strategies import GroupStrategy, NoStrategy, BankMaxAmountStrategy, PaymentFormatAverageStrategy, AccountPairCountStategy
 from common import communication_protocol
 
 import yaml
 
 CONFIG_PATH = "./config.yaml"
-
-#Tipos de groups:
-# - 
 
 # @dataclass
 # class AccountRow(Payload):
@@ -46,6 +41,7 @@ class GroupConfig:
     input_queue: str
     output_queue: str
     log_level: str
+    strategy: GroupStrategy
 
 
 def _load_file_config() -> Dict[str, str]:
@@ -56,16 +52,31 @@ def _load_file_config() -> Dict[str, str]:
     except FileNotFoundError:
         return {}
 
+def _parse_strategy_config(raw_strategy: Dict[str, Any]) -> GroupStrategy:
+    strategy_type = raw_strategy.get("type", "noop")
+    params = raw_strategy.get("params", {})
+
+    if strategy_type == "BankMaxAmount":
+        return BankMaxAmountStrategy()
+
+    if strategy_type == "PaymentFormatAverage":
+        return PaymentFormatAverageStrategy()
+    
+    if strategy_type == "AccountPairCount":
+        return AccountPairCountStategy()
+
+    return NoStrategy()
 
 def init_config() -> GroupConfig:
     file_config = _load_file_config()
+
     return GroupConfig(
         mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
         input_queue=os.getenv("INPUT_QUEUE", file_config.get("input_queue", "")),
         output_queue=os.getenv("OUTPUT_QUEUE", file_config.get("output_queue", "")),
         log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
+        strategy=_parse_strategy_config(file_config.get("strategy", {})),
     )
-
 
 def log_config(config: GroupConfig) -> None:
     logging.info(
@@ -74,7 +85,6 @@ def log_config(config: GroupConfig) -> None:
         config.input_queue,
         config.output_queue,
     )
-
 
 class GroupService:
     def __init__(self, config: GroupConfig, strategy: GroupStrategy | None = None) -> None:
@@ -115,16 +125,11 @@ class GroupService:
                 eof_message = communication_protocol.build_eof_message(client=message["client"], msg_id=message["msg_id"])
                 self.control_exchange.send(communication_protocol.serialize(eof_message))
 
-            else: # aca ver condicion para procesar otros mensajes                
-                self._process_data(message["client"], message["payload"]["batch"])
+            else: # aca ver condicion para procesar otros mensajes
+                logging.info("Processing data message from client %s", message["client"])               
+                self.strategy.group_batch(message["payload"]["batch"])
 
         ack()
-
-    def _process_data(self, client_id, batch):
-        logging.info("Processing data message from client %s", client_id)
-
-        # Placeholder for actual processing logic.
-        
 
 def main() -> int:
     config = init_config()

@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from datetime import date
 from typing import Any, List
+import logging
 
 class GroupStrategy(ABC):
     """Abstract strategy for grouping batches of messages."""
@@ -24,31 +25,26 @@ class NoStrategy(GroupStrategy):
         return batch
 
 class BankMaxAmountStrategy(GroupStrategy):
-    def __init__(self) -> None:
-        pass
     def __str__(self) -> str:
-        return f"BankMaxAmountStrategy(max_amount={self.max_amount})"
+        return f"BankMaxAmountStrategy"
 
     def group_batch(self, batch: List[Any]) -> List[Any]:
         max_per_bank = {}
         for tx in batch:
-            bank = tx.from_bank
-            amount = tx.amount_paid or 0.0
+            bank = tx["from_bank"]
+            amount = tx["amount_paid"] or 0.0
             current = max_per_bank.get(bank)
 
             if current is None or amount > current["amount_paid"]:
                 max_per_bank[bank] = {
-                    "from_bank": tx.from_bank,
-                    "from_account": tx.from_account,
+                    "from_bank": tx["from_bank"],
+                    "from_account": tx["from_account"],
                     "amount_paid": amount,
                 }
 
         return list(max_per_bank.values())
             
 class PaymentFormatAverageStrategy(GroupStrategy):
-    def __init__(self) -> None:
-        pass
-
     def __str__(self) -> str:
         return "PaymentFormatAverageStrategy"
 
@@ -57,8 +53,8 @@ class PaymentFormatAverageStrategy(GroupStrategy):
         counts = {}
 
         for tx in batch:
-            payment_format = tx.payment_format
-            amount = tx.amount_paid
+            payment_format = tx["payment_format"]
+            amount = tx["amount_paid"]
 
             totals[payment_format] = totals.get(payment_format, 0.0) + amount
             counts[payment_format] = counts.get(payment_format, 0) + 1
@@ -75,15 +71,13 @@ class PaymentFormatAverageStrategy(GroupStrategy):
         return averages
 
 class AccountPairCountStategy(GroupStrategy):
-    def __init__(self) -> None:
-        pass    
     def __str__(self) -> str:
         return f"AccountPairCountStategy()"
 
     def group_batch(self, batch: List[Any]) -> List[Any]:
         counts = {}
         for tx in batch:
-            key = (tx.from_bank, tx.from_account, tx.to_bank, tx.to_account)
+            key = (tx["from_bank"], tx["from_account"], tx["to_bank"], tx["to_account"])
             counts[key] = counts.get(key, 0) + 1
 
         results = []

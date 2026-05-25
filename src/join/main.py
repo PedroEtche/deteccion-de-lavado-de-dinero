@@ -2,13 +2,16 @@ import logging
 import os
 import signal
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Any, Dict
 
-import yaml
+import threading
 
-
-CONFIG_PATH = "./config.yaml"
-
+from strategies import (
+    JoinStrategy,
+    CountStrategy,
+    NoStrategy, 
+)
+from common import message_protocol, middleware
 
 @dataclass
 class JoinConfig:
@@ -16,26 +19,23 @@ class JoinConfig:
     input_queue: str
     output_queue: str
     log_level: str
+    strategy: JoinStrategy
 
+def _parse_strategy_config(strategy_type: str) -> JoinStrategy:
 
-def _load_file_config() -> Dict[str, str]:
-    try:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as handle:
-            data = yaml.safe_load(handle) or {}
-            return data if isinstance(data, dict) else {}
-    except FileNotFoundError:
-        return {}
+    if strategy_type == "CountStrategy":
+        return CountStrategy()
 
+    return NoStrategy()
 
 def init_config() -> JoinConfig:
-    file_config = _load_file_config()
     return JoinConfig(
-        mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
-        input_queue=os.getenv("INPUT_QUEUE", file_config.get("input_queue", "")),
-        output_queue=os.getenv("OUTPUT_QUEUE", file_config.get("output_queue", "")),
-        log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
+        mom_host=os.environ["MOM_HOST"],
+        input_queue=os.environ["INPUT_QUEUE"],
+        output_queue=os.environ["OUTPUT_QUEUE"],
+        log_level=os.environ["LOG_LEVEL"],
+        strategy=_parse_strategy_config(os.environ.get("STRATEGY", "NoStrategy")),
     )
-
 
 def log_config(config: JoinConfig) -> None:
     logging.info(
@@ -45,28 +45,70 @@ def log_config(config: JoinConfig) -> None:
         config.output_queue,
     )
 
-
-class JoinService:
+class JoinService: 
     def __init__(self, config: JoinConfig) -> None:
+        logging.info("Initializing JoinService with strategy: %s", config.strategy)
         self.mom_host = config.mom_host
-        self.input_queue = config.input_queue
-        self.output_queue = config.output_queue
+        self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(self.mom_host, config.input_queue)
+        self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(self.mom_host, config.output_queue)
+        self.strategy = config.strategy
+        self.lock = threading.Lock()
         self._running = False
 
     def start(self) -> None:
-        logging.info("Starting join service")
+        logging.info("Starting Join service with strategy %s", self.strategy)
+
+        # eof_control_thread = threading.Thread(target=self._listen_for_eof)
+        # eof_control_thread.start()
+
         self._running = True
-        # Placeholder for message loop integration.
+        self.input_queue.start_consuming(self.process_data_messsage)
+
+        # eof_control_thread.join()
 
     def stop(self) -> None:
-        logging.info("Stopping join service")
+        logging.info("Stopping Join service")
         self._running = False
 
+    def _listen_for_eof(self):
+        logging.info("Starting EOF control thread")
+        # control_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
+        #     MOM_HOST, SUM_CONTROL_EXCHANGE, [EOF_BROADCAST]
+        # )
+
+        # control_exchange.start_consuming(self._process_eof_message)
+
+    def process_data_messsage(self, message, ack, nack):
+        message = message_protocol.internal.deserialize(message)
+        logging.info("Received message from client %s: %s", message["client"], message)
+        with self.lock:
+            if message["type"] == "eof":
+                logging.info("Received EOF message from client %s", message["client"])
+                batch = self.strategy.get_count_for_client(message["client"])
+                
+                logging.info("Joined batch: %s", batch)
+
+                batch_message = message_protocol.internal.build_batch_message(
+                    message_type="joined_data",
+                    client=message["client"],
+                    msg_id=message["msg_id"],
+                    batch=batch,
+                )
+                self.output_queue.send(message_protocol.internal.serialize(batch_message))
+
+            else: # logica placeholder, pero join va a hacer algo distinto
+                logging.info("Processing data message from client %s", message["client"])               
+                self.strategy.join_batch(message["payload"]["batch"], message["client"])
+
+        ack()
 
 def main() -> int:
     config = init_config()
     logging.basicConfig(level=getattr(logging, config.log_level.upper(), logging.INFO))
     log_config(config)
+    logging.getLogger("pika").setLevel(logging.WARNING)
+
+    logging.debug("Initialized configuration: %s", config)
     service = JoinService(config)
 
     def handle_sigterm(signum, frame):

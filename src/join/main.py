@@ -7,14 +7,11 @@ from typing import Any, Dict
 import threading
 
 from strategies import (
-    JoinStrategy, 
+    JoinStrategy,
+    CountStrategy,
     NoStrategy, 
 )
 from common import message_protocol, middleware
-
-import yaml
-
-CONFIG_PATH = "./config.yaml"
 
 @dataclass
 class JoinConfig:
@@ -24,28 +21,14 @@ class JoinConfig:
     log_level: str
     strategy: JoinStrategy
 
-
-def _load_file_config() -> Dict[str, str]:
-    try:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as handle:
-            data = yaml.safe_load(handle) or {}
-            return data if isinstance(data, dict) else {}
-    except FileNotFoundError:
-        logging.warning("Configuration file not found at %s. Using defaults and environment variables.", CONFIG_PATH)
-        return {}
-
 def _parse_strategy_config(strategy_type: str) -> JoinStrategy:
-    # strategy_type = raw_strategy.get("type", "noop")
-    # params = raw_strategy.get("params", {})
 
-    if strategy_type == "BankMaxAmountStrategy":
-        return NoStrategy()
+    if strategy_type == "CountStrategy":
+        return CountStrategy()
 
     return NoStrategy()
 
 def init_config() -> JoinConfig:
-    # file_config = _load_file_config()
-    # logging.info("Loaded file config: %s", file_config)
     return JoinConfig(
         mom_host=os.environ["MOM_HOST"],
         input_queue=os.environ["INPUT_QUEUE"],
@@ -69,6 +52,7 @@ class JoinService:
         self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(self.mom_host, config.input_queue)
         self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(self.mom_host, config.output_queue)
         self.strategy = config.strategy
+        self.lock = threading.Lock()
         self._running = False
 
     def start(self) -> None:
@@ -95,25 +79,26 @@ class JoinService:
         # control_exchange.start_consuming(self._process_eof_message)
 
     def process_data_messsage(self, message, ack, nack):
-        message = message_protocol.deserialize(message)
+        message = message_protocol.internal.deserialize(message)
+        logging.info("Received message from client %s: %s", message["client"], message)
         with self.lock:
             if message["type"] == "eof":
                 logging.info("Received EOF message from client %s", message["client"])
-                eof_message = message_protocol.build_eof_message(client=message["client"], msg_id=message["msg_id"])
-                self.control_exchange.send(message_protocol.serialize(eof_message))
-
-            else: # aca ver condicion para procesar otros mensajes
-                logging.info("Processing data message from client %s", message["client"])               
-                grouped_batch = self.strategy.group_batch(message["payload"]["batch"])
-                logging.info("Grouped batch: %s", grouped_batch)
+                batch = self.strategy.get_count_for_client(message["client"])
                 
-                batch_message = message_protocol.build_batch_message(
-                    message_type="grouped_data",
+                logging.info("Joined batch: %s", batch)
+
+                batch_message = message_protocol.internal.build_batch_message(
+                    message_type="joined_data",
                     client=message["client"],
                     msg_id=message["msg_id"],
-                    batch=grouped_batch,
+                    batch=batch,
                 )
-                self.output_queue.send(message_protocol.serialize(batch_message))
+                self.output_queue.send(message_protocol.internal.serialize(batch_message))
+
+            else: # logica placeholder, pero join va a hacer algo distinto
+                logging.info("Processing data message from client %s", message["client"])               
+                self.strategy.join_batch(message["payload"]["batch"], message["client"])
 
         ack()
 
@@ -121,6 +106,8 @@ def main() -> int:
     config = init_config()
     logging.basicConfig(level=getattr(logging, config.log_level.upper(), logging.INFO))
     log_config(config)
+    logging.getLogger("pika").setLevel(logging.WARNING)
+
     logging.debug("Initialized configuration: %s", config)
     service = JoinService(config)
 

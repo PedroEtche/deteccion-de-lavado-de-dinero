@@ -2,8 +2,6 @@ import logging
 import os
 import signal
 from dataclasses import dataclass
-from typing import Any, Dict
-
 import threading
 
 from strategies import (
@@ -15,10 +13,6 @@ from strategies import (
 )
 from common import message_protocol, middleware
 
-import yaml
-
-CONFIG_PATH = "./config.yaml"
-
 @dataclass
 class GroupConfig:
     mom_host: str
@@ -27,10 +21,8 @@ class GroupConfig:
     log_level: str
     strategy: GroupStrategy
 
-def _parse_strategy_config(raw_strategy: Dict[str, Any]) -> GroupStrategy:
-    strategy_type = raw_strategy.get("type", "noop")
-    params = raw_strategy.get("params", {})
-
+def _parse_strategy_config(strategy_type: str) -> GroupStrategy:
+   
     if strategy_type == "BankMaxAmount":
         return BankMaxAmountStrategy()
 
@@ -42,24 +34,13 @@ def _parse_strategy_config(raw_strategy: Dict[str, Any]) -> GroupStrategy:
 
     return NoStrategy()
 
-def _parse_strategy_config(strategy_type: str) -> GroupStrategy:
-    # strategy_type = raw_strategy.get("type", "noop")
-    # params = raw_strategy.get("params", {})
-
-    if strategy_type == "BankMaxAmount":
-        return NoStrategy()
-
-    return NoStrategy()
-
 def init_config() -> GroupConfig:
-    # file_config = _load_file_config()
-    # logging.info("Loaded file config: %s", file_config)
     return GroupConfig(
         mom_host=os.environ["MOM_HOST"],
         input_queue=os.environ["INPUT_QUEUE"],
         output_queue=os.environ["OUTPUT_QUEUE"],
         log_level=os.environ["LOG_LEVEL"],
-        strategy=_parse_strategy_config(os.environ.get("STRATEGY", "NoStrategy")),
+        strategy=_parse_strategy_config(os.environ["STRATEGY"]),
     )
 
 def log_config(config: GroupConfig) -> None:
@@ -72,11 +53,12 @@ def log_config(config: GroupConfig) -> None:
 
 class GroupService:
     def __init__(self, config: GroupConfig) -> None:
-        logging.info("Initializing GroupService with strategy: %s", config.strategy)
+        logging.debug("Initializing GroupService with strategy: %s", config.strategy)
         self.mom_host = config.mom_host
         self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(self.mom_host, config.input_queue)
         self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(self.mom_host, config.output_queue)
         self.strategy = config.strategy
+        self.lock = threading.Lock()
         self._running = False
 
     def start(self) -> None:
@@ -102,26 +84,59 @@ class GroupService:
 
         # control_exchange.start_consuming(self._process_eof_message)
 
-    def process_data_messsage(self, message, ack, nack):
-        message = message_protocol.deserialize(message)
-        with self.lock:
+    def process_mock_data(self, message):
             if message["type"] == "eof":
                 logging.info("Received EOF message from client %s", message["client"])
-                eof_message = message_protocol.build_eof_message(client=message["client"], msg_id=message["msg_id"])
-                self.control_exchange.send(message_protocol.serialize(eof_message))
+                eof_message = message_protocol.internal.build_eof_message(
+                    client=message["client"],
+                    msg_id=message["msg_id"],
+                )
+                self.control_exchange.send(message_protocol.internal.serialize(eof_message))
 
             else: # aca ver condicion para procesar otros mensajes
                 logging.info("Processing data message from client %s", message["client"])               
-                grouped_batch = self.strategy.join_batch(message["payload"]["batch"])
+                grouped_batch = self.strategy.group_batch(message["payload"]["batch"])
                 logging.info("Grouped batch: %s", grouped_batch)
                 
-                batch_message = message_protocol.build_batch_message(
-                    message_type="grouped_data",
+                batch_message = message_protocol.internal.build_batch_message(
+                    message_type="batch",
                     client=message["client"],
                     msg_id=message["msg_id"],
                     batch=grouped_batch,
                 )
-                self.output_queue.send(message_protocol.serialize(batch_message))
+                logging.info("Sending grouped batch message to output queue: %s", batch_message)
+                self.output_queue.send(message_protocol.internal.serialize(batch_message))
+
+                eof_message = message_protocol.internal.build_eof_message(
+                    client=message["client"],
+                    msg_id=message["msg_id"],
+                )
+                self.output_queue.send(message_protocol.internal.serialize(eof_message))
+
+    def process_data_messsage(self, message, ack, nack):
+        message = message_protocol.internal.deserialize(message)
+        with self.lock:
+            if message["type"] == "eof":
+                logging.info("Received EOF message from client %s", message["client"])
+                eof_message = message_protocol.internal.build_eof_message(
+                    client=message["client"],
+                    msg_id=message["msg_id"],
+                )
+                self.control_exchange.send(message_protocol.internal.serialize(eof_message))
+
+            else: # aca ver condicion para procesar otros mensajes
+                logging.info("Processing data message from client %s", message["client"])               
+                grouped_batch = self.strategy.group_batch(message["payload"]["batch"])
+                logging.info("Grouped batch: %s", grouped_batch)
+                
+                batch_message = message_protocol.internal.build_batch_message(
+                    message_type="batch",
+                    client=message["client"],
+                    msg_id=message["msg_id"],
+                    batch=grouped_batch,
+                )
+                logging.info("Sending grouped batch message to output queue: %s", batch_message)
+                self.output_queue.send(message_protocol.internal.serialize(batch_message))
 
         ack()
 

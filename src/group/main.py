@@ -2,13 +2,44 @@ import logging
 import os
 import signal
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Any, Dict
+
+import threading
+
+from strategies import (
+    GroupStrategy, 
+    NoStrategy, 
+    BankMaxAmountStrategy, 
+    PaymentFormatAverageStrategy, 
+    AccountPairCountStategy,
+)
+from common import communication_protocol
 
 import yaml
 
-
 CONFIG_PATH = "./config.yaml"
 
+# @dataclass
+# class AccountRow(Payload):
+#     bank_name: str | None = None
+#     bank_id: str | None = None
+#     account_number: str | None = None
+#     entity_id: str | None = None
+#     entity_name: str | None = None
+
+
+# @dataclass
+# class TransactionRow(Payload):
+#     timestamp: str | None = None
+#     from_bank: str | None = None
+#     from_account: str | None = None
+#     to_bank: str | None = None
+#     to_account: str | None = None
+#     amount_received: float | None = None
+#     receiving_currency: str | None = None
+#     amount_paid: float | None = None
+#     payment_currency: str | None = None
+#     payment_format: str | None = None
 
 @dataclass
 class GroupConfig:
@@ -16,6 +47,7 @@ class GroupConfig:
     input_queue: str
     output_queue: str
     log_level: str
+    strategy: GroupStrategy
 
 
 def _load_file_config() -> Dict[str, str]:
@@ -26,16 +58,31 @@ def _load_file_config() -> Dict[str, str]:
     except FileNotFoundError:
         return {}
 
+def _parse_strategy_config(raw_strategy: Dict[str, Any]) -> GroupStrategy:
+    strategy_type = raw_strategy.get("type", "noop")
+    params = raw_strategy.get("params", {})
+
+    if strategy_type == "BankMaxAmount":
+        return BankMaxAmountStrategy()
+
+    if strategy_type == "PaymentFormatAverage":
+        return PaymentFormatAverageStrategy()
+    
+    if strategy_type == "AccountPairCount":
+        return AccountPairCountStategy()
+
+    return NoStrategy()
 
 def init_config() -> GroupConfig:
     file_config = _load_file_config()
+
     return GroupConfig(
         mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
         input_queue=os.getenv("INPUT_QUEUE", file_config.get("input_queue", "")),
         output_queue=os.getenv("OUTPUT_QUEUE", file_config.get("output_queue", "")),
         log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
+        strategy=_parse_strategy_config(file_config.get("strategy", {})),
     )
-
 
 def log_config(config: GroupConfig) -> None:
     logging.info(
@@ -45,23 +92,59 @@ def log_config(config: GroupConfig) -> None:
         config.output_queue,
     )
 
-
 class GroupService:
-    def __init__(self, config: GroupConfig) -> None:
+    def __init__(self, config: GroupConfig, strategy: GroupStrategy | None = None) -> None:
         self.mom_host = config.mom_host
         self.input_queue = config.input_queue
         self.output_queue = config.output_queue
+        self.strategy = strategy or NoStrategy()
         self._running = False
 
     def start(self) -> None:
-        logging.info("Starting group service")
+        logging.info("Starting group service with strategy %s", self.strategy)
+
+        # eof_control_thread = threading.Thread(target=self._listen_for_eof)
+        # eof_control_thread.start()
+
         self._running = True
-        # Placeholder for message loop integration.
+        self.input_queue.start_consuming(self.process_data_messsage)
+
+        # eof_control_thread.join()
 
     def stop(self) -> None:
         logging.info("Stopping group service")
         self._running = False
 
+    def _listen_for_eof(self):
+        logging.info("Starting EOF control thread")
+        # control_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
+        #     MOM_HOST, SUM_CONTROL_EXCHANGE, [EOF_BROADCAST]
+        # )
+
+        # control_exchange.start_consuming(self._process_eof_message)
+
+    def process_data_messsage(self, message, ack, nack):
+        message = communication_protocol.deserialize(message)
+        with self.lock:
+            if message["type"] == "eof":
+                logging.info("Received EOF message from client %s", message["client"])
+                eof_message = communication_protocol.build_eof_message(client=message["client"], msg_id=message["msg_id"])
+                self.control_exchange.send(communication_protocol.serialize(eof_message))
+
+            else: # aca ver condicion para procesar otros mensajes
+                logging.info("Processing data message from client %s", message["client"])               
+                grouped_batch = self.strategy.group_batch(message["payload"]["batch"])
+                logging.info("Grouped batch: %s", grouped_batch)
+                
+                batch_message = communication_protocol.build_batch_message(
+                    message_type="grouped_data",
+                    client=message["client"],
+                    msg_id=message["msg_id"],
+                    batch=grouped_batch,
+                )
+                self.output_queue.send(communication_protocol.serialize(batch_message))
+
+        ack()
 
 def main() -> int:
     config = init_config()

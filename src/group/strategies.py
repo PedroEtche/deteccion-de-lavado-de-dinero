@@ -24,10 +24,8 @@ class NoStrategy(GroupStrategy):
         return batch
 
 class BankMaxAmountStrategy(GroupStrategy):
-    def __init__(self) -> None:
-        pass
     def __str__(self) -> str:
-        return f"BankMaxAmountStrategy(max_amount={self.max_amount})"
+        return f"BankMaxAmountStrategy"
 
     def group_batch(self, batch: List[Any]) -> List[Any]:
         max_per_bank = {}
@@ -46,9 +44,6 @@ class BankMaxAmountStrategy(GroupStrategy):
         return list(max_per_bank.values())
             
 class PaymentFormatAverageStrategy(GroupStrategy):
-    def __init__(self) -> None:
-        pass
-
     def __str__(self) -> str:
         return "PaymentFormatAverageStrategy"
 
@@ -75,8 +70,6 @@ class PaymentFormatAverageStrategy(GroupStrategy):
         return averages
 
 class AccountPairCountStategy(GroupStrategy):
-    def __init__(self) -> None:
-        pass    
     def __str__(self) -> str:
         return f"AccountPairCountStategy()"
 

@@ -13,33 +13,12 @@ from strategies import (
     PaymentFormatAverageStrategy, 
     AccountPairCountStategy,
 )
-from common import communication_protocol
+from communication import internal
+from common import middleware
 
 import yaml
 
 CONFIG_PATH = "./config.yaml"
-
-# @dataclass
-# class AccountRow(Payload):
-#     bank_name: str | None = None
-#     bank_id: str | None = None
-#     account_number: str | None = None
-#     entity_id: str | None = None
-#     entity_name: str | None = None
-
-
-# @dataclass
-# class TransactionRow(Payload):
-#     timestamp: str | None = None
-#     from_bank: str | None = None
-#     from_account: str | None = None
-#     to_bank: str | None = None
-#     to_account: str | None = None
-#     amount_received: float | None = None
-#     receiving_currency: str | None = None
-#     amount_paid: float | None = None
-#     payment_currency: str | None = None
-#     payment_format: str | None = None
 
 @dataclass
 class GroupConfig:
@@ -93,11 +72,11 @@ def log_config(config: GroupConfig) -> None:
     )
 
 class GroupService:
-    def __init__(self, config: GroupConfig, strategy: GroupStrategy | None = None) -> None:
+    def __init__(self, config: GroupConfig) -> None:
         self.mom_host = config.mom_host
         self.input_queue = config.input_queue
         self.output_queue = config.output_queue
-        self.strategy = strategy or NoStrategy()
+        self.strategy = config.strategy
         self._running = False
 
     def start(self) -> None:
@@ -124,25 +103,25 @@ class GroupService:
         # control_exchange.start_consuming(self._process_eof_message)
 
     def process_data_messsage(self, message, ack, nack):
-        message = communication_protocol.deserialize(message)
+        message = internal.deserialize(message)
         with self.lock:
             if message["type"] == "eof":
                 logging.info("Received EOF message from client %s", message["client"])
-                eof_message = communication_protocol.build_eof_message(client=message["client"], msg_id=message["msg_id"])
-                self.control_exchange.send(communication_protocol.serialize(eof_message))
+                eof_message = internal.build_eof_message(client=message["client"], msg_id=message["msg_id"])
+                self.control_exchange.send(internal.serialize(eof_message))
 
             else: # aca ver condicion para procesar otros mensajes
                 logging.info("Processing data message from client %s", message["client"])               
-                grouped_batch = self.strategy.group_batch(message["payload"]["batch"])
+                grouped_batch = self.strategy.join_batch(message["payload"]["batch"])
                 logging.info("Grouped batch: %s", grouped_batch)
                 
-                batch_message = communication_protocol.build_batch_message(
+                batch_message = internal.build_batch_message(
                     message_type="grouped_data",
                     client=message["client"],
                     msg_id=message["msg_id"],
                     batch=grouped_batch,
                 )
-                self.output_queue.send(communication_protocol.serialize(batch_message))
+                self.output_queue.send(internal.serialize(batch_message))
 
         ack()
 

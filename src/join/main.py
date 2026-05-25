@@ -2,13 +2,19 @@ import logging
 import os
 import signal
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Any, Dict
+
+import threading
+
+from strategies import (
+    JoinStrategy, 
+    NoStrategy, 
+)
+from common import communication_protocol
 
 import yaml
 
-
 CONFIG_PATH = "./config.yaml"
-
 
 @dataclass
 class JoinConfig:
@@ -16,6 +22,7 @@ class JoinConfig:
     input_queue: str
     output_queue: str
     log_level: str
+    strategy: JoinStrategy
 
 
 def _load_file_config() -> Dict[str, str]:
@@ -26,16 +33,25 @@ def _load_file_config() -> Dict[str, str]:
     except FileNotFoundError:
         return {}
 
+def _parse_strategy_config(raw_strategy: Dict[str, Any]) -> JoinStrategy:
+    strategy_type = raw_strategy.get("type", "noop")
+    params = raw_strategy.get("params", {})
 
-def init_config() -> JoinConfig:
+    # if strategy_type == "BankMaxAmount":
+    #     return BankMaxAmountStrategy()
+
+    return NoStrategy()
+
+def init_config() -> GroupConfig:
     file_config = _load_file_config()
+
     return JoinConfig(
         mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
         input_queue=os.getenv("INPUT_QUEUE", file_config.get("input_queue", "")),
         output_queue=os.getenv("OUTPUT_QUEUE", file_config.get("output_queue", "")),
         log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
+        strategy=_parse_strategy_config(file_config.get("strategy", {})),
     )
-
 
 def log_config(config: JoinConfig) -> None:
     logging.info(
@@ -45,23 +61,59 @@ def log_config(config: JoinConfig) -> None:
         config.output_queue,
     )
 
-
 class JoinService:
     def __init__(self, config: JoinConfig) -> None:
         self.mom_host = config.mom_host
         self.input_queue = config.input_queue
         self.output_queue = config.output_queue
+        self.strategy = config.strategy
         self._running = False
 
     def start(self) -> None:
-        logging.info("Starting join service")
+        logging.info("Starting Join service with strategy %s", self.strategy)
+
+        # eof_control_thread = threading.Thread(target=self._listen_for_eof)
+        # eof_control_thread.start()
+
         self._running = True
-        # Placeholder for message loop integration.
+        self.input_queue.start_consuming(self.process_data_messsage)
+
+        # eof_control_thread.join()
 
     def stop(self) -> None:
-        logging.info("Stopping join service")
+        logging.info("Stopping Join service")
         self._running = False
 
+    def _listen_for_eof(self):
+        logging.info("Starting EOF control thread")
+        # control_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
+        #     MOM_HOST, SUM_CONTROL_EXCHANGE, [EOF_BROADCAST]
+        # )
+
+        # control_exchange.start_consuming(self._process_eof_message)
+
+    def process_data_messsage(self, message, ack, nack):
+        message = communication_protocol.deserialize(message)
+        with self.lock:
+            if message["type"] == "eof":
+                logging.info("Received EOF message from client %s", message["client"])
+                eof_message = communication_protocol.build_eof_message(client=message["client"], msg_id=message["msg_id"])
+                self.control_exchange.send(communication_protocol.serialize(eof_message))
+
+            else: # aca ver condicion para procesar otros mensajes
+                logging.info("Processing data message from client %s", message["client"])               
+                grouped_batch = self.strategy.group_batch(message["payload"]["batch"])
+                logging.info("Grouped batch: %s", grouped_batch)
+                
+                batch_message = communication_protocol.build_batch_message(
+                    message_type="grouped_data",
+                    client=message["client"],
+                    msg_id=message["msg_id"],
+                    batch=grouped_batch,
+                )
+                self.output_queue.send(communication_protocol.serialize(batch_message))
+
+        ack()
 
 def main() -> int:
     config = init_config()

@@ -6,7 +6,13 @@ from typing import Any, Dict
 
 import threading
 
-from .strategies import GroupStrategy, NoStrategy, BankMaxAmountStrategy, PaymentFormatAverageStrategy, AccountPairCountStategy
+from strategies import (
+    GroupStrategy, 
+    NoStrategy, 
+    BankMaxAmountStrategy, 
+    PaymentFormatAverageStrategy, 
+    AccountPairCountStategy,
+)
 from common import communication_protocol
 
 import yaml
@@ -127,7 +133,16 @@ class GroupService:
 
             else: # aca ver condicion para procesar otros mensajes
                 logging.info("Processing data message from client %s", message["client"])               
-                self.strategy.group_batch(message["payload"]["batch"])
+                grouped_batch = self.strategy.group_batch(message["payload"]["batch"])
+                logging.info("Grouped batch: %s", grouped_batch)
+                
+                batch_message = communication_protocol.build_batch_message(
+                    message_type="grouped_data",
+                    client=message["client"],
+                    msg_id=message["msg_id"],
+                    batch=grouped_batch,
+                )
+                self.output_queue.send(communication_protocol.serialize(batch_message))
 
         ack()
 

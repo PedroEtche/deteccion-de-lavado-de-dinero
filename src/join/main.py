@@ -10,7 +10,7 @@ from strategies import (
     JoinStrategy, 
     NoStrategy, 
 )
-from common import communication_protocol
+from common import message_protocol, middleware
 
 import yaml
 
@@ -31,26 +31,27 @@ def _load_file_config() -> Dict[str, str]:
             data = yaml.safe_load(handle) or {}
             return data if isinstance(data, dict) else {}
     except FileNotFoundError:
+        logging.warning("Configuration file not found at %s. Using defaults and environment variables.", CONFIG_PATH)
         return {}
 
-def _parse_strategy_config(raw_strategy: Dict[str, Any]) -> JoinStrategy:
-    strategy_type = raw_strategy.get("type", "noop")
-    params = raw_strategy.get("params", {})
+def _parse_strategy_config(strategy_type: str) -> JoinStrategy:
+    # strategy_type = raw_strategy.get("type", "noop")
+    # params = raw_strategy.get("params", {})
 
-    # if strategy_type == "BankMaxAmount":
-    #     return BankMaxAmountStrategy()
+    if strategy_type == "BankMaxAmountStrategy":
+        return NoStrategy()
 
     return NoStrategy()
 
-def init_config() -> GroupConfig:
-    file_config = _load_file_config()
-
+def init_config() -> JoinConfig:
+    # file_config = _load_file_config()
+    # logging.info("Loaded file config: %s", file_config)
     return JoinConfig(
-        mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
-        input_queue=os.getenv("INPUT_QUEUE", file_config.get("input_queue", "")),
-        output_queue=os.getenv("OUTPUT_QUEUE", file_config.get("output_queue", "")),
-        log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
-        strategy=_parse_strategy_config(file_config.get("strategy", {})),
+        mom_host=os.environ["MOM_HOST"],
+        input_queue=os.environ["INPUT_QUEUE"],
+        output_queue=os.environ["OUTPUT_QUEUE"],
+        log_level=os.environ["LOG_LEVEL"],
+        strategy=_parse_strategy_config(os.environ.get("STRATEGY", "NoStrategy")),
     )
 
 def log_config(config: JoinConfig) -> None:
@@ -61,11 +62,12 @@ def log_config(config: JoinConfig) -> None:
         config.output_queue,
     )
 
-class JoinService:
+class JoinService: 
     def __init__(self, config: JoinConfig) -> None:
+        logging.info("Initializing JoinService with strategy: %s", config.strategy)
         self.mom_host = config.mom_host
-        self.input_queue = config.input_queue
-        self.output_queue = config.output_queue
+        self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(self.mom_host, config.input_queue)
+        self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(self.mom_host, config.output_queue)
         self.strategy = config.strategy
         self._running = False
 
@@ -93,25 +95,25 @@ class JoinService:
         # control_exchange.start_consuming(self._process_eof_message)
 
     def process_data_messsage(self, message, ack, nack):
-        message = communication_protocol.deserialize(message)
+        message = message_protocol.deserialize(message)
         with self.lock:
             if message["type"] == "eof":
                 logging.info("Received EOF message from client %s", message["client"])
-                eof_message = communication_protocol.build_eof_message(client=message["client"], msg_id=message["msg_id"])
-                self.control_exchange.send(communication_protocol.serialize(eof_message))
+                eof_message = message_protocol.build_eof_message(client=message["client"], msg_id=message["msg_id"])
+                self.control_exchange.send(message_protocol.serialize(eof_message))
 
             else: # aca ver condicion para procesar otros mensajes
                 logging.info("Processing data message from client %s", message["client"])               
                 grouped_batch = self.strategy.group_batch(message["payload"]["batch"])
                 logging.info("Grouped batch: %s", grouped_batch)
                 
-                batch_message = communication_protocol.build_batch_message(
+                batch_message = message_protocol.build_batch_message(
                     message_type="grouped_data",
                     client=message["client"],
                     msg_id=message["msg_id"],
                     batch=grouped_batch,
                 )
-                self.output_queue.send(communication_protocol.serialize(batch_message))
+                self.output_queue.send(message_protocol.serialize(batch_message))
 
         ack()
 
@@ -119,6 +121,7 @@ def main() -> int:
     config = init_config()
     logging.basicConfig(level=getattr(logging, config.log_level.upper(), logging.INFO))
     log_config(config)
+    logging.debug("Initialized configuration: %s", config)
     service = JoinService(config)
 
     def handle_sigterm(signum, frame):

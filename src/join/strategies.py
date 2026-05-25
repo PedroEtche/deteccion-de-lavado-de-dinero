@@ -24,11 +24,16 @@ class NoStrategy(JoinStrategy):
         return batch
 
 class BankMaxAmountStrategy(JoinStrategy):
-    def __init__(self) -> None:
-        pass
     def __str__(self) -> str:
-        return f"BankMaxAmountStrategy(max_amount={self.max_amount})"
+        return f"BankMaxAmountStrategy"
 
+    def join_batch(self, batch: List[Any]) -> List[Any]:
+        pass
+
+class PaymentFormatAverageStrategy(JoinStrategy):
+    def __str__(self) -> str:
+        return "PaymentFormatAverageStrategy"
+    
     def join_batch(self, batch: List[Any]) -> List[Any]:
         pass
             

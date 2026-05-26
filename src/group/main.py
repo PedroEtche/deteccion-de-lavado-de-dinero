@@ -3,6 +3,8 @@ import os
 import signal
 from dataclasses import dataclass
 import threading
+import yaml
+from typing import Any, Dict
 
 from strategies import (
     GroupStrategy, 
@@ -12,6 +14,8 @@ from strategies import (
     AccountPairCountStategy,
 )
 from common import message_protocol, middleware
+
+CONFIG_PATH = "./config.yaml"
 
 @dataclass
 class GroupConfig:
@@ -34,13 +38,24 @@ def _parse_strategy_config(strategy_type: str) -> GroupStrategy:
 
     return NoStrategy()
 
+def _load_file_config() -> Dict[str, Any]:
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as handle:
+            data = yaml.safe_load(handle) or {}
+            return data if isinstance(data, dict) else {}
+    except FileNotFoundError:
+        return {}
+
 def init_config() -> GroupConfig:
+    file_config = _load_file_config()
+    raw_strategy = os.getenv("STRATEGY", file_config.get("strategy", "NoStrategy"))
+
     return GroupConfig(
-        mom_host=os.environ["MOM_HOST"],
-        input_queue=os.environ["INPUT_QUEUE"],
-        output_queue=os.environ["OUTPUT_QUEUE"],
-        log_level=os.environ["LOG_LEVEL"],
-        strategy=_parse_strategy_config(os.environ["STRATEGY"]),
+        mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
+        input_queue=os.getenv("INPUT_QUEUE", file_config.get("input_queue", "")),
+        output_queue=os.getenv("OUTPUT_QUEUE", file_config.get("output_queue", "")),
+        log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
+        strategy=_parse_strategy_config(raw_strategy),
     )
 
 def log_config(config: GroupConfig) -> None:

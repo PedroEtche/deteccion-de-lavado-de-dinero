@@ -15,11 +15,17 @@ logs:
 	docker compose -f docker-compose.yaml logs
 .PHONY: logs
 
-
-
 test:
 	# Procesar los datos de forma secuencial y compararlo con nuestro resultado
 .PHONY: test
+
+q1_switch:
+	@echo Escenarios de prueba:
+	@echo "1) Un cliente, set de datos LI-Small, una sola replica de cada elemento"
+	@read -p "Selecciona uno: " option;	\
+	cp ./scenarios/q1/$${option}.yaml docker-compose.yaml
+.PHONY: q1_switch
+
 
 # Genera un sample chico del dataset para iterar rapido. Por default toma las
 # primeras SAMPLE_ROWS filas de HI-Large_Trans.csv (head es O(filas pedidas),
@@ -40,13 +46,6 @@ sample:
 	@echo "Sampling $(SAMPLE_ROWS) rows from $(SOURCE_DATASET) into $(SAMPLE_FILE)"
 	@head -n $$(( $(SAMPLE_ROWS) + 1 )) $(SOURCE_DATASET) > $(SAMPLE_FILE)
 .PHONY: sample
-
-switch:
-	@echo Escenarios de prueba:
-	@echo "1) Un cliente, set de datos chico, una sola replica de cada elemento"
-	@read -p "Selecciona uno: " option;	\
-	cp ./scenarios/$${option}.yaml docker-compose.yaml
-.PHONY: switch
 
 DEMO_COMPOSE := docker-compose.q1.yaml
 

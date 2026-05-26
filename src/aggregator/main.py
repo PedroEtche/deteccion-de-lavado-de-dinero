@@ -8,7 +8,6 @@ from strategies import (
     AggregatorStrategy,
     NoStrategy,
     BankMaxAmountStrategy,
-    PaymentFormatAverageStrategy,
     AccountPairCountStategy,
 )
 from common import message_protocol, middleware
@@ -25,8 +24,11 @@ def _parse_strategy_config(strategy_type: str) -> AggregatorStrategy:
     if strategy_type == "BankMaxAmount":
         return BankMaxAmountStrategy()
 
-    if strategy_type == "PaymentFormatAverage":
-        return PaymentFormatAverageStrategy()
+    if strategy_type == "BankMaxAmount":
+        return BankMaxAmountStrategy()
+    
+    if strategy_type == "AccountPairCount":
+        return AccountPairCountStategy()
 
     if strategy_type == "AccountPairCount":
         return AccountPairCountStategy()

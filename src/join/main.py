@@ -9,7 +9,8 @@ import threading
 from strategies import (
     JoinStrategy,
     CountStrategy,
-    NoStrategy, 
+    NoStrategy,
+    BankMaxAmountStrategy, 
 )
 from common import message_protocol, middleware
 
@@ -25,6 +26,9 @@ def _parse_strategy_config(strategy_type: str) -> JoinStrategy:
 
     if strategy_type == "CountStrategy":
         return CountStrategy()
+    
+    if strategy_type == "BankMaxAmount":
+        return BankMaxAmountStrategy()
 
     return NoStrategy()
 

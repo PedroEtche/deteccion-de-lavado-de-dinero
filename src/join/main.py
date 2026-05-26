@@ -5,12 +5,25 @@ from dataclasses import dataclass
 
 import threading
 
+import yaml
+
+from src.communication.protocols.queue_protocol.internal import (
+    build_batch_message,
+    deserialize,
+    serialize,
+    build_eof_message,
+)
+
+from common import middleware
+
 from strategies import (
     JoinStrategy,
     CountStrategy,
-    NoStrategy, 
+    NoStrategy,
+    BankMaxAmountStrategy,
 )
-from common import message_protocol, middleware
+
+CONFIG_PATH = "./config.yaml"
 
 @dataclass
 class JoinConfig:
@@ -24,29 +37,43 @@ def _parse_strategy_config(strategy_type: str) -> JoinStrategy:
 
     if strategy_type == "CountStrategy":
         return CountStrategy()
+    
+    if strategy_type == "BankMaxAmount":
+        return BankMaxAmountStrategy()
 
     return NoStrategy()
 
+def _load_file_config() -> Dict[str, Any]:
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as handle:
+            data = yaml.safe_load(handle) or {}
+            return data if isinstance(data, dict) else {}
+    except FileNotFoundError:
+        return {}
+
 def init_config() -> JoinConfig:
+    file_config = _load_file_config()
+    raw_strategy = os.getenv("STRATEGY", file_config.get("strategy", "NoStrategy"))
+
     return JoinConfig(
-        mom_host=os.environ["MOM_HOST"],
-        input_queue=os.environ["INPUT_QUEUE"],
-        output_queue=os.environ["OUTPUT_QUEUE"],
-        log_level=os.environ["LOG_LEVEL"],
-        strategy=_parse_strategy_config(os.environ.get("STRATEGY", "NoStrategy")),
+        mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
+        input_queue=os.getenv("INPUT_QUEUE", file_config.get("input_queue", "")),
+        output_queue=os.getenv("OUTPUT_QUEUE", file_config.get("output_queue", "")),
+        log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
+        strategy=_parse_strategy_config(raw_strategy),
     )
 
 def log_config(config: JoinConfig) -> None:
     logging.info(
-        "Join startup with: mom_host=%s | input_queue=%s | output_queue=%s",
+        "Join startup with: mom_host=%s | input_queue=%s | output_queue=%s | strategy=%s", 
         config.mom_host,
         config.input_queue,
         config.output_queue,
+        config.strategy
     )
 
 class JoinService: 
     def __init__(self, config: JoinConfig) -> None:
-        logging.info("Initializing JoinService with strategy: %s", config.strategy)
         self.mom_host = config.mom_host
         self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(self.mom_host, config.input_queue)
         self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(self.mom_host, config.output_queue)
@@ -55,47 +82,37 @@ class JoinService:
         self._running = False
 
     def start(self) -> None:
-        logging.info("Starting Join service with strategy %s", self.strategy)
-
-        # eof_control_thread = threading.Thread(target=self._listen_for_eof)
-        # eof_control_thread.start()
-
         self._running = True
         self.input_queue.start_consuming(self.process_data_messsage)
-
-        # eof_control_thread.join()
 
     def stop(self) -> None:
         logging.info("Stopping Join service")
         self._running = False
 
-    def _listen_for_eof(self):
-        logging.info("Starting EOF control thread")
-        # control_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-        #     MOM_HOST, SUM_CONTROL_EXCHANGE, [EOF_BROADCAST]
-        # )
-
-        # control_exchange.start_consuming(self._process_eof_message)
-
     def process_data_messsage(self, message, ack, nack):
-        message = message_protocol.internal.deserialize(message)
+        message = deserialize(message)
         logging.info("Received message from client %s: %s", message["client"], message)
         with self.lock:
             if message["type"] == "eof":
                 logging.info("Received EOF message from client %s", message["client"])
-                batch = self.strategy.get_count_for_client(message["client"])
+                batch = self.strategy.get_joined_for_client(message["client"])
                 
                 logging.info("Joined batch: %s", batch)
 
-                batch_message = message_protocol.internal.build_batch_message(
+                batch_message = build_batch_message(
                     message_type="joined_data",
                     client=message["client"],
                     msg_id=message["msg_id"],
                     batch=batch,
                 )
-                self.output_queue.send(message_protocol.internal.serialize(batch_message))
+                self.output_queue.send(serialize(batch_message))
 
-            else: # logica placeholder, pero join va a hacer algo distinto
+                eof_message = build_eof_message(
+                    client=message["client"],
+                    msg_id=message["msg_id"],
+                )
+                self.output_queue.send(serialize(eof_message))
+            else:
                 logging.info("Processing data message from client %s", message["client"])               
                 self.strategy.join_batch(message["payload"]["batch"], message["client"])
 

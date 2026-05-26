@@ -9,4 +9,4 @@ COPY src /app/src
 
 ENV PYTHONUNBUFFERED=1
 
-CMD ["python", "-m", "src.join.main"]
+CMD ["python", "-m", "src.aggregator.main"]

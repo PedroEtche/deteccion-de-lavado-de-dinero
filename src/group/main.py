@@ -93,12 +93,12 @@ class GroupService:
                     client=message["client"],
                     msg_id=message["msg_id"],
                 )
-                self.control_exchange.send(message_protocol.internal.serialize(eof_message))
+                self.output_queue.send(message_protocol.internal.serialize(eof_message))
 
             else: # aca ver condicion para procesar otros mensajes
                 logging.info("Processing data message from client %s", message["client"])               
                 grouped_batch = self.strategy.group_batch(message["payload"]["batch"])
-                
+
                 batch_message = message_protocol.internal.build_batch_message(
                     message_type="batch",
                     client=message["client"],

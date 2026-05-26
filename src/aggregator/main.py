@@ -62,26 +62,12 @@ class AggregatorService:
 
     def start(self) -> None:
         logging.info("Starting group service with strategy %s", self.strategy)
-
-        # eof_control_thread = threading.Thread(target=self._listen_for_eof)
-        # eof_control_thread.start()
-
         self._running = True
         self.input_queue.start_consuming(self.process_data_messsage)
-
-        # eof_control_thread.join()
 
     def stop(self) -> None:
         logging.info("Stopping group service")
         self._running = False
-
-    def _listen_for_eof(self):
-        logging.info("Starting EOF control thread")
-        # control_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-        #     MOM_HOST, SUM_CONTROL_EXCHANGE, [EOF_BROADCAST]
-        # )
-
-        # control_exchange.start_consuming(self._process_eof_message)
 
     def process_data_messsage(self, message, ack, nack):
         message = message_protocol.internal.deserialize(message)
@@ -97,12 +83,12 @@ class AggregatorService:
                         batch=output_for_client,
                     )
                 ))
-                # eof_message = message_protocol.internal.build_eof_message(
-                #     client=message["client"],
-                #     msg_id=message["msg_id"],
-                # )
-                # self.output_queue.send(message_protocol.internal.serialize(eof_message))
-                
+                eof_message = message_protocol.internal.build_eof_message(
+                    client=message["client"],
+                    msg_id=message["msg_id"],
+                )
+                self.output_queue.send(message_protocol.internal.serialize(eof_message))
+
             else:
                 logging.info("Processing data message from client %s", message["client"])               
                 self.strategy.aggregate_batch(

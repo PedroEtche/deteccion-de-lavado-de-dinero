@@ -3,7 +3,6 @@ import json
 import uuid
 from internal import (
     build_message,
-    build_batch_message,
     build_raw_transactions_message,
     build_raw_accounts_message,
     build_eof_message,

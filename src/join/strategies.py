@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from datetime import date
 from typing import Any, List, Optional
 
 class JoinStrategy(ABC):
@@ -28,7 +27,7 @@ class CountStrategy(JoinStrategy):
         self.count_by_client = {}
 
     def __str__(self) -> str:
-        return f"CountStrategy"
+        return "CountStrategy"
 
     def join_batch(self, batch: List[Any], client: Optional[str] = None) -> List[Any]:
         if client is None:

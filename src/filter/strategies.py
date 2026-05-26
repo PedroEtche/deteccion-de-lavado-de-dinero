@@ -1,5 +1,5 @@
 from datetime import date
-from typing import Any, Dict, List
+from typing import Any, List
 from abc import ABC, abstractmethod
 
 class FilterStrategy(ABC):

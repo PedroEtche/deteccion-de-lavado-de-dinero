@@ -2,17 +2,27 @@ import logging
 import os
 import signal
 from dataclasses import dataclass
-from typing import Any, Dict
-import yaml
+from datetime import date
+from typing import Any, Dict, List, Optional
 import threading
+
+import yaml
+
+from src.communication.protocols.queue_protocol.internal import (
+    build_batch_message,
+    deserialize,
+    serialize,
+    build_eof_message,
+)
+
+from common import middleware
 
 from strategies import (
     JoinStrategy,
     CountStrategy,
     NoStrategy,
-    BankMaxAmountStrategy, 
+    BankMaxAmountStrategy,
 )
-from common import message_protocol, middleware
 
 CONFIG_PATH = "./config.yaml"
 
@@ -81,7 +91,7 @@ class JoinService:
         self._running = False
 
     def process_data_messsage(self, message, ack, nack):
-        message = message_protocol.internal.deserialize(message)
+        message = deserialize(message)
         logging.info("Received message from client %s: %s", message["client"], message)
         with self.lock:
             if message["type"] == "eof":
@@ -90,20 +100,19 @@ class JoinService:
                 
                 logging.info("Joined batch: %s", batch)
 
-                batch_message = message_protocol.internal.build_batch_message(
+                batch_message = build_batch_message(
                     message_type="joined_data",
                     client=message["client"],
                     msg_id=message["msg_id"],
                     batch=batch,
                 )
-                self.output_queue.send(message_protocol.internal.serialize(batch_message))
+                self.output_queue.send(serialize(batch_message))
 
-                eof_message = message_protocol.internal.build_eof_message(
+                eof_message = build_eof_message(
                     client=message["client"],
                     msg_id=message["msg_id"],
                 )
-                self.output_queue.send(message_protocol.internal.serialize(eof_message))
-
+                self.output_queue.send(serialize(eof_message))
             else:
                 logging.info("Processing data message from client %s", message["client"])               
                 self.strategy.join_batch(message["payload"]["batch"], message["client"])

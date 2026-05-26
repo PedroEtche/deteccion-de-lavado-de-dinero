@@ -7,13 +7,20 @@ from typing import Any, Dict
 
 import yaml
 
+from src.communication.protocols.queue_protocol.internal import (
+    build_batch_message,
+    deserialize,
+    serialize,
+    build_eof_message,
+)
+
 from strategies import (
     AggregatorStrategy,
     NoStrategy,
     BankMaxAmountStrategy,
     AccountPairCountStategy,
 )
-from common import message_protocol, middleware
+from common import middleware
 
 CONFIG_PATH = "./config.yaml"
 
@@ -87,25 +94,24 @@ class AggregatorService:
         self._running = False
 
     def process_data_messsage(self, message, ack, nack):
-        message = message_protocol.internal.deserialize(message)
+        message = deserialize(message)
         with self.lock:
             if message["type"] == "eof":
                 logging.info("Received EOF message from client %s", message["client"])
                 output_for_client = self.strategy.get_result_for_client(message["client"])
-                self.output_queue.send(message_protocol.internal.serialize(
-                    message_protocol.internal.build_batch_message(
+                self.output_queue.send(serialize(
+                    build_batch_message(
                         message_type="batch",
                         client=message["client"],
                         msg_id=message["msg_id"],
                         batch=output_for_client,
                     )
                 ))
-                eof_message = message_protocol.internal.build_eof_message(
+                eof_message = build_eof_message(
                     client=message["client"],
                     msg_id=message["msg_id"],
                 )
-                self.output_queue.send(message_protocol.internal.serialize(eof_message))
-
+                self.output_queue.send(serialize(eof_message))
             else:
                 logging.info("Processing data message from client %s", message["client"])               
                 self.strategy.aggregate_batch(

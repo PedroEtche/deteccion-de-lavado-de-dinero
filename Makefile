@@ -26,6 +26,12 @@ q1_switch:
 	cp ./scenarios/q1/$${option}.yaml docker-compose.yaml
 .PHONY: q1_switch
 
+q3_switch:
+	@echo Escenarios de prueba:
+	@echo "1) Un cliente, set de datos LI-Small, una sola replica de cada elemento"
+	@read -p "Selecciona uno: " option;	\
+	cp ./scenarios/q3/$${option}.yaml docker-compose.yaml
+.PHONY: q3_switch
 
 # Genera un sample chico del dataset para iterar rapido. Por default toma las
 # primeras SAMPLE_ROWS filas de HI-Large_Trans.csv (head es O(filas pedidas),

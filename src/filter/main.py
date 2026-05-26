@@ -3,7 +3,7 @@ import os
 import signal
 import uuid
 from dataclasses import dataclass
-from datetime import date
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import yaml
@@ -22,10 +22,12 @@ from .strategies import (
     DateStrategy,
     FilterStrategy,
     NoStrategy,
+    DateRangeRoute,
 )
 
 
 CONFIG_PATH = "./config.yaml"
+DATETIME_FORMAT = "%Y/%m/%d %H:%M"
 
 
 @dataclass
@@ -36,7 +38,7 @@ class FilterConfig:
     # consumen de colas distintas (q2_queue, q5_queue, date_filter_queue).
     # Para soportar fanout, output_queue tiene que pasar a List[str] y
     # FilterService debe publicar a todas. Por ahora single-output (Q1).
-    output_queue: str
+    output_queues: List[str]
     log_level: str
     strategy: FilterStrategy
     projection_fields: Optional[List[str]] = None
@@ -56,19 +58,32 @@ def _parse_strategy_config(raw_strategy: Dict[str, Any]) -> FilterStrategy:
     params = raw_strategy.get("params", {})
 
     if strategy_type == "currency":
-        return CurrencyStrategy(params["target_currency"])
+        return CurrencyStrategy(params["output_queue"], params["target_currency"])
 
     if strategy_type == "amount_less_than":
-        return AmountLessThanStrategy(float(params["threshold"]))
+        return AmountLessThanStrategy(params["output_queue"], float(params["threshold"]))
 
     if strategy_type == "date":
-        return DateStrategy(
-            from_date=date.fromisoformat(str(params["from"])),
-            to_date=date.fromisoformat(str(params["to"]))
-        )
+        raw_routes = params.get("routes", [])
+        routes: List[DateRangeRoute] = []
+        for raw_route in raw_routes:
+            routes.append(
+                DateRangeRoute(
+                    from_date=datetime.strptime(
+                        raw_route["from"],
+                        DATETIME_FORMAT,
+                    ),
+                    to_date=datetime.strptime(
+                        raw_route["to"],
+                        DATETIME_FORMAT,
+                    ),
+                    queue=raw_route["queue"],
+                )
+            )
 
-    return NoStrategy()
+        return DateStrategy(routes=routes)
 
+    return NoStrategy("")
 
 def _parse_projection_config(raw_projection: Dict[str, Any]) -> Optional[List[str]]:
     fields = raw_projection.get("fields")
@@ -76,16 +91,26 @@ def _parse_projection_config(raw_projection: Dict[str, Any]) -> Optional[List[st
         return None
     return list(fields)
 
+def _parse_output_queues(raw_value: str) -> List[str]:
+    if not raw_value:
+        return []
+
+    return [
+        queue.strip()
+        for queue in raw_value.split(",")
+        if queue.strip()
+    ]
 
 def init_config() -> FilterConfig:
     file_config = _load_file_config()
     raw_strategy = file_config.get("strategy", {})
     raw_projection = file_config.get("projection", {})
+    raw_output_queues = os.getenv("OUTPUT_QUEUE", file_config.get("output_queue", ""))
 
     return FilterConfig(
         mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
         input_queue=os.getenv("INPUT_QUEUE", file_config.get("input_queue", "")),
-        output_queue=os.getenv("OUTPUT_QUEUE", file_config.get("output_queue", "")),
+        output_queues=_parse_output_queues(raw_output_queues),
         log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
         strategy=_parse_strategy_config(raw_strategy),
         projection_fields=_parse_projection_config(raw_projection),
@@ -97,7 +122,7 @@ def log_config(config: FilterConfig) -> None:
         "Filter startup with: mom_host=%s | input_queue=%s | output_queue=%s | strategy=%s | projection_fields=%s",
         config.mom_host,
         config.input_queue,
-        config.output_queue,
+        config.output_queues,
         str(config.strategy),
         config.projection_fields,
     )
@@ -111,53 +136,60 @@ def process_message(
     message_bytes: bytes,
     strategy: FilterStrategy,
     projection_fields: Optional[List[str]],
-) -> Optional[bytes]:
+) -> Optional[Dict[str, bytes]]:
     decoded = deserialize(message_bytes)
-    # TODO EOF propagation: por ahora se ignora cualquier mensaje que no sea
+
+    # TODO: EOF propagation: por ahora se ignora cualquier mensaje que no sea
     # raw_transactions (incluido EOF). Esto es OK mientras downstream no
     # necesita saber cuándo termina el stream pero tiene que resolverse a futuro.
     if decoded["type"] != "raw_transactions":
         return None
 
     batch = decoded["payload"]["batch"]
-    filtered = strategy.filter_batch(batch)
+    routed_batches = strategy.filter_batch(batch)
+    result: Dict[str, bytes] = {}
 
-    if projection_fields:
-        filtered = [_project_row(row, projection_fields) for row in filtered]
+    for queue_name, rows in routed_batches.items():
+        if projection_fields:
+            rows = [ _project_row(row, projection_fields) for row in rows ]
 
-    if not filtered:
-        return None
+        if not rows:
+            continue
 
-    new_msg = build_raw_transactions_message(
-        client=decoded["client"],
-        msg_id=str(uuid.uuid4()),
-        batch=filtered,
-    )
-    return serialize(new_msg)
+        new_msg = build_raw_transactions_message(
+            client=decoded["client"],
+            msg_id=str(uuid.uuid4()),
+            batch=rows,
+        )
 
+        result[queue_name] = serialize(new_msg)
+
+    return result
 
 class FilterService:
     def __init__(self, config: FilterConfig) -> None:
         self.mom_host = config.mom_host
         self.input_queue = config.input_queue
-        self.output_queue = config.output_queue
+        self.output_queues = config.output_queues
         self.strategy = config.strategy
         self.projection_fields = config.projection_fields
         self._input_middleware: Optional[MessageMiddlewareQueueRabbitMQ] = None
-        self._output_middleware: Optional[MessageMiddlewareQueueRabbitMQ] = None
+        self._output_middleware: Dict[str, MessageMiddlewareQueueRabbitMQ] = {}
         self._running = False
 
     def start(self) -> None:
         logging.info("Starting filter service")
         self._running = True
         self._input_middleware = MessageMiddlewareQueueRabbitMQ(self.mom_host, self.input_queue)
-        self._output_middleware = MessageMiddlewareQueueRabbitMQ(self.mom_host, self.output_queue)
+        for queue_name in self.output_queues:
+            self._output_middleware[queue_name] = MessageMiddlewareQueueRabbitMQ(self.mom_host, queue_name)
 
         def on_message(message, ack, nack):
             try:
                 result = process_message(message, self.strategy, self.projection_fields)
                 if result is not None:
-                    self._output_middleware.send(result)
+                    for queue, message in result.items():
+                        self._output_middleware[queue].send(message)
                 ack()
             except Exception:
                 logging.exception("error processing message")
@@ -178,13 +210,17 @@ class FilterService:
                 logging.exception("error stopping consumer")
 
     def _close_middlewares(self) -> None:
-        for mw in (self._input_middleware, self._output_middleware):
-            if mw is None:
-                continue
+        if self._input_middleware is not None:
+            try:
+                self._input_middleware.close()
+            except Exception:
+                logging.exception("error closing input middleware")
+
+        for mw in self._output_middleware.values():
             try:
                 mw.close()
             except Exception:
-                logging.exception("error closing middleware")
+                logging.exception("error closing output middleware")
 
 
 def main() -> int:

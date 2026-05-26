@@ -45,15 +45,15 @@ def init_config() -> GroupConfig:
 
 def log_config(config: GroupConfig) -> None:
     logging.info(
-        "Group startup with: mom_host=%s | input_queue=%s | output_queue=%s",
+        "Group startup with: mom_host=%s | input_queue=%s | output_queue=%s | strategy=%s",
         config.mom_host,
         config.input_queue,
         config.output_queue,
+        config.strategy
     )
 
 class GroupService:
     def __init__(self, config: GroupConfig) -> None:
-        logging.debug("Initializing GroupService with strategy: %s", config.strategy)
         self.mom_host = config.mom_host
         self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(self.mom_host, config.input_queue)
         self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(self.mom_host, config.output_queue)
@@ -62,8 +62,6 @@ class GroupService:
         self._running = False
 
     def start(self) -> None:
-        logging.info("Starting group service with strategy %s", self.strategy)
-
         # eof_control_thread = threading.Thread(target=self._listen_for_eof)
         # eof_control_thread.start()
 

@@ -46,15 +46,15 @@ def init_config() -> AggregatorConfig:
 
 def log_config(config: AggregatorConfig) -> None:
     logging.info(
-        "Aggregator startup with: mom_host=%s | input_queue=%s | output_queue=%s",
+        "Aggregator startup with: mom_host=%s | input_queue=%s | output_queue=%s | strategy=%s",
         config.mom_host,
         config.input_queue,
         config.output_queue,
+        config.strategy
     )
 
 class AggregatorService:
     def __init__(self, config: AggregatorConfig) -> None:
-        logging.debug("Initializing AggregatorService with strategy: %s", config.strategy)
         self.mom_host = config.mom_host
         self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(self.mom_host, config.input_queue)
         self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(self.mom_host, config.output_queue)
@@ -63,12 +63,11 @@ class AggregatorService:
         self._running = False
 
     def start(self) -> None:
-        logging.info("Starting group service with strategy %s", self.strategy)
         self._running = True
         self.input_queue.start_consuming(self.process_data_messsage)
 
     def stop(self) -> None:
-        logging.info("Stopping group service")
+        logging.info("Stopping aggregator service")
         self._running = False
 
     def process_data_messsage(self, message, ack, nack):

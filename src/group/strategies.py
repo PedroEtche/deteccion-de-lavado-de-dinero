@@ -94,3 +94,16 @@ class AccountPairCountStategy(GroupStrategy):
 
         return results
         
+class AccountStrategy(GroupStrategy):
+    # aca hay que revisar caso en query 4
+    # como vamos a routear las cuentas? es necesario mantener un estado?
+    def __str__(self) -> str:
+        return f"AccountStrategy()"
+
+    def group_batch(self, batch: List[Any]) -> List[Any]:
+        accounts = set()
+        for tx in batch:
+            accounts.add((tx["from_bank"], tx["from_account"]))
+            accounts.add((tx["to_bank"], tx["to_account"]))
+
+        return [{"bank": bank, "account": account} for bank, account in accounts]

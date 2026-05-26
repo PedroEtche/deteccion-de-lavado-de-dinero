@@ -1,7 +1,5 @@
 from abc import ABC, abstractmethod
-from datetime import date
 from typing import Any, List
-import logging
 
 class GroupStrategy(ABC):
     """Abstract strategy for grouping batches of messages."""
@@ -26,7 +24,7 @@ class NoStrategy(GroupStrategy):
 
 class BankMaxAmountStrategy(GroupStrategy):
     def __str__(self) -> str:
-        return f"BankMaxAmountStrategy"
+        return "BankMaxAmountStrategy"
 
     def group_batch(self, batch: List[Any]) -> List[Any]:
         max_per_bank = {}
@@ -72,7 +70,7 @@ class PaymentFormatAverageStrategy(GroupStrategy):
 
 class AccountPairCountStategy(GroupStrategy):
     def __str__(self) -> str:
-        return f"AccountPairCountStategy()"
+        return "AccountPairCountStategy()"
 
     def group_batch(self, batch: List[Any]) -> List[Any]:
         counts = {}

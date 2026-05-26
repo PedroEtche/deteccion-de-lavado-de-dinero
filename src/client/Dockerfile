@@ -1,7 +1,12 @@
-FROM python:3-alpine
-RUN pip3 install pika
+FROM python:3.13-slim
 
-COPY common ./common
-COPY client .
+WORKDIR /app
 
-ENTRYPOINT ["python3", "main.py"]
+COPY requirements.txt /app/
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY src /app/src
+
+ENV PYTHONUNBUFFERED=1
+
+CMD ["python", "-m", "src.client.main"]

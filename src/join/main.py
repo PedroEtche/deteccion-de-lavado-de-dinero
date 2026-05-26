@@ -2,8 +2,7 @@ import logging
 import os
 import signal
 from dataclasses import dataclass
-from datetime import date
-from typing import Any, Dict, List, Optional
+
 import threading
 
 import yaml

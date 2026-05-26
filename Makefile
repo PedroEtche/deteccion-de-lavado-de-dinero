@@ -47,3 +47,18 @@ switch:
 	@read -p "Selecciona uno: " option;	\
 	cp ./scenarios/$${option}.yaml docker-compose.yaml
 .PHONY: switch
+
+DEMO_COMPOSE := docker-compose.q1.yaml
+
+# Levanta el pipeline Q1 end-to-end: rabbit + gateway + filters + cliente.
+# Si data/sample.csv no existe, genera uno con `make sample` antes de buildear.
+demo: $(SAMPLE_FILE)
+	docker compose -f $(DEMO_COMPOSE) up --build --remove-orphans
+.PHONY: demo
+
+$(SAMPLE_FILE):
+	@$(MAKE) sample
+
+demo-down:
+	docker compose -f $(DEMO_COMPOSE) down -t 5
+.PHONY: demo-down

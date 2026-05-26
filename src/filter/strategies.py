@@ -36,7 +36,21 @@ class CurrencyStrategy(FilterStrategy):
         return f"CurrencyStrategy(target_currency={self.target_currency})"
 
     def filter_batch(self, batch: List[Any]) -> List[Any]:
-        raise NotImplementedError("implement later")
+        return [row for row in batch if row.payment_currency == self.target_currency]
+
+
+class AmountLessThanStrategy(FilterStrategy):
+    def __init__(self, threshold: float) -> None:
+        self.threshold = threshold
+
+    def __str__(self) -> str:
+        return f"AmountLessThanStrategy(threshold={self.threshold})"
+
+    def filter_batch(self, batch: List[Any]) -> List[Any]:
+        return [
+            row for row in batch
+            if row.amount_paid is not None and row.amount_paid < self.threshold
+        ]
 
 
 class DateStrategy(FilterStrategy):

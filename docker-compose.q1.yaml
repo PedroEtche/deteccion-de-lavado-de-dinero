@@ -1,0 +1,80 @@
+services:
+  rabbitmq:
+    build:
+      context: ./src/rabbitmq
+      dockerfile: Dockerfile
+    container_name: rabbitmq
+    environment:
+    - RABBITMQ_LOG_LEVELS=error
+    healthcheck:
+      interval: 5s
+      retries: 10
+      start_period: 50s
+      test: rabbitmq-diagnostics check_port_connectivity
+      timeout: 3s
+    ports:
+    - 5672:5672
+    - 15672:15672
+
+  gateway:
+    build:
+      context: .
+      dockerfile: src/gateway/Dockerfile
+    container_name: gateway
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+    - TRANSACTIONS_QUEUE=transactions_queue
+    - INPUT_QUEUE=result_queue
+    - SERVER_PORT=5678
+
+  filter_usd_0:
+    build:
+      context: .
+      dockerfile: src/filter/Dockerfile
+    container_name: filter_usd_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/filter/config/usd_config.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=transactions_queue
+    - OUTPUT_QUEUE=q1_queue
+
+  q1_filter_less_than_fifty_0:
+    build:
+      context: .
+      dockerfile: src/filter/Dockerfile
+    container_name: q1_filter_less_than_fifty_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/filter/config/q1_amount_less_than_50_config.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=q1_queue
+    - OUTPUT_QUEUE=result_queue
+
+  client_0:
+    build:
+      context: .
+      dockerfile: src/client/Dockerfile
+    container_name: client_0
+    depends_on:
+    - gateway
+    volumes:
+    - ./data/sample.csv:/data/dataset.csv:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - SERVER_HOST=gateway
+    - SERVER_PORT=5678
+    - DATASET_PATH=/data/dataset.csv
+    - BATCH_SIZE=500

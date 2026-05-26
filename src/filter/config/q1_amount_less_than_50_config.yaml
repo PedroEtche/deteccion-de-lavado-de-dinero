@@ -1,0 +1,15 @@
+mom_host: rabbitmq
+
+input_queue: q1_queue
+output_queue: result_queue
+
+strategy:
+  type: amount_less_than
+  params:
+    threshold: 50
+
+projection:
+  fields:
+    - from_account
+    - to_account
+    - amount_paid

@@ -84,35 +84,6 @@ class GroupService:
 
         # control_exchange.start_consuming(self._process_eof_message)
 
-    def process_mock_data(self, message):
-            if message["type"] == "eof":
-                logging.info("Received EOF message from client %s", message["client"])
-                eof_message = message_protocol.internal.build_eof_message(
-                    client=message["client"],
-                    msg_id=message["msg_id"],
-                )
-                self.control_exchange.send(message_protocol.internal.serialize(eof_message))
-
-            else: # aca ver condicion para procesar otros mensajes
-                logging.info("Processing data message from client %s", message["client"])               
-                grouped_batch = self.strategy.group_batch(message["payload"]["batch"])
-                logging.info("Grouped batch: %s", grouped_batch)
-                
-                batch_message = message_protocol.internal.build_batch_message(
-                    message_type="batch",
-                    client=message["client"],
-                    msg_id=message["msg_id"],
-                    batch=grouped_batch,
-                )
-                logging.info("Sending grouped batch message to output queue: %s", batch_message)
-                self.output_queue.send(message_protocol.internal.serialize(batch_message))
-
-                eof_message = message_protocol.internal.build_eof_message(
-                    client=message["client"],
-                    msg_id=message["msg_id"],
-                )
-                self.output_queue.send(message_protocol.internal.serialize(eof_message))
-
     def process_data_messsage(self, message, ack, nack):
         message = message_protocol.internal.deserialize(message)
         with self.lock:
@@ -127,7 +98,6 @@ class GroupService:
             else: # aca ver condicion para procesar otros mensajes
                 logging.info("Processing data message from client %s", message["client"])               
                 grouped_batch = self.strategy.group_batch(message["payload"]["batch"])
-                logging.info("Grouped batch: %s", grouped_batch)
                 
                 batch_message = message_protocol.internal.build_batch_message(
                     message_type="batch",

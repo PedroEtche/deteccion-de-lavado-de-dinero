@@ -88,11 +88,6 @@ class AggregatorService:
         with self.lock:
             if message["type"] == "eof":
                 logging.info("Received EOF message from client %s", message["client"])
-                eof_message = message_protocol.internal.build_eof_message(
-                    client=message["client"],
-                    msg_id=message["msg_id"],
-                )
-
                 output_for_client = self.strategy.get_result_for_client(message["client"])
                 self.output_queue.send(message_protocol.internal.serialize(
                     message_protocol.internal.build_batch_message(
@@ -102,6 +97,12 @@ class AggregatorService:
                         batch=output_for_client,
                     )
                 ))
+                # eof_message = message_protocol.internal.build_eof_message(
+                #     client=message["client"],
+                #     msg_id=message["msg_id"],
+                # )
+                # self.output_queue.send(message_protocol.internal.serialize(eof_message))
+                
             else:
                 logging.info("Processing data message from client %s", message["client"])               
                 self.strategy.aggregate_batch(

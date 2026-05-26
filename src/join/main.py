@@ -84,7 +84,7 @@ class JoinService:
         with self.lock:
             if message["type"] == "eof":
                 logging.info("Received EOF message from client %s", message["client"])
-                batch = self.strategy.get_count_for_client(message["client"])
+                batch = self.strategy.get_joined_for_client(message["client"])
                 
                 logging.info("Joined batch: %s", batch)
 
@@ -95,8 +95,14 @@ class JoinService:
                     batch=batch,
                 )
                 self.output_queue.send(message_protocol.internal.serialize(batch_message))
+                
+                # eof_message = message_protocol.internal.build_eof_message(
+                #     client=message["client"],
+                #     msg_id=message["msg_id"],
+                # )
+                # self.output_queue.send(message_protocol.internal.serialize(eof_message))
 
-            else: # logica placeholder, pero join va a hacer algo distinto
+            else:
                 logging.info("Processing data message from client %s", message["client"])               
                 self.strategy.join_batch(message["payload"]["batch"], message["client"])
 

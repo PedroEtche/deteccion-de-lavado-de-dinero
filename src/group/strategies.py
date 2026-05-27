@@ -59,9 +59,9 @@ class BankMaxAmountStrategy(GroupStrategy):
             
 class PaymentFormatAverageStrategy(GroupStrategy):
     """A sharded strategy that distributes data across multiple aggregators."""
-    def __init__(self, base_route: str):
+    def __init__(self, base_route: str, total_aggregators: int):
         self.base_route = base_route
-        self.total_aggregators = int(os.getenv("TOTAL_AGGREGATORS", "1"))
+        self.total_aggregators = total_aggregators
 
     def __str__(self) -> str:
         return "PaymentFormatAverageStrategy"

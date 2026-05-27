@@ -39,7 +39,7 @@ def _parse_strategy_config(strategy_type: str, output_queue: str) -> GroupStrate
         return BankMaxAmountStrategy(output_queue)
 
     if strategy_type == "PaymentFormatAverage":
-        return PaymentFormatAverageStrategy(output_queue)
+        return PaymentFormatAverageStrategy(output_queue, int(os.getenv("TOTAL_AGGREGATORS", "1")))
     
     if strategy_type == "AccountPairCount":
         return AccountPairCountStategy(output_queue)

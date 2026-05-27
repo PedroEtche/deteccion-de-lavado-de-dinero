@@ -8,3 +8,4 @@ strategy:
   type: currency
   params:
     target_currency: "US Dollar"
+    output_queue: queue

@@ -7,6 +7,7 @@ strategy:
   type: amount_less_than
   params:
     threshold: 50
+    output_queue: result_queue
 
 projection:
   fields:

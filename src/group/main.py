@@ -13,7 +13,7 @@ from src.communication.protocols.queue_protocol.internal import (
     build_eof_message,
 )
 
-from strategies import (
+from .strategies import (
     GroupStrategy, 
     NoStrategy, 
     BankMaxAmountStrategy, 
@@ -21,7 +21,7 @@ from strategies import (
     AccountPairCountStategy,
 )
 
-from common import middleware
+from src.common import middleware
 
 CONFIG_PATH = "./config.yaml"
 

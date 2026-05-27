@@ -57,16 +57,14 @@ class PaymentFormatAverageStrategy(GroupStrategy):
             totals[payment_format] = totals.get(payment_format, 0.0) + amount
             counts[payment_format] = counts.get(payment_format, 0) + 1
 
-        averages = []
-        for payment_format, total in totals.items():
-            count = counts[payment_format]
-            average_amount = total / count if count > 0 else 0.0
-            averages.append({
-                "payment_format": payment_format,
-                "average_amount_paid": average_amount,
-            })
+        count_total_by_format = {}
+        for payment_format, count in counts.items():
+            count_total_by_format[payment_format] = {
+                "tx_quantity": count,
+                "total_amount": totals[payment_format],
+            }
 
-        return averages
+        return count_total_by_format
 
 class AccountPairCountStategy(GroupStrategy):
     def __str__(self) -> str:

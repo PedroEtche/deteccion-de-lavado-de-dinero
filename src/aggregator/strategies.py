@@ -58,7 +58,7 @@ class BankMaxAmountStrategy(AggregatorStrategy):
         return list(current_max_per_bank.values())
 
     def get_result_for_client(self, client: str) -> List[Any]:
-        return list(self.max_per_bank_by_client.get(client, {}).values())
+        return list(self.max_per_bank_by_client.pop(client, {}).values())
 
 class AccountPairCountStategy(AggregatorStrategy):
     def __init__(self):
@@ -79,7 +79,7 @@ class AccountPairCountStategy(AggregatorStrategy):
         return self._build_results(counts)
 
     def get_result_for_client(self, client: str) -> List[Any]:
-        counts = self.counts_by_client.get(client, {})
+        counts = self.counts_by_client.pop(client, {})
         return self._build_results(counts)
 
     def _build_results(self, counts: Dict[tuple, int]) -> List[Any]:
@@ -97,3 +97,43 @@ class AccountPairCountStategy(AggregatorStrategy):
 
         return results
         
+class PaymentFormatAverageStrategy(AggregatorStrategy):
+    def __init__(self):
+        self.stats_by_client: Dict[str, Dict[str, Dict[str, Any]]] = {}
+
+    def __str__(self) -> str:
+        return f"PaymentFormatAverageStrategy()"
+
+    def aggregate_batch(self, batch: List[Any], client: Optional[str] = None) -> List[Any]:
+        if client is None:
+            raise ValueError("client is required for PaymentFormatAverageStrategy")
+
+        stats = self.stats_by_client.setdefault(client, {})
+        for tx in batch:
+            payment_format = tx["payment_format"]
+            amount = tx["amount_paid"]
+
+            if payment_format not in stats:
+                stats[payment_format] = {"count": 0, "total": 0.0}
+            
+            stats[payment_format]["count"] += 1
+            stats[payment_format]["total"] += amount
+
+        count_total_by_format = {}
+        for payment_format, stat in stats.items():
+            count_total_by_format[payment_format] = {
+                "tx_quantity": stat["count"],
+                "total_amount": stat["total"],
+            }
+
+        return count_total_by_format
+    
+    def get_result_for_client(self, client: str) -> List[Any]:
+        stats = self.stats_by_client.pop(client, {})
+
+        average_by_format = {}
+        for payment_format, stat in stats.items():
+            count = stat["count"]
+            average_by_format[payment_format] = stat["total"] / count if count > 0 else 0.0
+
+        return average_by_format

@@ -1,9 +1,12 @@
-FROM python:3.11-slim
+FROM python:3.13-slim
 
-COPY ./requirements.txt .
+WORKDIR /app
+
+COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY common ./common
-COPY group .
+COPY src /app/src
 
-ENTRYPOINT ["python3", "main.py"]
+ENV PYTHONUNBUFFERED=1
+
+CMD ["python", "-m", "src.group.main"]

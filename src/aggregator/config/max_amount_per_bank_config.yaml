@@ -1,0 +1,10 @@
+mom_host: rabbitmq
+
+input_queue: group_max_amount_output_queue
+
+output_queue: output_queue
+
+log_level: DEBUG
+
+strategy:
+  type: BankMaxAmount

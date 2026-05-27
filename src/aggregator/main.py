@@ -2,8 +2,8 @@ import logging
 import os
 import signal
 from dataclasses import dataclass
-from typing import Any, Dict
 import threading
+from typing import Any, Dict
 
 import yaml
 
@@ -14,32 +14,36 @@ from src.communication.protocols.queue_protocol.internal import (
     build_eof_message,
 )
 
-from src.common import middleware
-
 from .strategies import (
-    JoinStrategy,
-    CountStrategy,
+    AggregatorStrategy,
     NoStrategy,
     BankMaxAmountStrategy,
+    AccountPairCountStategy,
 )
+from src.common import middleware
 
 CONFIG_PATH = "./config.yaml"
 
 @dataclass
-class JoinConfig:
+class AggregatorConfig:
     mom_host: str
     input_queue: str
     output_queue: str
     log_level: str
-    strategy: JoinStrategy
+    strategy: AggregatorStrategy
 
-def _parse_strategy_config(strategy_type: str) -> JoinStrategy:
-
-    if strategy_type == "CountStrategy":
-        return CountStrategy()
-    
+def _parse_strategy_config(strategy_type: str) -> AggregatorStrategy:
     if strategy_type == "BankMaxAmount":
         return BankMaxAmountStrategy()
+
+    if strategy_type == "BankMaxAmount":
+        return BankMaxAmountStrategy()
+    
+    if strategy_type == "AccountPairCount":
+        return AccountPairCountStategy()
+
+    if strategy_type == "AccountPairCount":
+        return AccountPairCountStategy()
 
     return NoStrategy()
 
@@ -51,11 +55,11 @@ def _load_file_config() -> Dict[str, Any]:
     except FileNotFoundError:
         return {}
 
-def init_config() -> JoinConfig:
+def init_config() -> AggregatorConfig:
     file_config = _load_file_config()
     raw_strategy = os.getenv("STRATEGY", file_config.get("strategy", "NoStrategy"))
 
-    return JoinConfig(
+    return AggregatorConfig(
         mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
         input_queue=os.getenv("INPUT_QUEUE", file_config.get("input_queue", "")),
         output_queue=os.getenv("OUTPUT_QUEUE", file_config.get("output_queue", "")),
@@ -63,17 +67,17 @@ def init_config() -> JoinConfig:
         strategy=_parse_strategy_config(raw_strategy),
     )
 
-def log_config(config: JoinConfig) -> None:
+def log_config(config: AggregatorConfig) -> None:
     logging.info(
-        "Join startup with: mom_host=%s | input_queue=%s | output_queue=%s | strategy=%s", 
+        "Aggregator startup with: mom_host=%s | input_queue=%s | output_queue=%s | strategy=%s",
         config.mom_host,
         config.input_queue,
         config.output_queue,
         config.strategy
     )
 
-class JoinService: 
-    def __init__(self, config: JoinConfig) -> None:
+class AggregatorService:
+    def __init__(self, config: AggregatorConfig) -> None:
         self.mom_host = config.mom_host
         self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(self.mom_host, config.input_queue)
         self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(self.mom_host, config.output_queue)
@@ -86,27 +90,23 @@ class JoinService:
         self.input_queue.start_consuming(self.process_data_messsage)
 
     def stop(self) -> None:
-        logging.info("Stopping Join service")
+        logging.info("Stopping aggregator service")
         self._running = False
 
     def process_data_messsage(self, message, ack, nack):
         message = deserialize(message)
-        logging.info("Received message from client %s: %s", message["client"], message)
         with self.lock:
             if message["type"] == "eof":
                 logging.info("Received EOF message from client %s", message["client"])
-                batch = self.strategy.get_joined_for_client(message["client"])
-                
-                logging.info("Joined batch: %s", batch)
-
-                batch_message = build_batch_message(
-                    message_type="joined_data",
-                    client=message["client"],
-                    msg_id=message["msg_id"],
-                    batch=batch,
-                )
-                self.output_queue.send(serialize(batch_message))
-
+                output_for_client = self.strategy.get_result_for_client(message["client"])
+                self.output_queue.send(serialize(
+                    build_batch_message(
+                        message_type="batch",
+                        client=message["client"],
+                        msg_id=message["msg_id"],
+                        batch=output_for_client,
+                    )
+                ))
                 eof_message = build_eof_message(
                     client=message["client"],
                     msg_id=message["msg_id"],
@@ -114,8 +114,10 @@ class JoinService:
                 self.output_queue.send(serialize(eof_message))
             else:
                 logging.info("Processing data message from client %s", message["client"])               
-                self.strategy.join_batch(message["payload"]["batch"], message["client"])
-
+                self.strategy.aggregate_batch(
+                    message["payload"]["batch"],
+                    message["client"],
+                )
         ack()
 
 def main() -> int:
@@ -124,8 +126,7 @@ def main() -> int:
     log_config(config)
     logging.getLogger("pika").setLevel(logging.WARNING)
 
-    logging.debug("Initialized configuration: %s", config)
-    service = JoinService(config)
+    service = AggregatorService(config)
 
     def handle_sigterm(signum, frame):
         logging.info("Received SIGTERM signal")

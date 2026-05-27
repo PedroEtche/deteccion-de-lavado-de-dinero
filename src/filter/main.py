@@ -4,7 +4,7 @@ import signal
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
@@ -23,6 +23,7 @@ from .strategies import (
     FilterStrategy,
     NoStrategy,
     DateRangeRoute,
+    ShardConfig,
 )
 
 
@@ -38,7 +39,7 @@ class FilterConfig:
     # consumen de colas distintas (q2_queue, q5_queue, date_filter_queue).
     # Para soportar fanout, output_queue tiene que pasar a List[str] y
     # FilterService debe publicar a todas. Por ahora single-output (Q1).
-    output_queues: List[str]
+    output_queues: List[Tuple[str, str]]
     log_level: str
     strategy: FilterStrategy
     projection_fields: Optional[List[str]] = None
@@ -52,35 +53,70 @@ def _load_file_config() -> Dict[str, Any]:
     except FileNotFoundError:
         return {}
 
+#
+# def _parse_strategy_config(raw_strategy: Dict[str, Any]) -> FilterStrategy:
+#     strategy_type = raw_strategy.get("type", "noop")
+#     params = raw_strategy.get("params", {})
+#
+#     if strategy_type == "currency":
+#         return CurrencyStrategy(params["output_queue"], params["target_currency"])
+#
+#     if strategy_type == "amount_less_than":
+#         return AmountLessThanStrategy(params["output_queue"], float(params["threshold"]))
+#
+#     if strategy_type == "date":
+#         raw_routes = params.get("routes", [])
+#         routes: List[DateRangeRoute] = []
+#         for raw_route in raw_routes:
+#             routes.append(
+#                 DateRangeRoute(
+#                     from_date=datetime.strptime(
+#                         raw_route["from"],
+#                         DATETIME_FORMAT,
+#                     ),
+#                     to_date=datetime.strptime(
+#                         raw_route["to"],
+#                         DATETIME_FORMAT,
+#                     ),
+#                     queue=raw_route["queue"],
+#                 )
+#             )
+#         return DateStrategy(routes=routes)
+#
+#     return NoStrategy("")
 
 def _parse_strategy_config(raw_strategy: Dict[str, Any]) -> FilterStrategy:
     strategy_type = raw_strategy.get("type", "noop")
     params = raw_strategy.get("params", {})
 
     if strategy_type == "currency":
-        return CurrencyStrategy(params["output_queue"], params["target_currency"])
+        return CurrencyStrategy(output_queue=params["output_queue"], target_currency=params["target_currency"])
 
     if strategy_type == "amount_less_than":
-        return AmountLessThanStrategy(params["output_queue"], float(params["threshold"]))
+        return AmountLessThanStrategy(output_queue=params["output_queue"], threshold=float(params["threshold"]))
 
-    if strategy_type == "date":
+    if strategy_type == "date_routing":
         raw_routes = params.get("routes", [])
         routes: List[DateRangeRoute] = []
         for raw_route in raw_routes:
+            raw_match = raw_route["match"]
+            raw_shard = raw_route.get("shard")
+            shard_config = None
+
+            if raw_shard is not None:
+                shard_config = ShardConfig(by=raw_shard["by"], shards=int(raw_shard["shards"]))
+
             routes.append(
                 DateRangeRoute(
                     from_date=datetime.strptime(
-                        raw_route["from"],
+                        raw_match["from"],
                         DATETIME_FORMAT,
                     ),
                     to_date=datetime.strptime(
-                        raw_route["to"],
+                        raw_match["to"],
                         DATETIME_FORMAT,
                     ),
-                    queue=raw_route["queue"],
-                )
-            )
-
+                    queue=raw_route["output"], shard=shard_config))
         return DateStrategy(routes=routes)
 
     return NoStrategy("")
@@ -91,31 +127,44 @@ def _parse_projection_config(raw_projection: Dict[str, Any]) -> Optional[List[st
         return None
     return list(fields)
 
-def _parse_output_queues(raw_value: str) -> List[str]:
-    if not raw_value:
-        return []
 
-    return [
-        queue.strip()
-        for queue in raw_value.split(",")
-        if queue.strip()
-    ]
+def _parse_output_queues(raw_value: List[Dict[str, Any]]) -> List[Tuple[str, str]]:
+    result: List[Tuple[str, str]] = []
+    if not raw_value:
+        return result
+
+    for raw_output in raw_value:
+        output_type = raw_output["type"]
+        output_name = raw_output["name"]
+        shards = int(raw_output.get("shards", 1))
+        if shards == 1:
+            result.append((output_type, output_name))
+            continue
+        for shard_id in range(shards):
+            result.append((output_type, f"{output_name}_shard_{shard_id}"))
+
+    return result
+
 
 def init_config() -> FilterConfig:
     file_config = _load_file_config()
     raw_strategy = file_config.get("strategy", {})
     raw_projection = file_config.get("projection", {})
-    raw_output_queues = os.getenv("OUTPUT_QUEUE", file_config.get("output_queue", ""))
+    raw_inputs = file_config.get("inputs", [])
+    raw_outputs = file_config.get("outputs", [])
+    input_queue = ""
+
+    if raw_inputs:
+        input_queue = raw_inputs[0]["name"]
 
     return FilterConfig(
         mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
-        input_queue=os.getenv("INPUT_QUEUE", file_config.get("input_queue", "")),
-        output_queues=_parse_output_queues(raw_output_queues),
+        input_queue=os.getenv("INPUT_QUEUE", input_queue),
+        output_queues=_parse_output_queues(raw_outputs),
         log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
         strategy=_parse_strategy_config(raw_strategy),
         projection_fields=_parse_projection_config(raw_projection),
     )
-
 
 def log_config(config: FilterConfig) -> None:
     logging.info(
@@ -180,6 +229,7 @@ class FilterService:
     def start(self) -> None:
         logging.info("Starting filter service")
         self._running = True
+        #TODO: Instanciar Exchange o Queue dependiendo de los nombres que llegan del config
         self._input_middleware = MessageMiddlewareQueueRabbitMQ(self.mom_host, self.input_queue)
         for queue_name in self.output_queues:
             self._output_middleware[queue_name] = MessageMiddlewareQueueRabbitMQ(self.mom_host, queue_name)

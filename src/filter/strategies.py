@@ -1,8 +1,9 @@
-from typing import Any, List, Dict
+from typing import Any, List, Dict, Optional
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
+import hashlib
 
 class FilterStrategy(ABC):
     """Abstract strategy for filtering batches of messages.
@@ -70,14 +71,32 @@ class AmountLessThanStrategy(FilterStrategy):
         return { self.output_queue: filtered }
 
 
+
+@dataclass(frozen=True)
+class ShardConfig:
+    by: str
+    shards: int
+
+
 @dataclass(frozen=True)
 class DateRangeRoute:
     from_date: datetime
     to_date: datetime
     queue: str
+    shard: Optional[ShardConfig] = None
 
     def matches(self, value: datetime) -> bool:
         return self.from_date <= value <= self.to_date
+
+    def resolve_queue(self, row: Any) -> str:
+        if self.shard is None:
+            return self.queue
+
+        shard_value = getattr(row, self.shard.by)
+        hash = hashlib.md5( str(shard_value).encode()).hexdigest()
+        shard_id = int(hash, 16) % self.shard.shards
+
+        return f"{self.queue}_shard_{shard_id}"
 
 
 class DateStrategy(FilterStrategy):
@@ -92,8 +111,9 @@ class DateStrategy(FilterStrategy):
         for row in batch:
             row_date = row.date
             for route in self.routes:
-                if route.matches(row_date):
-                    routed[route.queue].append(row)
+                if not route.matches(row_date):
+                    continue
+                queue_name = route.resolve_queue(row)
+                routed[queue_name].append(row)
 
         return dict(routed)
-

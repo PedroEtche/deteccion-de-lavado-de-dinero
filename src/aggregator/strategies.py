@@ -58,7 +58,7 @@ class BankMaxAmountStrategy(AggregatorStrategy):
         return list(current_max_per_bank.values())
 
     def get_result_for_client(self, client: str) -> List[Any]:
-        return list(self.max_per_bank_by_client.get(client, {}).values())
+        return list(self.max_per_bank_by_client.pop(client, {}).values())
 
 class AccountPairCountStategy(AggregatorStrategy):
     def __init__(self):
@@ -79,7 +79,7 @@ class AccountPairCountStategy(AggregatorStrategy):
         return self._build_results(counts)
 
     def get_result_for_client(self, client: str) -> List[Any]:
-        counts = self.counts_by_client.get(client, {})
+        counts = self.counts_by_client.pop(client, {})
         return self._build_results(counts)
 
     def _build_results(self, counts: Dict[tuple, int]) -> List[Any]:
@@ -97,3 +97,50 @@ class AccountPairCountStategy(AggregatorStrategy):
 
         return results
         
+class PaymentFormatAverageStrategy(AggregatorStrategy):
+    def __init__(self):
+        self.stats_by_client: Dict[str, Dict[tuple, Dict[str, Any]]] = {}
+
+    def __str__(self) -> str:
+        return f"PaymentFormatAverageStrategy()"
+
+    def aggregate_batch(self, batch: List[Any], client: Optional[str] = None) -> List[Any]:
+        if client is None:
+            raise ValueError("client is required for PaymentFormatAverageStrategy")
+
+        stats = self.stats_by_client.setdefault(client, {})
+        for tx in batch:
+            bank = tx["from_bank"]
+            account = tx["from_account"]
+            fmt = tx["payment_format"]
+
+            partial_amount = tx["total_amount"]
+            partial_count = tx["tx_quantity"]
+
+            key = (bank, account, fmt)
+
+            if key not in stats:
+                stats[key] = {"count": 0, "total": 0.0}
+
+            stats[key]["count"] += partial_count
+            stats[key]["total"] += partial_amount
+
+        return []
+    
+    def get_result_for_client(self, client: str) -> List[Any]:
+        # Pop the state to calculate the final results and clear memory for this client
+        stats = self.stats_by_client.pop(client, {})
+
+        results = []
+        for (bank, account, fmt), stat in stats.items():
+            count = stat["count"]
+            average = stat["total"] / count if count > 0 else 0.0
+
+            results.append({
+                "from_bank": bank,
+                "from_account": account,
+                "payment_format": fmt,
+                "average_amount": average,
+            })
+
+        return results

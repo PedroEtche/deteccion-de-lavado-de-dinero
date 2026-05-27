@@ -2,7 +2,7 @@ import logging
 import os
 import signal
 from dataclasses import dataclass
-
+from typing import Any, Dict
 import threading
 
 import yaml
@@ -14,9 +14,9 @@ from src.communication.protocols.queue_protocol.internal import (
     build_eof_message,
 )
 
-from common import middleware
+from src.common import middleware
 
-from strategies import (
+from .strategies import (
     JoinStrategy,
     CountStrategy,
     NoStrategy,

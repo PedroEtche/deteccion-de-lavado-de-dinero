@@ -183,6 +183,7 @@ class FilterService:
         self._running = True
         self._input_middleware = MessageMiddlewareQueueRabbitMQ(self.mom_host, self.input_queue)
         for queue_name in self.output_queues:
+            logging.info("Initializing output middleware for queue: %s", queue_name)
             self._output_middleware[queue_name] = MessageMiddlewareQueueRabbitMQ(self.mom_host, queue_name)
 
         def on_message(message, ack, nack):
@@ -195,6 +196,7 @@ class FilterService:
                 result = process_message(message, self.strategy, self.projection_fields)
                 if result is not None:
                     for queue, message in result.items():
+                        logging.info("Sending message to queue %s", queue)
                         self._output_middleware[queue].send(message)
                 ack()
             except Exception:

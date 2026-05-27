@@ -31,37 +31,27 @@ services:
     - INPUT_QUEUE=result_queue
     - SERVER_PORT=5678
 
-  filter_usd_0:
+  q4_filter_usd_0:
     build:
       context: .
       dockerfile: src/filter/Dockerfile
-    container_name: filter_usd_0
+    container_name: q4_filter_usd_0
     depends_on:
       rabbitmq:
         condition: service_healthy
     volumes:
     - ./src/filter/config/usd_config.yaml:/app/config.yaml:ro
-    environment:
-    - PYTHONUNBUFFERED=1
-    - MOM_HOST=rabbitmq
-    - INPUT_QUEUE=transactions_queue
-    - OUTPUT_QUEUE=q3_queue
 
-  # q4_filter_by_datetime_0:
-  #   build:
-  #     context: .
-  #     dockerfile: src/filter/Dockerfile
-  #   container_name: q4_filter_by_datetime_0
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   volumes:
-  #   - ./src/filter/config/q4_amount_less_than_50_config.yaml:/app/config.yaml:ro
-  #   environment:
-  #   - PYTHONUNBUFFERED=1
-  #   - MOM_HOST=rabbitmq
-  #   - INPUT_QUEUE=q3_queue
-  #   - OUTPUT_QUEUE=result_queue
+  q4_filter_by_datetime_0:
+    build:
+      context: .
+      dockerfile: src/filter/Dockerfile
+    container_name: q4_filter_by_datetime_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/filter/config/date_multiplex_config.yaml:/app/config.yaml:ro
 
   # q4_merge_with_self_0:
   #   build:

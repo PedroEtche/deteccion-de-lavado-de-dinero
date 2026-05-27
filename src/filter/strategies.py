@@ -95,7 +95,9 @@ class DateStrategy(FilterStrategy):
     def filter_batch(self, batch: List[Any]) -> Dict[str, List[Any]]:
         routed = defaultdict(list)
         for row in batch:
-            row_date = row.date
+
+            row_date = datetime.strptime(row.timestamp, "%Y/%m/%d %H:%M")
+            
             for route in self.routes:
                 if route.matches(row_date):
                     routed[route.queue].append(row)

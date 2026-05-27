@@ -122,9 +122,8 @@ class PaymentFormatAverageStrategy(AggregatorStrategy):
             if key not in stats:
                 stats[key] = {"count": 0, "total": 0.0}
 
-
             stats[key]["count"] += partial_count
-            stats[fmt]["total"] += partial_amount
+            stats[key]["total"] += partial_amount
 
         return []
     

@@ -1,5 +1,9 @@
 mom_host: rabbitmq
 
+input_queue: transactions_queue
+
+output_queue: q5_queue
+
 strategy:
   type: currency
   params:

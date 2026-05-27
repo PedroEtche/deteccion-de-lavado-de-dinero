@@ -240,6 +240,8 @@ def main() -> int:
     config = init_config()
     logging.basicConfig(level=getattr(logging, config.log_level.upper(), logging.INFO))
     log_config(config)
+    logging.getLogger("pika").setLevel(logging.WARNING)
+
     service = FilterService(config)
 
     def handle_sigterm(signum, frame):

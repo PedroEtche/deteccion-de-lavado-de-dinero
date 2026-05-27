@@ -66,7 +66,7 @@ class MessageMiddlewareQueueRabbitMQ(MessageMiddlewareQueue):
 
 class MessageMiddlewareExchangeRabbitMQ(MessageMiddlewareExchange):
     
-    def __init__(self, host, exchange_name, routing_keys):
+    def __init__(self, host, exchange_name, routing_keys=None):
         try:
             self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=host))
             self.channel = self.connection.channel()
@@ -76,9 +76,18 @@ class MessageMiddlewareExchangeRabbitMQ(MessageMiddlewareExchange):
             result = self.channel.queue_declare(queue='', exclusive=True)
             self.queue_name = result.method.queue
 
-            self.routing_keys = routing_keys
-            for routing_key in routing_keys:
-                self.channel.queue_bind(exchange=exchange_name, queue=self.queue_name, routing_key=routing_key)
+            self.routing_keys = routing_keys or []
+
+            if self.routing_keys:
+                result = self.channel.queue_declare(queue='', exclusive=True)
+                self.queue_name = result.method.queue
+
+                for routing_key in self.routing_keys:
+                    self.channel.queue_bind(
+                        exchange=exchange_name, 
+                        queue=self.queue_name, 
+                        routing_key=routing_key
+                    )
         except (AMQPConnectionError, AMQPChannelError):
             raise MessageMiddlewareDisconnectedError("Connection lost while initializing exchange.")
         except Exception as e:

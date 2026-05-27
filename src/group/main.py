@@ -33,18 +33,18 @@ class GroupConfig:
     log_level: str
     strategy: GroupStrategy
 
-def _parse_strategy_config(strategy_type: str) -> GroupStrategy:
+def _parse_strategy_config(strategy_type: str, output_queue: str) -> GroupStrategy:
    
     if strategy_type == "BankMaxAmount":
-        return BankMaxAmountStrategy()
+        return BankMaxAmountStrategy(output_queue)
 
     if strategy_type == "PaymentFormatAverage":
-        return PaymentFormatAverageStrategy()
+        return PaymentFormatAverageStrategy(output_queue)
     
     if strategy_type == "AccountPairCount":
-        return AccountPairCountStategy()
+        return AccountPairCountStategy(output_queue)
 
-    return NoStrategy()
+    return NoStrategy(output_queue)
 
 def _load_file_config() -> Dict[str, Any]:
     try:
@@ -114,7 +114,12 @@ class GroupService:
                     client=message["client"],
                     msg_id=message["msg_id"],
                 )
-                self.output_queue.send(serialize(eof_message))
+
+                eof_routes = self.strategy.get_eof_routes()
+                logging.info("Sending EOF message to routes: %s", eof_routes)
+                for route in eof_routes:
+                    logging.info("Sending EOF message to route: %s", route)
+                    self.output_queue.send(serialize(eof_message))
 
             else: # aca ver condicion para procesar otros mensajes
                 logging.info("Processing data message from client %s", message["client"])               

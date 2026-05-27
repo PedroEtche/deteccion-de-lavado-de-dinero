@@ -99,7 +99,7 @@ class AccountPairCountStategy(AggregatorStrategy):
         
 class PaymentFormatAverageStrategy(AggregatorStrategy):
     def __init__(self):
-        self.stats_by_client: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        self.stats_by_client: Dict[str, Dict[tuple, Dict[str, Any]]] = {}
 
     def __str__(self) -> str:
         return f"PaymentFormatAverageStrategy()"
@@ -110,30 +110,38 @@ class PaymentFormatAverageStrategy(AggregatorStrategy):
 
         stats = self.stats_by_client.setdefault(client, {})
         for tx in batch:
-            payment_format = tx["payment_format"]
-            amount = tx["amount_paid"]
+            bank = tx["from_bank"]
+            account = tx["from_account"]
+            fmt = tx["payment_format"]
 
-            if payment_format not in stats:
-                stats[payment_format] = {"count": 0, "total": 0.0}
-            
-            stats[payment_format]["count"] += 1
-            stats[payment_format]["total"] += amount
+            partial_amount = tx["total_amount"]
+            partial_count = tx["tx_quantity"]
 
-        count_total_by_format = {}
-        for payment_format, stat in stats.items():
-            count_total_by_format[payment_format] = {
-                "tx_quantity": stat["count"],
-                "total_amount": stat["total"],
-            }
+            key = (bank, account, fmt)
 
-        return count_total_by_format
+            if key not in stats:
+                stats[key] = {"count": 0, "total": 0.0}
+
+
+            stats[key]["count"] += partial_count
+            stats[fmt]["total"] += partial_amount
+
+        return []
     
     def get_result_for_client(self, client: str) -> List[Any]:
+        # Pop the state to calculate the final results and clear memory for this client
         stats = self.stats_by_client.pop(client, {})
 
-        average_by_format = {}
-        for payment_format, stat in stats.items():
+        results = []
+        for (bank, account, fmt), stat in stats.items():
             count = stat["count"]
-            average_by_format[payment_format] = stat["total"] / count if count > 0 else 0.0
+            average = stat["total"] / count if count > 0 else 0.0
 
-        return average_by_format
+            results.append({
+                "from_bank": bank,
+                "from_account": account,
+                "payment_format": fmt,
+                "average_amount": average,
+            })
+
+        return results

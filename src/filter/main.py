@@ -18,7 +18,7 @@ from src.communication.protocols.queue_protocol.internal import (
 )
 
 from .strategies import (
-    AmountLessThanStrategy,
+    FieldLessThanStrategy,
     CurrencyStrategy,
     DateStrategy,
     FilterStrategy,
@@ -63,7 +63,7 @@ def _parse_strategy_config(
         return CurrencyStrategy(default_output, params["target_currency"])
 
     if strategy_type == "amount_less_than":
-        return AmountLessThanStrategy(default_output, float(params["threshold"]))
+        return FieldLessThanStrategy(params["output_queue"], float(params["threshold"]), params["field_name"])
 
     if strategy_type == "date":
         raw_routes = params.get("routes", [])

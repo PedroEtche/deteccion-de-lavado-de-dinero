@@ -28,6 +28,7 @@ services:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
     - TRANSACTIONS_QUEUE=transactions_queue
+    - ACCOUNTS_QUEUE=accounts_queue
     - INPUT_QUEUE=result_queue
     - SERVER_PORT=5678
 
@@ -58,6 +59,50 @@ services:
     environment:
     - EOF_FANOUT=filter_by_datetime_eof
     - EXPECTED_EOFS=1
+
+  q4_scatter_group_0:
+    build:
+      context: .
+      dockerfile: src/group/Dockerfile
+    container_name: q4_scatter_group_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/group/config/q4_scatter_group.yaml:/app/config.yaml:ro
+    environment:
+    - EOF_FANOUT=scatter_group_eof
+    - EXPECTED_EOFS=1
+
+  q4_scatter_aggregator_0:
+    build:
+      context: .
+      dockerfile: src/aggregator/Dockerfile
+    container_name: q4_scatter_aggregator_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/aggregator/config/q4_scatter_aggregator.yaml:/app/config.yaml:ro
+    environment:
+    - SHARD_ID=0
+    - EOF_FANOUT=scatter_aggregator_eof
+    - EXPECTED_EOFS=1
+
+  q4_scatter_filter_0:
+    build:
+      context: .
+      dockerfile: src/filter/Dockerfile
+    container_name: q4_scatter_filter_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/filter/config/q4_scatter_filter.yaml:/app/config.yaml:ro
+    environment:
+    - EOF_FANOUT=scatter_filter_eof
+    - EXPECTED_EOFS=1
+    - OUTPUT_MESSAGE_TYPE=raw_transactions 
 
   q4_selfmerge_route_group_0:
     build:
@@ -129,7 +174,8 @@ services:
     - ./src/filter/config/q4_count_more_than_5.yaml:/app/config.yaml:ro
     environment:
     - EOF_FANOUT=filter_by_count_eof
-    - EXPECTED_EOFS=1
+    - EXPECTED_EOFS=2
+    - OUTPUT_MESSAGE_TYPE=batch
 
   q4_group_by_account_0:
     build:
@@ -160,6 +206,20 @@ services:
     - EOF_FANOUT=aggregator_accounts_eof
     - EXPECTED_EOFS=1
 
+  q4_join_accounts_0:
+    build:
+      context: .
+      dockerfile: src/join/Dockerfile
+    container_name: q4_join_accounts_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ./src/join/config/q4_join_accounts.yaml:/app/config.yaml:ro
+    environment:
+      - EOF_FANOUT=q4_join_accounts_eof
+      - EXPECTED_EOFS=1
+
   client_0:
     build:
       context: .
@@ -168,7 +228,7 @@ services:
     depends_on:
     - gateway
     volumes:
-    - ./data/LI-Small_Trans.csv:/data/dataset.csv:ro
+    - ./data/my_sample_500k.csv:/data/dataset.csv:ro
     - ./data/accounts.csv:/data/accounts.csv:ro
     environment:
     - PYTHONUNBUFFERED=1

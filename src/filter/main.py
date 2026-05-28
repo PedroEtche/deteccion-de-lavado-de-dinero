@@ -30,6 +30,9 @@ from .strategies import (
     DateRangeRoute,
     OriginNotEqualDestinationStrategy,
     ShardConfig,
+    FieldGreaterThanStrategy,
+    PaymentFormatStrategy,
+    ScatterFilterStrategy,
 )
 
 
@@ -81,6 +84,9 @@ def _parse_strategy_config(
 
     if strategy_type == "payment_format":
         return PaymentFormatStrategy(default_output, params.get("formats", []))
+    
+    if strategy_type == "scatter_filter":
+        return ScatterFilterStrategy(params.get("output_queues", float(params["threshold"])))
 
     if strategy_type == "date_routing":
         raw_routes = params.get("routes", [])

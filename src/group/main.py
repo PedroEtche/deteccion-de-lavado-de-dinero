@@ -25,6 +25,7 @@ from .strategies import (
     AccountStrategy,
     MergeRoutingStrategy,
     AccountStrategy,
+    ScatterGroupStrategy,
 )
 
 CONFIG_PATH = "./config.yaml"
@@ -58,6 +59,9 @@ def _parse_strategy_config(raw_strategy: str) -> GroupStrategy:
     
     if strategy_type == "Account":
         return AccountStrategy(params["base_routing_key"], params["shard_amount"])
+    
+    if strategy_type == "ScatterGroup":
+        return ScatterGroupStrategy(params["base_routing_key"], params["shard_amount"])
 
     return NoStrategy(params["base_routing_key"])
 
@@ -153,7 +157,7 @@ class GroupService:
     def _on_input(self, message, ack, _nack):
         decoded = deserialize(message)
         client = decoded["client"]
-        
+
         if decoded["type"] == "eof":
             logging.info("Received EOF from upstream for client %s", client)
             self.coord.broadcast(client)

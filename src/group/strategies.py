@@ -214,3 +214,28 @@ class MergeRoutingStrategy(GroupStrategy):
 
     def get_eof_routes(self) -> List[str]:
         return [f"{self.base_route}_{i}" for i in range(self.shard_amount)]
+   
+class ScatterGroupStrategy(GroupStrategy):
+    def __init__(self, base_route: str, shard_amount: int):
+        self.base_route = base_route
+        self.shard_amount = shard_amount
+
+    def __str__(self) -> str:
+        return "ScatterGroupStrategy"
+
+    def group_and_route(self, batch: List[Any]) -> List[Tuple[str, List[Any]]]:
+        routed_batches = {}
+
+        for tx in batch:
+            string_key = f"{tx.from_bank}_{tx.from_account}"
+            route = _get_shard_route(string_key, self.shard_amount, self.base_route)
+            
+            if route not in routed_batches:
+                routed_batches[route] = []
+                
+            routed_batches[route].append(tx)
+
+        return [(route, b) for route, b in routed_batches.items()]
+
+    def get_eof_routes(self) -> List[str]:
+        return [f"{self.base_route}_{i}" for i in range(self.shard_amount)]

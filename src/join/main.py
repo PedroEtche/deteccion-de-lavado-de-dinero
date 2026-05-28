@@ -23,6 +23,7 @@ from .strategies import (
     CountStrategy,
     JoinStrategy,
     NoStrategy,
+    AccountStrategy,
 )
 
 CONFIG_PATH = "./config.yaml"
@@ -54,6 +55,8 @@ def _parse_strategy_config(raw_strategy) -> JoinStrategy:
         return BankMaxAmountStrategy()
     if strategy_type in ("JoinUnion", "UnionStrategy"):
         return UnionStrategy()
+    if strategy_type == "Account":
+        return AccountStrategy()
     return NoStrategy()
 
 
@@ -127,6 +130,7 @@ class JoinService:
         self._accounts_mom_host = config.mom_host
         self._accounts_input_queue = None
         self._accounts_thread: Optional[threading.Thread] = None
+        self._flushed_clients = set()
 
     def start(self) -> None:
         self.coord.start()
@@ -199,6 +203,12 @@ class JoinService:
     def _flush_client(self, client: str) -> None:
         """Bajo `coord.lock()`. Emite el resultado joineado + EOF downstream."""
         logging.info("Flushing joined result for client %s", client)
+        
+        if client in self._flushed_clients:
+            logging.info("Ignoring duplicate flush wave for client %s", client)
+            return
+        self._flushed_clients.add(client)
+
         batch = self.strategy.get_joined_for_client(client)
         self.output_queue.send(
             serialize(
@@ -213,7 +223,6 @@ class JoinService:
         self.output_queue.send(
             serialize(build_eof_message(client=client, msg_id=str(uuid.uuid4())))
         )
-
 
 def main() -> int:
     config = init_config()

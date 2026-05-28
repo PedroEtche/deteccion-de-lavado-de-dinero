@@ -1,0 +1,13 @@
+mom_host: rabbitmq
+
+input_queue: queue_9/1-9/6
+
+output_exchange: q4_scatter_route_exchange
+
+log_level: DEBUG
+
+strategy:
+  type: ScatterGroup
+  params:
+    base_routing_key: q4_scatter_route
+    shard_amount: 1

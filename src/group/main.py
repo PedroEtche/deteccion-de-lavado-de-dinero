@@ -47,9 +47,9 @@ def _parse_strategy_config(raw_strategy: str) -> GroupStrategy:
     if strategy_type == "BankMaxAmount":
         return BankMaxAmountStrategy(params["base_routing_key"], params["shard_amount"])
 
-    if strategy_type == "PaymentFormatAverage":
+    if strategy_type in ("PaymentFormatAverage", "MergeRouting"):
         return PaymentFormatAverageStrategy(params["base_routing_key"], params["shard_amount"])
-    
+
     if strategy_type == "AccountPairCount":
         return AccountPairCountStategy(params["base_routing_key"], params["shard_amount"])
     
@@ -61,6 +61,18 @@ def _parse_strategy_config(raw_strategy: str) -> GroupStrategy:
 
     return NoStrategy(params["base_routing_key"])
 
+
+def _read_strategy_type(raw_strategy: Any) -> str:
+    if isinstance(raw_strategy, dict):
+        return str(raw_strategy.get("type", "NoStrategy"))
+    return str(raw_strategy or "NoStrategy")
+
+
+def _read_strategy_params(raw_strategy: Any) -> Dict[str, Any]:
+    if not isinstance(raw_strategy, dict):
+        return {}
+    params = raw_strategy.get("params", {})
+    return params if isinstance(params, dict) else {}
 
 def _load_file_config() -> Dict[str, Any]:
     try:

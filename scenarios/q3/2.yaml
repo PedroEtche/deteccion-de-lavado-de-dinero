@@ -32,6 +32,9 @@ services:
     - INPUT_QUEUE=result_queue
     - SERVER_PORT=5678
 
+  # ── Filtro USD: 3 réplicas ─────────────────────────────────────────────────
+  # Compiten por mensajes en transactions_queue (round-robin RabbitMQ).
+  # El EOF llega a exactamente 1 réplica → propaga 1 EOF a q3_queue.
   filter_usd_0:
     build:
       context: .
@@ -46,6 +49,35 @@ services:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
 
+  filter_usd_1:
+    build:
+      context: .
+      dockerfile: src/filter/Dockerfile
+    container_name: filter_usd_1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/filter/config/q3_usd_config.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+
+  filter_usd_2:
+    build:
+      context: .
+      dockerfile: src/filter/Dockerfile
+    container_name: filter_usd_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/filter/config/q3_usd_config.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+
+  # ── Filtro fecha: 3 réplicas ───────────────────────────────────────────────
   filter_date_0:
     build:
       context: .
@@ -60,11 +92,45 @@ services:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
 
-  group_q3_0:
+  filter_date_1:
+    build:
+      context: .
+      dockerfile: src/filter/Dockerfile
+    container_name: filter_date_1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/filter/config/date_multiplex_config.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+
+  filter_date_2:
+    build:
+      context: .
+      dockerfile: src/filter/Dockerfile
+    container_name: filter_date_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/filter/config/date_multiplex_config.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+
+  # ── Group: 3 réplicas × 3 shards = 9 workers ─────────────────────────────
+  # Cada shard tiene 3 réplicas compitiendo en la misma cola de entrada.
+  # Cuando llega el EOF upstream (1 por shard), UNA réplica lo recibe y
+  # hace broadcast al fanout compartido. Las 3 réplicas del shard reciben
+  # ese broadcast → las 3 flushean → cada aggregator recibe 9 EOFs
+  # (3 shards × 3 réplicas = 9 flushes, cada flush envía a los 3 aggregators).
+  group_q3_shard0_0:
     build:
       context: .
       dockerfile: src/group/Dockerfile
-    container_name: group_q3_0
+    container_name: group_q3_shard0_0
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -74,11 +140,39 @@ services:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
 
-  group_q3_1:
+  group_q3_shard0_1:
     build:
       context: .
       dockerfile: src/group/Dockerfile
-    container_name: group_q3_1
+    container_name: group_q3_shard0_1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/group/config/q3_shard_0_config.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+
+  group_q3_shard0_2:
+    build:
+      context: .
+      dockerfile: src/group/Dockerfile
+    container_name: group_q3_shard0_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/group/config/q3_shard_0_config.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+
+  group_q3_shard1_0:
+    build:
+      context: .
+      dockerfile: src/group/Dockerfile
+    container_name: group_q3_shard1_0
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -88,11 +182,39 @@ services:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
 
-  group_q3_2:
+  group_q3_shard1_1:
     build:
       context: .
       dockerfile: src/group/Dockerfile
-    container_name: group_q3_2
+    container_name: group_q3_shard1_1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/group/config/q3_shard_1_config.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+
+  group_q3_shard1_2:
+    build:
+      context: .
+      dockerfile: src/group/Dockerfile
+    container_name: group_q3_shard1_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/group/config/q3_shard_1_config.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+
+  group_q3_shard2_0:
+    build:
+      context: .
+      dockerfile: src/group/Dockerfile
+    container_name: group_q3_shard2_0
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -102,6 +224,36 @@ services:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
 
+  group_q3_shard2_1:
+    build:
+      context: .
+      dockerfile: src/group/Dockerfile
+    container_name: group_q3_shard2_1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/group/config/q3_shard_2_config.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+
+  group_q3_shard2_2:
+    build:
+      context: .
+      dockerfile: src/group/Dockerfile
+    container_name: group_q3_shard2_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/group/config/q3_shard_2_config.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+
+  # ── Aggregators: 1 por shard, expected_eofs=9 ─────────────────────────────
+  # Con 3 group_replicas × 3 shards cada aggregator recibe 9 EOFs.
   agg_q3_0:
     build:
       context: .
@@ -115,6 +267,7 @@ services:
     environment:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
+    - EXPECTED_EOFS=9
 
   agg_q3_1:
     build:
@@ -129,6 +282,7 @@ services:
     environment:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
+    - EXPECTED_EOFS=9
 
   agg_q3_2:
     build:
@@ -143,7 +297,9 @@ services:
     environment:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
+    - EXPECTED_EOFS=9
 
+  # ── Join: 1 instancia, expected_eofs=3 (no escala) ────────────────────────
   join_q3_0:
     build:
       context: .
@@ -158,6 +314,7 @@ services:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
 
+  # ── Filtro promedio histórico: 1 instancia ─────────────────────────────────
   filter_hist_avg_q3_0:
     build:
       context: .
@@ -172,7 +329,7 @@ services:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
 
-  # 3 clientes simultáneos - cada uno recibe su UUID y sus propios resultados
+  # ── 3 clientes simultáneos ────────────────────────────────────────────────
   client_0:
     build:
       context: .

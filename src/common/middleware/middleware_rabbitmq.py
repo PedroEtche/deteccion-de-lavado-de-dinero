@@ -65,29 +65,35 @@ class MessageMiddlewareQueueRabbitMQ(MessageMiddlewareQueue):
             raise MessageMiddlewareCloseError("Failed to close the connection properly.")
 
 class MessageMiddlewareExchangeRabbitMQ(MessageMiddlewareExchange):
-    
-    def __init__(self, host, exchange_name, routing_keys=None):
+
+    def __init__(self, host, exchange_name, routing_keys=None, queue_name=None):
         try:
             self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=host))
             self.channel = self.connection.channel()
             self.exchange_name = exchange_name
             self.channel.exchange_declare(exchange=exchange_name, exchange_type='direct')
-            
-            result = self.channel.queue_declare(queue='', exclusive=True)
-            self.queue_name = result.method.queue
 
             self.routing_keys = routing_keys or []
 
             if self.routing_keys:
-                result = self.channel.queue_declare(queue='', exclusive=True)
-                self.queue_name = result.method.queue
+                if queue_name:
+                    # Named durable-ish queue: survives container restarts within a run
+                    self.channel.queue_declare(queue=queue_name)
+                    self.queue_name = queue_name
+                else:
+                    result = self.channel.queue_declare(queue='', exclusive=True)
+                    self.queue_name = result.method.queue
 
                 for routing_key in self.routing_keys:
                     self.channel.queue_bind(
-                        exchange=exchange_name, 
-                        queue=self.queue_name, 
-                        routing_key=routing_key
+                        exchange=exchange_name,
+                        queue=self.queue_name,
+                        routing_key=routing_key,
                     )
+            else:
+                result = self.channel.queue_declare(queue='', exclusive=True)
+                self.queue_name = result.method.queue
+
         except (AMQPConnectionError, AMQPChannelError):
             raise MessageMiddlewareDisconnectedError("Connection lost while initializing exchange.")
         except Exception as e:

@@ -18,11 +18,12 @@ from src.communication.protocols.queue_protocol.internal import (
 
 from .strategies import (
     AccountPairCountStategy,
+    AccountStrategy,
     AggregatorStrategy,
     BankMaxAmountStrategy,
     CountStrategy,
     NoStrategy,
-    AccountStrategy,
+    PaymentFormatAverageStrategy,
 )
 
 CONFIG_PATH = "./config.yaml"
@@ -44,22 +45,27 @@ class AggregatorConfig:
     # cuando el upstream publica a un exchange direct con sharding por route.
     input_exchange: Optional[str] = None
 
-def _parse_strategy_config(raw_strategy: str) -> AggregatorStrategy:
-    strategy_type = raw_strategy.get("type", "noop")
-    # params = raw_strategy.get("params", {})
+def _extract_strategy_type(raw_strategy) -> str:
+    if isinstance(raw_strategy, dict):
+        return str(raw_strategy.get("type", "NoStrategy"))
+    return str(raw_strategy or "NoStrategy")
+
+
+def _parse_strategy_config(raw_strategy) -> AggregatorStrategy:
+    strategy_type = _extract_strategy_type(raw_strategy)
 
     if strategy_type == "BankMaxAmount":
         return BankMaxAmountStrategy()
 
-    if strategy_type == "BankMaxAmount":
-        return BankMaxAmountStrategy()
-    
     if strategy_type == "AccountPairCount":
         return AccountPairCountStategy()
 
+    if strategy_type in ("PaymentFormatAverage", "MergeRouting"):
+        return PaymentFormatAverageStrategy()
+
     if strategy_type == "Account":
         return AccountStrategy()
-      
+
     if strategy_type == "Count":
         return CountStrategy()
 

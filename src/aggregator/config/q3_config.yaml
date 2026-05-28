@@ -1,0 +1,10 @@
+mom_host: rabbitmq
+
+input_queue: aggregate_route_0
+
+output_queue: q3_join_queue
+
+log_level: INFO
+
+strategy:
+  type: PaymentFormatAverage

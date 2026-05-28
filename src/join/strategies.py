@@ -39,6 +39,25 @@ class NoStrategy(JoinStrategy):
     def get_joined_for_client(self, client: str) -> List[Any]:
         return []
 
+
+class UnionStrategy(JoinStrategy):
+    def __init__(self):
+        self.batch_by_client: Dict[str, List[Any]] = {}
+
+    def __str__(self) -> str:
+        return "UnionStrategy"
+
+    def join_batch(self, batch: List[Any], client: Optional[str] = None) -> List[Any]:
+        if client is None:
+            raise ValueError("client is required for UnionStrategy")
+
+        current_batch = self.batch_by_client.setdefault(client, [])
+        current_batch.extend(batch)
+        return current_batch
+
+    def get_joined_for_client(self, client: str) -> List[Any]:
+        return list(self.batch_by_client.pop(client, []))
+
 class CountStrategy(JoinStrategy):
     def __init__(self):
         self.count_by_client = {}

@@ -83,9 +83,10 @@ class SelfMergeStrategy(JoinerStrategy):
 
             if origin_key in client_inbound:
                 for inbound_tx in client_inbound[origin_key]:
-                    joined_txs.append(
-                        self._create_merged_record(inbound_tx, tx)
-                    )
+                    merged_record = self._create_merged_record(inbound_tx, tx)
+                    
+                    if merged_record is not None:
+                        joined_txs.append(merged_record)
 
             if origin_key not in client_outbound:
                 client_outbound[origin_key] = []
@@ -93,9 +94,10 @@ class SelfMergeStrategy(JoinerStrategy):
 
             if dest_key in client_outbound:
                 for outbound_tx in client_outbound[dest_key]:
-                    joined_txs.append(
-                        self._create_merged_record(tx, outbound_tx)
-                    )
+                    merged_record = self._create_merged_record(tx, outbound_tx)
+                    
+                    if merged_record is not None:
+                        joined_txs.append(merged_record)
 
             if dest_key not in client_inbound:
                 client_inbound[dest_key] = []
@@ -107,6 +109,9 @@ class SelfMergeStrategy(JoinerStrategy):
         return []
     
     def _create_merged_record(self, tx_1: dict, tx_2: dict) -> TransactionRow:
+        if tx_1["from_bank"] == tx_2["to_bank"] and tx_1["from_account"] == tx_2["to_account"]:
+            return None
+        
         return TransactionRow(
             from_bank=tx_1.get("from_bank"),
             from_account=tx_1.get("from_account"),

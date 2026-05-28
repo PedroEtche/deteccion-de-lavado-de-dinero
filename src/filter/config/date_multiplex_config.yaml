@@ -1,21 +1,31 @@
 mom_host: rabbitmq
 
-input_queue: q4_queue
+inputs:
+  - type: queue
+    name: q3_queue
 
-output_queue: queue_6/9-15/9, queue_9/1-9/5, queue_9/1-9/6
+outputs:
+  - type: queue
+    name: queue_6/9-15/9
+    shards: 1
+
+  - type: queue
+    name: queue_9/1-9/5
+    shards: 3
 
 strategy:
-  type: date
+  type: date_routing
   params:
     routes:
-      - from: "2022/09/06 00:01"
-        to: "2022/09/15 23:59"
-        queue: "queue_6/9-15/9"
+      - match:
+          from: "2022/09/01 00:01"
+          to: "2022/09/05 23:59"
+        output: queue_9/1-9/5
+        shard:
+          by: from_bank
+          shards: 3
+      - match:
+          from: "2022/09/06 00:01"
+          to: "2022/09/15 23:59"
+        output: queue_6/9-15/9
 
-      - from: "2022/09/01 00:01"
-        to: "2022/09/05 23:59"
-        queue: "queue_9/1-9/5"
-
-      - from: "2022/09/01 00:01"
-        to: "2022/09/06 23:59"
-        queue: "queue_9/1-9/6"

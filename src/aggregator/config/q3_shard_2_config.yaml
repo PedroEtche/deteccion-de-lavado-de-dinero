@@ -1,0 +1,10 @@
+mom_host: rabbitmq
+
+input_queue: aggregate_route_2
+input_exchange: q3_aggregate_exchange
+output_queue: q3_join_queue
+eof_fanout: q3_agg_eof_2
+expected_eofs: 3
+
+strategy:
+  type: PaymentFormatAverage

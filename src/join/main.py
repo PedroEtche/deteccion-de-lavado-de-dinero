@@ -18,6 +18,7 @@ from src.communication.protocols.queue_protocol.internal import (
 )
 
 from .strategies import (
+    UnionStrategy,
     BankMaxAmountStrategy,
     CountStrategy,
     JoinStrategy,
@@ -39,11 +40,20 @@ class JoinConfig:
     accounts_input_queue: Optional[str] = None
 
 
-def _parse_strategy_config(strategy_type: str) -> JoinStrategy:
-    if strategy_type == "CountStrategy":
+def _extract_strategy_type(raw_strategy) -> str:
+    if isinstance(raw_strategy, dict):
+        return str(raw_strategy.get("type", "NoStrategy"))
+    return str(raw_strategy or "NoStrategy")
+
+
+def _parse_strategy_config(raw_strategy) -> JoinStrategy:
+    strategy_type = _extract_strategy_type(raw_strategy)
+    if strategy_type in ("CountStrategy", "Count"):
         return CountStrategy()
     if strategy_type == "BankMaxAmount":
         return BankMaxAmountStrategy()
+    if strategy_type in ("JoinUnion", "UnionStrategy"):
+        return UnionStrategy()
     return NoStrategy()
 
 

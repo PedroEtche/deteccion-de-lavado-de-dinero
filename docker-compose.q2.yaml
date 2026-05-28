@@ -123,4 +123,22 @@ services:
     - SERVER_PORT=5678
     - TRANSACTIONS_DATASET_PATH=/data/transactions.csv
     - ACCOUNTS_DATASET_PATH=/data/accounts.csv
-    - BATCH_SIZE=500
+    - BATCH_SIZE=${BATCH_SIZE:-500}
+
+  client_1:
+    build:
+      context: .
+      dockerfile: src/client/Dockerfile
+    container_name: client_1
+    depends_on:
+    - gateway
+    volumes:
+    - ./data/sample.csv:/data/transactions.csv:ro
+    - ./data/accounts_sample.csv:/data/accounts.csv:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - SERVER_HOST=gateway
+    - SERVER_PORT=5678
+    - TRANSACTIONS_DATASET_PATH=/data/transactions.csv
+    - ACCOUNTS_DATASET_PATH=/data/accounts.csv
+    - BATCH_SIZE=${BATCH_SIZE:-500}

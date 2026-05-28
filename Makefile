@@ -72,9 +72,6 @@ DEMO_Q2_COMPOSE := docker-compose.q2.yaml
 
 # Levanta el pipeline Q2 end-to-end: rabbit + gateway + filter_usd + group +
 # aggregator + join + cliente. Requiere data/sample.csv (lo genera automaticamente).
-# NOTA: ver "Bugs pendientes para smoke Q2" en la respuesta del bot — esta
-# pipeline tiene bugs en codigo upstream (group/aggregator) que la van a hacer
-# fallar hasta que se arreglen. Los bugs estan marcados con `TODO BUG:` en el codigo.
 demo-q2: $(SAMPLE_FILE)
 	docker compose -f $(DEMO_Q2_COMPOSE) up --build --remove-orphans
 .PHONY: demo-q2
@@ -82,3 +79,78 @@ demo-q2: $(SAMPLE_FILE)
 demo-q2-down:
 	docker compose -f $(DEMO_Q2_COMPOSE) down -t 5
 .PHONY: demo-q2-down
+
+# Runner orientado a "correr y comparar": corre el escenario, espera a que los
+# clientes terminen, vuelca logs por contenedor, meta (duracion + exit codes) y
+# resumen de resultados a results/<timestamp>_<escenario>/.
+#
+# Override de parametros via env:
+#   BATCH_SIZE=1000 make run-q2
+BATCH_SIZE ?= 500
+
+run-q1: $(SAMPLE_FILE)
+	BATCH_SIZE=$(BATCH_SIZE) ./scripts/run.sh q1
+.PHONY: run-q1
+
+run-q2: $(SAMPLE_FILE)
+	BATCH_SIZE=$(BATCH_SIZE) ./scripts/run.sh q2
+.PHONY: run-q2
+
+# Corre q1 y q2 en serie (cada uno en su propio results/<timestamp>_<escenario>/).
+# Cuando aparezca docker-compose.all.yaml con todas las queries en paralelo,
+# agregar `run-all-parallel` como ./scripts/run.sh all.
+run-all: run-q1 run-q2
+.PHONY: run-all
+
+# Corre el escenario dos veces y verifica que el resultado (sin UUIDs ni
+# tiempos) sea byte-igual entre corridas.
+verify-q1: $(SAMPLE_FILE)
+	BATCH_SIZE=$(BATCH_SIZE) ./scripts/verify.sh q1
+.PHONY: verify-q1
+
+verify-q2: $(SAMPLE_FILE)
+	BATCH_SIZE=$(BATCH_SIZE) ./scripts/verify.sh q2
+.PHONY: verify-q2
+
+# Lista las ultimas 10 corridas, ordenadas por fecha desc.
+results:
+	@if [[ -d results ]]; then \
+		ls -1t results/ 2>/dev/null | head -10 | while read d; do \
+			meta="results/$$d/meta.txt"; \
+			if [[ -f $$meta ]]; then \
+				dur=$$(grep -E '^duration_seconds:' $$meta | awk '{print $$2}'); \
+				ec=$$(grep -E '^exit_code:' $$meta | head -1 | awk '{print $$2}'); \
+				printf "%-40s  %3ss  exit=%s\n" "$$d" "$$dur" "$$ec"; \
+			else \
+				printf "%-40s  (incomplete)\n" "$$d"; \
+			fi; \
+		done; \
+	else \
+		echo "No results yet. Run: make run-q1 / make run-q2 / make run-all"; \
+	fi
+.PHONY: results
+
+# Muestra el summary de una corrida especifica.
+#   make show RUN=20260528_105334_q2
+show:
+	@if [[ -z "$(RUN)" ]]; then echo "Usage: make show RUN=<dir>"; exit 1; fi
+	@cat results/$(RUN)/meta.txt
+	@echo ""
+	@cat results/$(RUN)/summary.txt
+.PHONY: show
+
+# Muestra el summary de la ultima corrida.
+show-last:
+	@last=$$(ls -1t results/ 2>/dev/null | head -1); \
+	if [[ -z "$$last" ]]; then echo "No results yet."; exit 1; fi; \
+	echo "==> $$last"; echo ""; \
+	cat results/$$last/meta.txt; \
+	echo ""; \
+	cat results/$$last/summary.txt
+.PHONY: show-last
+
+# Limpia containers/volumes de los escenarios sin tocar results/.
+run-clean:
+	-docker compose -f docker-compose.q1.yaml down -t 3 2>/dev/null
+	-docker compose -f docker-compose.q2.yaml down -t 3 2>/dev/null
+.PHONY: run-clean

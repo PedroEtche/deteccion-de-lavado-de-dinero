@@ -80,4 +80,4 @@ services:
     - SERVER_PORT=5678
     - TRANSACTIONS_DATASET_PATH=/data/transactions.csv
     - ACCOUNTS_DATASET_PATH=/data/accounts.csv
-    - BATCH_SIZE=500
+    - BATCH_SIZE=${BATCH_SIZE:-500}

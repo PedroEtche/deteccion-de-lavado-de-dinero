@@ -135,7 +135,7 @@ class AggregatorService:
     def start(self) -> None:
         self.coord.start()
         self._running = True
-        self.input_exchange.start_consuming(self.process_data_messsage)
+        self.input_exchange.start_consuming(self._on_input)
 
     def stop(self) -> None:
         logging.info("Stopping aggregator service")

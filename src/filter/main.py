@@ -174,10 +174,10 @@ def process_message(
 class FilterService:
     def __init__(self, config: FilterConfig) -> None:
         self.mom_host = config.mom_host
-        self.input_queue = config.input_queue
-        self.output_queues = config.output_queues
         self.strategy = config.strategy
         self.projection_fields = config.projection_fields
+        self.input_queue = config.input_queue
+        self.output_queues = config.output_queues
         self._input_middleware: Optional[MessageMiddlewareQueueRabbitMQ] = None
         self._output_middleware: Dict[str, MessageMiddlewareQueueRabbitMQ] = {}
         self._running = False

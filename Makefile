@@ -103,44 +103,58 @@ demo-q2-down:
 	docker compose -f $(DEMO_Q2_COMPOSE) down -t 5
 .PHONY: demo-q2-down
 
-# Runner orientado a "correr y comparar": corre el escenario, espera a que los
-# clientes terminen, vuelca logs por contenedor, meta (duracion + exit codes) y
-# resumen de resultados a results/<timestamp>_<escenario>/.
+# ─── Demo parameters ─────────────────────────────────────────────────────────
 #
-# Override de parametros via env:
-#   BATCH_SIZE=1000 make run-q2
-BATCH_SIZE ?= 500
+#  BATCH_SIZE    filas por mensaje al gateway          (default: 500)
+#  SAMPLE_ROWS   filas del dataset para Q1/Q2          (default: 50000)
+#  SAMPLE_Q5_ROWS filas del dataset para Q5            (default: 50000)
+#  CLIENTS       clientes simuláneos por escenario     (default: 1)
+#  WORKERS       replicas de etapas stateless          (default: 1)
+#
+#  Ejemplo demo en vivo:
+#    make run-all BATCH_SIZE=200 SAMPLE_ROWS=20000 CLIENTS=2 WORKERS=2
+#
+#  Nota WORKERS:
+#    - Q1/Q5: todas las etapas pre-aggregator escalan libremente (stateless,
+#      competing consumers). El EOF solo llega a una instancia y se forwarda.
+#    - Q2:  filter + group escalan igual. Si querés escalar el aggregator o join
+#      hay que ajustar EXPECTED_EOFS en el compose file (ponele N si escalás
+#      el group a N workers, porque cada group instance flushea al recibir el
+#      broadcast de EOF).
+#
+# ─────────────────────────────────────────────────────────────────────────────
+BATCH_SIZE    ?= 500
+CLIENTS       ?= 1
+WORKERS       ?= 1
 
 run-q1: $(SAMPLE_FILE)
-	BATCH_SIZE=$(BATCH_SIZE) ./scripts/run.sh q1
+	BATCH_SIZE=$(BATCH_SIZE) CLIENTS=$(CLIENTS) WORKERS=$(WORKERS) ./scripts/run.sh q1
 .PHONY: run-q1
 
 run-q2: $(SAMPLE_FILE)
-	BATCH_SIZE=$(BATCH_SIZE) ./scripts/run.sh q2
+	BATCH_SIZE=$(BATCH_SIZE) CLIENTS=$(CLIENTS) WORKERS=$(WORKERS) ./scripts/run.sh q2
 .PHONY: run-q2
 
 run-q5: $(SAMPLE_Q5_FILE)
-	BATCH_SIZE=$(BATCH_SIZE) ./scripts/run.sh q5
+	BATCH_SIZE=$(BATCH_SIZE) CLIENTS=$(CLIENTS) WORKERS=$(WORKERS) ./scripts/run.sh q5
 .PHONY: run-q5
 
-# Corre q1 y q2 en serie (cada uno en su propio results/<timestamp>_<escenario>/).
-# Cuando aparezca docker-compose.all.yaml con todas las queries en paralelo,
-# agregar `run-all-parallel` como ./scripts/run.sh all.
+# Corre Q1, Q2 y Q5 en serie (cada uno en su propio results/<timestamp>_<escenario>/).
 run-all: run-q1 run-q2 run-q5
 .PHONY: run-all
 
 # Corre el escenario dos veces y verifica que el resultado (sin UUIDs ni
 # tiempos) sea byte-igual entre corridas.
 verify-q1: $(SAMPLE_FILE)
-	BATCH_SIZE=$(BATCH_SIZE) ./scripts/verify.sh q1
+	BATCH_SIZE=$(BATCH_SIZE) CLIENTS=$(CLIENTS) WORKERS=$(WORKERS) ./scripts/verify.sh q1
 .PHONY: verify-q1
 
 verify-q2: $(SAMPLE_FILE)
-	BATCH_SIZE=$(BATCH_SIZE) ./scripts/verify.sh q2
+	BATCH_SIZE=$(BATCH_SIZE) CLIENTS=$(CLIENTS) WORKERS=$(WORKERS) ./scripts/verify.sh q2
 .PHONY: verify-q2
 
 verify-q5: $(SAMPLE_Q5_FILE)
-	BATCH_SIZE=$(BATCH_SIZE) ./scripts/verify.sh q5
+	BATCH_SIZE=$(BATCH_SIZE) CLIENTS=$(CLIENTS) WORKERS=$(WORKERS) ./scripts/verify.sh q5
 .PHONY: verify-q5
 
 # Lista las ultimas 10 corridas, ordenadas por fecha desc.

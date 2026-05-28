@@ -19,6 +19,11 @@ class JoinStrategy(ABC):
     def get_joined_for_client(self, client: str) -> List[Any]:
         raise NotImplementedError()
 
+    # Default no-op. Strategies que necesiten enriquecer con datos de accounts
+    # (ej. BankMaxAmountStrategy para Q2) hacen override.
+    def add_accounts(self, batch: List[Any], client: Optional[str] = None) -> None:
+        pass
+
 
 class NoStrategy(JoinStrategy):
     """A strategy that returns the input batch unchanged."""
@@ -65,16 +70,28 @@ class CountStrategy(JoinStrategy):
             raise ValueError("client is required for CountStrategy")
         self.count_by_client[client] = self.count_by_client.get(client, 0) + len(batch)
         return [self.count_by_client[client]]
-    
+
     def get_joined_for_client(self, client: str) -> int:
         return [self.count_by_client.get(client, 0)]
-    
+
 class BankMaxAmountStrategy(JoinStrategy):
     def __init__(self):
         self.max_per_bank_by_client: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        # bank_id -> bank_name, por cliente. Poblado desde el accounts_queue.
+        self.bank_names_by_client: Dict[str, Dict[Any, str]] = {}
 
     def __str__(self) -> str:
         return "BankMaxAmountStrategy"
+
+    def add_accounts(self, batch: List[Any], client: Optional[str] = None) -> None:
+        if client is None:
+            raise ValueError("client is required for BankMaxAmountStrategy.add_accounts")
+        bank_names = self.bank_names_by_client.setdefault(client, {})
+        for account in batch:
+            bank_id = getattr(account, "bank_id", None)
+            bank_name = getattr(account, "bank_name", None)
+            if bank_id is not None and bank_name is not None:
+                bank_names[bank_id] = bank_name
 
     def join_batch(self, batch: List[Any], client: Optional[str] = None) -> List[Any]:
         if client is None:
@@ -92,8 +109,24 @@ class BankMaxAmountStrategy(JoinStrategy):
                     "amount_paid": amount,
                 }
 
-        return list(max_per_bank.values())
+        return self._enriched(client, pop=False)
 
     def get_joined_for_client(self, client: str) -> List[Any]:
-        return list(self.max_per_bank_by_client.get(client, {}).values())
-            
+        return self._enriched(client, pop=True)
+
+    def _enriched(self, client: str, pop: bool) -> List[Any]:
+        if pop:
+            entries = self.max_per_bank_by_client.pop(client, {})
+            bank_names = self.bank_names_by_client.pop(client, {})
+        else:
+            entries = self.max_per_bank_by_client.get(client, {})
+            bank_names = self.bank_names_by_client.get(client, {})
+
+        results = []
+        for entry in entries.values():
+            results.append({
+                "bank_name": bank_names.get(entry["from_bank"], entry["from_bank"]),
+                "from_account": entry["from_account"],
+                "amount_paid": entry["amount_paid"],
+            })
+        return results

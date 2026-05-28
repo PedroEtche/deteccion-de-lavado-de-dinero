@@ -18,6 +18,9 @@ from src.filter.strategies import (
 )
 
 
+_OUT_QUEUE = "out_q"
+
+
 def _make_transactions_msg(rows, client_id=None):
     msg = build_raw_transactions_message(
         client=client_id or str(uuid.uuid4()),
@@ -75,10 +78,11 @@ class TestProcessMessage(unittest.TestCase):
             TransactionRow(payment_currency="EUR", amount_paid=20.0),
             TransactionRow(payment_currency="USD", amount_paid=30.0),
         ]
-        result = process_message(_make_transactions_msg(rows), CurrencyStrategy("USD"), None)
+        result = process_message(_make_transactions_msg(rows), CurrencyStrategy(_OUT_QUEUE, "USD"), None)
         self.assertIsNotNone(result)
+        self.assertIn(_OUT_QUEUE, result)
 
-        decoded = deserialize(result)
+        decoded = deserialize(result[_OUT_QUEUE])
         batch = decoded["payload"]["batch"]
         self.assertEqual(len(batch), 2)
         for row in batch:
@@ -95,10 +99,10 @@ class TestProcessMessage(unittest.TestCase):
         ]
         result = process_message(
             _make_transactions_msg(rows),
-            NoStrategy(),
+            CurrencyStrategy(_OUT_QUEUE, "USD"),
             ["from_account", "to_account", "amount_paid"],
         )
-        decoded = deserialize(result)
+        decoded = deserialize(result[_OUT_QUEUE])
         row = decoded["payload"]["batch"][0]
         self.assertEqual(row.from_account, "A")
         self.assertEqual(row.to_account, "B")
@@ -113,10 +117,10 @@ class TestProcessMessage(unittest.TestCase):
         ]
         result = process_message(
             _make_transactions_msg(rows),
-            AmountLessThanStrategy(50.0),
+            AmountLessThanStrategy(_OUT_QUEUE, 50.0),
             ["from_account", "to_account", "amount_paid"],
         )
-        decoded = deserialize(result)
+        decoded = deserialize(result[_OUT_QUEUE])
         batch = decoded["payload"]["batch"]
         self.assertEqual(len(batch), 2)
         for row in batch:
@@ -124,30 +128,30 @@ class TestProcessMessage(unittest.TestCase):
             self.assertIsNotNone(row.from_account)
             self.assertIsNone(row.payment_currency)
 
-    def test_empty_filtered_batch_returns_none(self):
+    def test_empty_filtered_batch_returns_none_or_empty(self):
         rows = [TransactionRow(payment_currency="EUR")]
-        result = process_message(_make_transactions_msg(rows), CurrencyStrategy("USD"), None)
-        self.assertIsNone(result)
+        result = process_message(_make_transactions_msg(rows), CurrencyStrategy(_OUT_QUEUE, "USD"), None)
+        self.assertFalse(result)
 
     def test_non_transaction_message_returns_none(self):
         eof = build_eof_message(client=str(uuid.uuid4()), msg_id=str(uuid.uuid4()))
-        result = process_message(serialize(eof), CurrencyStrategy("USD"), None)
+        result = process_message(serialize(eof), CurrencyStrategy(_OUT_QUEUE, "USD"), None)
         self.assertIsNone(result)
 
     def test_output_preserves_client_id(self):
         rows = [TransactionRow(payment_currency="USD", amount_paid=10.0)]
         result = process_message(
             _make_transactions_msg(rows, client_id="client-abc"),
-            CurrencyStrategy("USD"),
+            CurrencyStrategy(_OUT_QUEUE, "USD"),
             None,
         )
-        decoded = deserialize(result)
+        decoded = deserialize(result[_OUT_QUEUE])
         self.assertEqual(decoded["client"], "client-abc")
 
     def test_output_message_is_raw_transactions_type(self):
         rows = [TransactionRow(payment_currency="USD", amount_paid=10.0)]
-        result = process_message(_make_transactions_msg(rows), CurrencyStrategy("USD"), None)
-        decoded = deserialize(result)
+        result = process_message(_make_transactions_msg(rows), CurrencyStrategy(_OUT_QUEUE, "USD"), None)
+        decoded = deserialize(result[_OUT_QUEUE])
         self.assertEqual(decoded["type"], "raw_transactions")
 
 

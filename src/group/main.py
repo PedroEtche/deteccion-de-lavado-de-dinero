@@ -2,7 +2,7 @@ import logging
 import os
 import signal
 import uuid
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from typing import Any, Dict
 
 import yaml
@@ -161,9 +161,7 @@ class GroupService:
         else:
             with self.coord.lock():
                 logging.debug("Processing data message for client %s", client)
-                batch = decoded["payload"]["batch"]
-                batch = [asdict(row) if hasattr(row, "__dataclass_fields__") else row for row in batch]
-                routed = self.strategy.group_and_route(batch)
+                routed = self.strategy.group_and_route(decoded["payload"]["batch"])
                 for route, grouped in routed:
                     if not grouped:
                         continue

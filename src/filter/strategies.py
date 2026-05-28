@@ -30,7 +30,7 @@ class NoStrategy(FilterStrategy):
         return "NoStrategy"
 
     def filter_batch(self, batch: List[Any]) -> Dict[str, List[Any]]:
-        return {self.output_queue[0]: batch}
+        return {self.output_queue: batch}
 
 
 class CurrencyStrategy(FilterStrategy):

@@ -56,15 +56,20 @@ def _load_file_config() -> Dict[str, Any]:
         return {}
 
 
-def _parse_strategy_config(raw_strategy: Dict[str, Any]) -> FilterStrategy:
+def _parse_strategy_config(
+    raw_strategy: Dict[str, Any], output_queues: List[str]
+) -> FilterStrategy:
     strategy_type = raw_strategy.get("type", "noop")
     params = raw_strategy.get("params", {})
+    # Estrategias single-output (currency, amount_less_than, no-op) usan la
+    # primera cola configurada. `date` lleva su propia tabla de routes.
+    default_output = output_queues[0] if output_queues else ""
 
     if strategy_type == "currency":
-        return CurrencyStrategy(output_queue=params["output_queue"], target_currency=params["target_currency"])
+        return CurrencyStrategy(default_output, params["target_currency"])
 
     if strategy_type == "amount_less_than":
-        return AmountLessThanStrategy(output_queue=params["output_queue"], threshold=float(params["threshold"]))
+        return AmountLessThanStrategy(default_output, float(params["threshold"]))
 
     if strategy_type == "date_routing":
         raw_routes = params.get("routes", [])
@@ -91,11 +96,10 @@ def _parse_strategy_config(raw_strategy: Dict[str, Any]) -> FilterStrategy:
         return DateStrategy(routes=routes)
 
     if strategy_type == "historical_average":
-        out = params.get("output_queue")
         thresh = params.get("threshold", 0.01)
-        return HistoricalAverageFilterStrategy(output_queue=out, threshold_multiplier=thresh)
+        return HistoricalAverageFilterStrategy(output_queue=default_output, threshold_multiplier=thresh)
 
-    return NoStrategy("")
+    return NoStrategy(default_output)
 
 def _parse_projection_config(raw_projection: Dict[str, Any]) -> Optional[List[str]]:
     fields = raw_projection.get("fields")
@@ -135,12 +139,14 @@ def init_config() -> FilterConfig:
     strategy_params = raw_strategy.get("params", {})
     control_queue = os.getenv("CONTROL_QUEUE", strategy_params.get("control_queue", None))
 
+    output_queues = _parse_output_queues(raw_outputs)
+
     return FilterConfig(
         mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
-        input_queue=os.getenv("INPUT_QUEUE", input_queue),
-        output_queues=_parse_output_queues(raw_outputs),
+        input_queue=os.getenv("INPUT_QUEUE", input_queue or file_config.get("input_queue", "")),
+        output_queues=output_queues,
         log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
-        strategy=_parse_strategy_config(raw_strategy),
+        strategy=_parse_strategy_config(raw_strategy, output_queues),
         projection_fields=_parse_projection_config(raw_projection),
         control_queue=control_queue,
     )

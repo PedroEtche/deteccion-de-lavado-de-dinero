@@ -41,14 +41,14 @@ class BankMaxAmountStrategy(GroupStrategy):
     def group_and_route(self, batch: List[Any]) -> List[Tuple[str, List[Any]]]:
         max_per_bank = {}
         for tx in batch:
-            bank = tx["from_bank"]
-            amount = tx["amount_paid"] or 0.0
+            bank = tx.from_bank
+            amount = tx.amount_paid or 0.0
             current = max_per_bank.get(bank)
 
             if current is None or amount > current["amount_paid"]:
                 max_per_bank[bank] = {
-                    "from_bank": tx["from_bank"],
-                    "from_account": tx["from_account"],
+                    "from_bank": tx.from_bank,
+                    "from_account": tx.from_account,
                     "amount_paid": amount,
                 }
 
@@ -79,8 +79,8 @@ class PaymentFormatAverageStrategy(GroupStrategy):
         grouped = {}
 
         for tx in batch:
-            fmt = tx["payment_format"]
-            amount = tx["amount_paid"] or 0.0
+            fmt = tx.payment_format
+            amount = tx.amount_paid or 0.0
 
             if fmt not in grouped:
                 grouped[fmt] = {"total_amount": 0.0, "tx_quantity": 0}
@@ -115,7 +115,7 @@ class AccountPairCountStategy(GroupStrategy):
     def group_and_route(self, batch: List[Any]) -> List[Tuple[str, List[Any]]]:
         counts = {}
         for tx in batch:
-            key = (tx["from_bank"], tx["from_account"], tx["to_bank"], tx["to_account"])
+            key = (tx.from_bank, tx.from_account, tx.to_bank, tx.to_account)
             counts[key] = counts.get(key, 0) + 1
 
         results = []
@@ -147,8 +147,8 @@ class AccountStrategy(GroupStrategy):
     def group_and_route(self, batch: List[Any]) -> List[Tuple[str, List[Any]]]:
         accounts = set()
         for tx in batch:
-            accounts.add((tx["from_bank"], tx["from_account"]))
-            accounts.add((tx["to_bank"], tx["to_account"]))
+            accounts.add((tx.from_bank, tx.from_account))
+            accounts.add((tx.to_bank, tx.to_account))
 
         return [{"bank": bank, "account": account} for bank, account in accounts]
     

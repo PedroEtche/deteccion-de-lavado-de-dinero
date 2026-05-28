@@ -114,11 +114,17 @@ class PaymentFormatAverageStrategy(GroupStrategy):
 
 
 class AccountPairCountStategy(GroupStrategy):
-    def __init__(self, output_route: str):
-        self.output_route = output_route
+    def __init__(self, base_route: str, shard_amount: int):
+        self.base_route = base_route
+        self.shard_amount = shard_amount
 
     def __str__(self) -> str:
         return "AccountPairCountStategy"
+
+    def _get_shard_route(self, string_key: str) -> str:
+        hash_val = zlib.crc32(string_key.encode('utf-8'))
+        shard_id = hash_val % self.shard_amount
+        return f"{self.base_route}_{shard_id}"
 
     def group_and_route(self, batch: List[Any]) -> List[Tuple[str, List[Any]]]:
         counts = {}
@@ -126,22 +132,26 @@ class AccountPairCountStategy(GroupStrategy):
             key = (tx.from_bank, tx.from_account, tx.to_bank, tx.to_account)
             counts[key] = counts.get(key, 0) + 1
 
-        results = []
+        routed_batches = {}
         for (from_bank, from_account, to_bank, to_account), size in counts.items():
-            results.append(
-                {
-                    "from_bank": from_bank,
-                    "from_account": from_account,
-                    "to_bank": to_bank,
-                    "to_account": to_account,
-                    "size": size,
-                }
-            )   
+            string_key = f"{from_bank}_{from_account}_{to_bank}_{to_account}"
+            route = self._get_shard_route(string_key)
 
-        return [(self.output_route, results)]
+            if route not in routed_batches:
+                routed_batches[route] = []
+
+            routed_batches[route].append({
+                "from_bank": from_bank,
+                "from_account": from_account,
+                "to_bank": to_bank,
+                "to_account": to_account,
+                "count": size
+            })
+
+        return [(route, b) for route, b in routed_batches.items()]
     
     def get_eof_routes(self) -> List[str]:
-        return [self.output_route]
+        return [f"{self.base_route}_{i}" for i in range(self.shard_amount)]
     
 
 class AccountStrategy(GroupStrategy):

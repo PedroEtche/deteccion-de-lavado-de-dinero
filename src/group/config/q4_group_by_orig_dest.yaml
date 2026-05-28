@@ -1,7 +1,11 @@
 mom_host: rabbitmq
 
-input_queue: transactions_queue
+input_queue: q4_merged_with_self_queue
 
-output_queue: queue
+output_exchange: groupby_orig_dest_route
 
-strategy: AccountPairCount
+strategy:
+  type: AccountPairCount
+  params:
+    base_routing_key: groupby_orig_dest_route
+    shard_amount: 1

@@ -84,14 +84,14 @@ class AccountPairCountStategy(AggregatorStrategy):
 
     def _build_results(self, counts: Dict[tuple, int]) -> List[Any]:
         results = []
-        for (from_bank, from_account, to_bank, to_account), size in counts.items():
+        for (from_bank, from_account, to_bank, to_account), count in counts.items():
             results.append(
                 {
                     "from_bank": from_bank,
                     "from_account": from_account,
                     "to_bank": to_bank,
                     "to_account": to_account,
-                    "size": size,
+                    "count": count,
                 }
             )
 

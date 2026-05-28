@@ -77,22 +77,6 @@ services:
     environment:
     - SHARD_ID=0
 
-  # q4_filter_by_orig_dest_0:
-  #   build:
-  #     context: .
-  #     dockerfile: src/filter/Dockerfile
-  #   container_name: q4_filter_by_orig_dest
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   volumes:
-  #   - ./src/filter/config/q4_filter_by_orig_dest_config.yaml:/app/config.yaml:ro
-  #   environment:
-  #   - PYTHONUNBUFFERED=1
-  #   - MOM_HOST=rabbitmq
-  #   - INPUT_QUEUE=result_queue
-  #   - OUTPUT_QUEUE=result_queue
-
   q4_group_by_orig_dest_0:
     build:
       context: .
@@ -101,41 +85,8 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
-    environment:
-    - PYTHONUNBUFFERED=1
-    - MOM_HOST=rabbitmq
-    - INPUT_QUEUE=result_queue
-    - OUTPUT_QUEUE=result_queue
-
-  q4_filter_by_count_0:
-    build:
-      context: .
-      dockerfile: src/filter/Dockerfile
-    container_name: q4_filter_by_count_0
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
     volumes:
-    - ./src/filter/config/q4_count_less_than_5.yaml:/app/config.yaml:ro
-    environment:
-    - PYTHONUNBUFFERED=1
-    - MOM_HOST=rabbitmq
-    - INPUT_QUEUE=result_queue
-    - OUTPUT_QUEUE=result_queue
-
-  q4_group_by_account:
-    build:
-      context: .
-      dockerfile: src/group/Dockerfile
-    container_name: q4_group_by_account
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    environment:
-    - PYTHONUNBUFFERED=1
-    - MOM_HOST=rabbitmq
-    - INPUT_QUEUE=result_queue
-    - OUTPUT_QUEUE=result_queue
+    - ./src/group/config/q4_group_by_orig_dest.yaml:/app/config.yaml:ro
 
   client_0:
     build:

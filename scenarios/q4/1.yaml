@@ -53,6 +53,17 @@ services:
     volumes:
     - ./src/filter/config/date_multiplex_config.yaml:/app/config.yaml:ro
 
+  q4_selfmerge_route_group_0:
+    build:
+      context: .
+      dockerfile: src/group/Dockerfile
+    container_name: q4_selfmerge_route_group_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/group/config/q4_selfmerge_route.yaml:/app/config.yaml:ro
+
   # q4_merge_with_self_0:
   #   build:
   #     context: .

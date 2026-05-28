@@ -22,6 +22,8 @@ from .strategies import (
     GroupStrategy,
     NoStrategy,
     PaymentFormatAverageStrategy,
+    AccountStrategy,
+    MergeRoutingStrategy,
 )
 
 CONFIG_PATH = "./config.yaml"
@@ -37,17 +39,23 @@ class GroupConfig:
     expected_eofs: int
     strategy: GroupStrategy
 
+def _parse_strategy_config(raw_strategy: str) -> GroupStrategy:
+    strategy_type = raw_strategy.get("type", "noop")
+    params = raw_strategy.get("params", {})
 
-def _parse_strategy_config(
-    strategy_type: str, base_routing_key: str, total_aggregators: int
-) -> GroupStrategy:
     if strategy_type == "BankMaxAmount":
-        return BankMaxAmountStrategy(base_routing_key)
+        return BankMaxAmountStrategy(params["base_routing_key"], params["shard_amount"])
+
     if strategy_type == "PaymentFormatAverage":
-        return PaymentFormatAverageStrategy(base_routing_key, total_aggregators)
+        return PaymentFormatAverageStrategy(params["base_routing_key"], params["shard_amount"])
+    
     if strategy_type == "AccountPairCount":
-        return AccountPairCountStategy(base_routing_key)
-    return NoStrategy(base_routing_key)
+        return AccountPairCountStategy(params["base_routing_key"], params["shard_amount"])
+    
+    if strategy_type == "MergeRouting":
+        return MergeRoutingStrategy(params["base_routing_key"], params["shard_amount"])
+
+    return NoStrategy(params["base_routing_key"])
 
 
 def _load_file_config() -> Dict[str, Any]:
@@ -61,11 +69,7 @@ def _load_file_config() -> Dict[str, Any]:
 
 def init_config() -> GroupConfig:
     file_config = _load_file_config()
-    raw_strategy = os.getenv("STRATEGY", file_config.get("strategy", "NoStrategy"))
-    total_aggregators = int(
-        os.getenv("TOTAL_AGGREGATORS", file_config.get("total_aggregators", "1"))
-    )
-    base_routing_key = os.getenv("BASE_ROUTING_KEY", file_config.get("base_routing_key", ""))
+    raw_strategy = file_config.get("strategy", "NoStrategy")
 
     return GroupConfig(
         mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
@@ -74,7 +78,7 @@ def init_config() -> GroupConfig:
         log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
         eof_fanout=os.getenv("EOF_FANOUT", file_config.get("eof_fanout", "")),
         expected_eofs=int(os.getenv("EXPECTED_EOFS", file_config.get("expected_eofs", "1"))),
-        strategy=_parse_strategy_config(raw_strategy, base_routing_key, total_aggregators),
+        strategy=_parse_strategy_config(raw_strategy),
     )
 
 

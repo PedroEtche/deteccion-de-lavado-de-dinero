@@ -141,6 +141,7 @@ class GroupService:
     def _on_input(self, message, ack, _nack):
         decoded = deserialize(message)
         client = decoded["client"]
+        
         if decoded["type"] == "eof":
             logging.info("Received EOF from upstream for client %s", client)
             self.coord.broadcast(client)

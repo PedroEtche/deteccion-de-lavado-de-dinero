@@ -2,6 +2,8 @@ mom_host: rabbitmq
 
 input_exchange: groupby_orig_dest_route
 
+input_queue: groupby_orig_dest_route_0
+
 output_queue: aggregator_count_pairs_queue
 
 base_routing_key: groupby_orig_dest_route

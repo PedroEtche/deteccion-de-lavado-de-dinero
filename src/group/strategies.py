@@ -123,8 +123,9 @@ class AccountPairCountStategy(GroupStrategy):
 
     def group_and_route(self, batch: List[Any]) -> List[Tuple[str, List[Any]]]:
         counts = {}
+
         for tx in batch:
-            key = (tx.from_bank, tx.from_account, tx.to_bank, tx.to_account)
+            key = (tx["from_bank"], tx["from_account"], tx["to_bank"], tx["to_account"])
             counts[key] = counts.get(key, 0) + 1
 
         routed_batches = {}
@@ -179,7 +180,7 @@ class AccountStrategy(GroupStrategy):
         return [(route, b) for route, b in routed_batches.items()]
     
     def get_eof_routes(self) -> List[str]:
-        return [f"{self.base_route}_{i}" for i in range(self.total_aggregators)]
+        return [f"{self.base_route}_{i}" for i in range(self.shard_amount)]
 
 
 class MergeRoutingStrategy(GroupStrategy):

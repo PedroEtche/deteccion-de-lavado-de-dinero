@@ -41,9 +41,6 @@ services:
         condition: service_healthy
     volumes:
     - ./src/filter/config/usd_config.yaml:/app/config.yaml:ro
-    environment:
-    - EOF_FANOUT=filter_by_usd_eof
-    - EXPECTED_EOFS=1
 
   q4_filter_by_datetime_0:
     build:
@@ -55,9 +52,6 @@ services:
         condition: service_healthy
     volumes:
     - ./src/filter/config/date_multiplex_config.yaml:/app/config.yaml:ro
-    environment:
-    - EOF_FANOUT=filter_by_datetime_eof
-    - EXPECTED_EOFS=1
 
   q4_selfmerge_route_group_0:
     build:
@@ -69,9 +63,6 @@ services:
         condition: service_healthy
     volumes:
     - ./src/group/config/q4_selfmerge_route.yaml:/app/config.yaml:ro
-    environment:
-    - EOF_FANOUT=selfmerge_route_eof
-    - EXPECTED_EOFS=1
 
   q4_merge_with_self_0:
     build:
@@ -85,8 +76,6 @@ services:
     - ./src/joiner/config/q4_merge_with_self.yaml:/app/config.yaml:ro
     environment:
     - SHARD_ID=0
-    - EOF_FANOUT=selfmerge_eof
-    - EXPECTED_EOFS=1
 
   q4_group_by_orig_dest_0:
     build:
@@ -98,9 +87,6 @@ services:
         condition: service_healthy
     volumes:
     - ./src/group/config/q4_group_by_orig_dest.yaml:/app/config.yaml:ro
-    environment:
-    - EOF_FANOUT=group_by_orig_dest_eof
-    - EXPECTED_EOFS=1
 
   q4_aggregator_count_pairs_0:
     build:
@@ -114,8 +100,6 @@ services:
     - ./src/aggregator/config/q4_aggregator_count_pairs.yaml:/app/config.yaml:ro
     environment:
     - SHARD_ID=0
-    - EOF_FANOUT=aggregator_count_pairs_eof
-    - EXPECTED_EOFS=1
 
   q4_filter_by_count_0:
     build:
@@ -127,9 +111,6 @@ services:
         condition: service_healthy
     volumes:
     - ./src/filter/config/q4_count_more_than_5.yaml:/app/config.yaml:ro
-    environment:
-    - EOF_FANOUT=filter_by_count_eof
-    - EXPECTED_EOFS=1
 
   q4_group_by_account_0:
     build:
@@ -141,9 +122,6 @@ services:
         condition: service_healthy
     volumes:
     - ./src/group/config/q4_group_by_account.yaml:/app/config.yaml:ro
-    environment:
-    - EOF_FANOUT=group_by_account_eof
-    - EXPECTED_EOFS=1
 
   q4_aggregator_accounts_0:
     build:
@@ -157,8 +135,6 @@ services:
     - ./src/aggregator/config/q4_aggregator_accounts.yaml:/app/config.yaml:ro
     environment:
     - SHARD_ID=0
-    - EOF_FANOUT=aggregator_accounts_eof
-    - EXPECTED_EOFS=1
 
   client_0:
     build:
@@ -169,11 +145,9 @@ services:
     - gateway
     volumes:
     - ./data/LI-Small_Trans.csv:/data/dataset.csv:ro
-    - ./data/accounts.csv:/data/accounts.csv:ro
     environment:
     - PYTHONUNBUFFERED=1
     - SERVER_HOST=gateway
     - SERVER_PORT=5678
-    - TRANSACTIONS_DATASET_PATH=/data/dataset.csv
-    - ACCOUNTS_DATASET_PATH=/data/accounts.csv
+    - DATASET_PATH=/data/dataset.csv
     - BATCH_SIZE=500

@@ -30,7 +30,7 @@ CONFIG_PATH = "./config.yaml"
 @dataclass
 class AggregatorConfig:
     mom_host: str
-    input_exchange: str
+    input_queue: str
     shard_id: str
     base_routing_key: str
     output_queue: str
@@ -75,14 +75,11 @@ def init_config() -> AggregatorConfig:
     file_config = _load_file_config()
     raw_strategy = os.getenv("STRATEGY", file_config.get("strategy", "NoStrategy"))
 
-    input_exchange = os.getenv(
-        "INPUT_EXCHANGE",
-        file_config.get("input_exchange", ""),
-    ) or None
+    input_exchange = os.getenv("INPUT_EXCHANGE", file_config.get("input_exchange", ""))
 
     return AggregatorConfig(
         mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
-        input_exchange=os.getenv("INPUT_EXCHANGE", file_config.get("input_exchange", "")),
+        input_queue=os.getenv("INPUT_QUEUE", file_config.get("input_queue", "")), # <--- ADD THIS LINE
         shard_id=os.getenv("SHARD_ID", file_config.get("shard_id", "")),
         base_routing_key=os.getenv("BASE_ROUTING_KEY", file_config.get("base_routing_key", "")),
         output_queue=os.getenv("OUTPUT_QUEUE", file_config.get("output_queue", "")),
@@ -90,7 +87,7 @@ def init_config() -> AggregatorConfig:
         eof_fanout=os.getenv("EOF_FANOUT", file_config.get("eof_fanout", "")),
         expected_eofs=int(os.getenv("EXPECTED_EOFS", file_config.get("expected_eofs", "1"))),
         strategy=_parse_strategy_config(raw_strategy),
-        input_exchange=input_exchange,
+        input_exchange=input_exchange if input_exchange else None,
     )
 
 
@@ -135,7 +132,7 @@ class AggregatorService:
     def start(self) -> None:
         self.coord.start()
         self._running = True
-        self.input_exchange.start_consuming(self._on_input)
+        self.input_queue.start_consuming(self._on_input)
 
     def stop(self) -> None:
         logging.info("Stopping aggregator service")
@@ -155,6 +152,7 @@ class AggregatorService:
 
     def _on_input(self, message, ack, _nack):
         decoded = deserialize(message)
+        logging.info("Received message of type %s for client %s", decoded["type"], decoded["client"])
         client = decoded["client"]
         if decoded["type"] == "eof":
             logging.info("Received EOF from upstream for client %s", client)

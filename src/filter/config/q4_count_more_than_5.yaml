@@ -4,9 +4,11 @@ input_queue: aggregator_count_pairs_queue
 
 output_queue: q4_filtered_count
 
+output_message_type: batch
+
 strategy:
   type: field_greater_than
   params:
-    threshold: 0
+    threshold: 5
     output_queue: q4_filtered_count
     field_name: count

@@ -14,12 +14,11 @@ import yaml
 from src.common.middleware import (MessageMiddlewareQueueRabbitMQ, MessageMiddlewareExchangeRabbitMQ)
 from src.communication.protocols.queue_protocol.internal import (
     TransactionRow,
+    build_batch_message,
     build_eof_message,
-    build_raw_transactions_message,
     deserialize,
     serialize,
 )
-
 from .strategies import (
     FieldLessThanStrategy,
     CurrencyStrategy,
@@ -48,6 +47,7 @@ class FilterConfig:
     log_level: str
     strategy: FilterStrategy
     projection_fields: Optional[List[str]] = None
+    output_message_type: str = "raw_transactions"
     control_queue: Optional[str] = None
 
 
@@ -159,6 +159,7 @@ def init_config() -> FilterConfig:
         log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
         strategy=_parse_strategy_config(raw_strategy, output_queues),
         projection_fields=_parse_projection_config(raw_projection),
+        output_message_type=os.getenv("OUTPUT_MESSAGE_TYPE", file_config.get("output_message_type", "raw_transactions")),
         control_queue=control_queue,
     )
 
@@ -181,6 +182,7 @@ def process_message(
     message_bytes: bytes,
     strategy: FilterStrategy,
     projection_fields: Optional[List[str]],
+    output_message_type: str,
 ) -> Optional[Dict[str, bytes]]:
     decoded = deserialize(message_bytes)
 
@@ -198,11 +200,13 @@ def process_message(
         if not rows:
             continue
 
-        new_msg = build_raw_transactions_message(
-            client=decoded["client"],
-            msg_id=str(uuid.uuid4()),
-            batch=rows,
+        new_msg = build_batch_message(
+                message_type=output_message_type,
+                client=decoded["client"],
+                msg_id=str(uuid.uuid4()),
+                batch=rows,
         )
+
         logging.info("Filtered batch for queue %s", queue_name)
         result[queue_name] = serialize(new_msg)
 
@@ -220,6 +224,7 @@ class FilterService:
         self._control_middleware: Optional[MessageMiddlewareQueueRabbitMQ] = None
         self._output_middleware: Dict[str, Any] = {}
         self._running = False
+        self.output_message_type = config.output_message_type
         # Disk buffer for HistoricalAverageFilterStrategy: messages that arrive
         # before the historical averages are ready are spilled to temp files so
         # memory is not exhausted on large datasets.

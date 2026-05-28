@@ -1,0 +1,11 @@
+mom_host: rabbitmq
+
+input_queue: transactions_queue
+
+output_queue: gateway_queue
+
+strategy:
+  type: accounts
+  params:
+    left: From Bank
+    right: Bank ID

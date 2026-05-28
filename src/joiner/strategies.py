@@ -26,15 +26,16 @@ class NoStrategy(JoinerStrategy):
     def __str__(self) -> str:
         return "NoStrategy"
 
-    def joiner_batch(self, batch: Any, ):
+    def joiner_batch(self, batch: List[Any], client_id: str):
         return batch
+
 
 class AccountsStrategy(JoinerStrategy):
     def __init__(self) -> None:
         self.data = {}
 
     def __str__(self) -> str:
-        return f"AccountsStrategy(left=From Bank right=Bank ID)"
+        return "AccountsStrategy(left=From Bank right=Bank ID)"
 
     def joiner_batch(self, batch: List[Any], client_id: str):
         msg_type = batch.get("type")

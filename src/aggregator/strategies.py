@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
 import logging
+from typing import Any, Dict, List, Optional, Set
 
 class AggregatorStrategy(ABC):
     """Abstract strategy for aggregating batches of messages."""
@@ -17,6 +17,10 @@ class AggregatorStrategy(ABC):
     def get_result_for_client(self, client: str) -> List[Any]:
         raise NotImplementedError()
 
+    @abstractmethod
+    def clear_client_state(self, client: str) -> None:
+        raise NotImplementedError()
+
 
 class NoStrategy(AggregatorStrategy):
     """A strategy that returns the input batch unchanged."""
@@ -30,12 +34,16 @@ class NoStrategy(AggregatorStrategy):
     def get_result_for_client(self, client: str) -> List[Any]:
         return []
 
+    def clear_client_state(self, client: str) -> None:
+        pass
+
+
 class BankMaxAmountStrategy(AggregatorStrategy):
     def __init__(self):
         self.max_per_bank_by_client: Dict[str, Dict[str, Dict[str, Any]]] = {}
 
     def __str__(self) -> str:
-        return f"BankMaxAmountStrategy"
+        return "BankMaxAmountStrategy"
 
     def aggregate_batch(self, batch: List[Any], client: Optional[str] = None) -> List[Any]:
         if client is None:
@@ -54,17 +62,21 @@ class BankMaxAmountStrategy(AggregatorStrategy):
                     "amount_paid": amount,
                 }
 
-        return list(current_max_per_bank.values())
+        return []
 
     def get_result_for_client(self, client: str) -> List[Any]:
-        return list(self.max_per_bank_by_client.pop(client, {}).values())
+        return list(self.max_per_bank_by_client.get(client, {}).values())
+
+    def clear_client_state(self, client: str) -> None:
+        self.max_per_bank_by_client.pop(client, None)
+
 
 class AccountPairCountStategy(AggregatorStrategy):
     def __init__(self):
         self.counts_by_client: Dict[str, Dict[tuple, int]] = {}
 
     def __str__(self) -> str:
-        return f"AccountPairCountStategy()"
+        return "AccountPairCountStategy"
 
     def aggregate_batch(self, batch: List[Any], client: Optional[str] = None) -> List[Any]:
         if client is None:
@@ -78,30 +90,52 @@ class AccountPairCountStategy(AggregatorStrategy):
         return self._build_results(counts)
 
     def get_result_for_client(self, client: str) -> List[Any]:
-        counts = self.counts_by_client.pop(client, {})
+        counts = self.counts_by_client.get(client, {})
         return self._build_results(counts)
+
+    def clear_client_state(self, client: str) -> None:
+        self.counts_by_client.pop(client, None)
 
     def _build_results(self, counts: Dict[tuple, int]) -> List[Any]:
         results = []
-        for (from_bank, from_account, to_bank, to_account), size in counts.items():
+        for (from_bank, from_account, to_bank, to_account), count in counts.items():
             results.append(
                 {
                     "from_bank": from_bank,
                     "from_account": from_account,
                     "to_bank": to_bank,
                     "to_account": to_account,
-                    "size": size,
+                    "count": count,
                 }
             )
-
         return results
         
+class CountStrategy(AggregatorStrategy):
+    """Counts rows per client; emits [{"count": N}] on flush."""
+
+    def __init__(self) -> None:
+        self._counts: Dict[str, int] = {}
+
+    def __str__(self) -> str:
+        return "CountStrategy"
+
+    def aggregate_batch(self, batch: List[Any], client: Optional[str] = None) -> List[Any]:
+        if client is None:
+            raise ValueError("client is required for CountStrategy")
+        self._counts[client] = self._counts.get(client, 0) + len(batch)
+        return []
+
+    def get_result_for_client(self, client: str) -> List[Any]:
+        count = self._counts.pop(client, 0)
+        return [{"count": count}]
+
+
 class PaymentFormatAverageStrategy(AggregatorStrategy):
     def __init__(self):
         self.stats_by_client: Dict[str, Dict[str, Dict[str, Any]]] = {}
 
     def __str__(self) -> str:
-        return f"PaymentFormatAverageStrategy()"
+        return "PaymentFormatAverageStrategy"
 
     def aggregate_batch(self, batch: List[Any], client: Optional[str] = None) -> List[Any]:
         if client is None:
@@ -123,8 +157,7 @@ class PaymentFormatAverageStrategy(AggregatorStrategy):
         return []
     
     def get_result_for_client(self, client: str) -> List[Any]:
-        # Pop the state to calculate the final results and clear memory for this client
-        stats = self.stats_by_client.pop(client, {})
+        stats = self.stats_by_client.get(client, {})
 
         results = []
         for fmt, stat in stats.items():
@@ -137,3 +170,42 @@ class PaymentFormatAverageStrategy(AggregatorStrategy):
             })
 
         return results
+
+    def clear_client_state(self, client: str) -> None:
+        self.stats_by_client.pop(client, None)
+    
+
+class AccountStrategy(AggregatorStrategy):
+    def __init__(self):
+        self.accounts_by_client: Dict[str, Set[tuple]] = {}
+
+    def __str__(self) -> str:
+        return "AccountStrategy"
+
+    def aggregate_batch(self, batch: List[Any], client: str) -> List[Any]:
+        if client not in self.accounts_by_client:
+            self.accounts_by_client[client] = set()
+
+        client_accounts = self.accounts_by_client[client]
+
+        for record in batch:
+            account_tuple = (record["bank"], record["account"])
+            client_accounts.add(account_tuple)
+
+        return client_accounts
+    
+    def get_result_for_client(self, client: str) -> List[Dict[str, str]]:
+        if client not in self.accounts_by_client:
+            return []
+
+        final_accounts = []
+        for bank, account in self.accounts_by_client.get(client, set()):
+            final_accounts.append({
+                "bank": bank,
+                "account": account
+            })
+            
+        return final_accounts
+
+    def clear_client_state(self, client: str) -> None:
+        self.accounts_by_client.pop(client, None)

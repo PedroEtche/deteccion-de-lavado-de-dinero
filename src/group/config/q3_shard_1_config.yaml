@@ -4,8 +4,9 @@ input_queue: "queue_9/1-9/5_shard_1"
 output_exchange: q3_aggregate_exchange
 eof_fanout: q3_group_eof_1
 expected_eofs: 1
-base_routing_key: aggregate_route
-total_aggregators: 3
 
 strategy:
   type: PaymentFormatAverage
+  params:
+    base_routing_key: aggregate_route
+    shard_amount: 3

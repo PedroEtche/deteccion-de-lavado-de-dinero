@@ -1,9 +1,11 @@
-from typing import Any, List, Dict, Optional
+from typing import Any, List, Dict, Optional, Set
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 import hashlib
+
+_TIMESTAMP_FMT = "%Y/%m/%d %H:%M"
 
 class FilterStrategy(ABC):
     """Abstract strategy for filtering batches of messages.
@@ -51,19 +53,47 @@ class CurrencyStrategy(FilterStrategy):
         return {self.output_queue: filtered}
 
 
-class AmountLessThanStrategy(FilterStrategy):
-    def __init__(self, output_queue: str, threshold: float) -> None:
+class FieldLessThanStrategy(FilterStrategy):
+    def __init__(self, output_queue: str, field_name: str, threshold: float) -> None:
         self.output_queue = output_queue
+        self.field_name = field_name
         self.threshold = threshold
+
 
     def __str__(self) -> str:
         return f"AmountLessThanStrategy(threshold={self.threshold}, output_queue={self.output_queue})"
 
     def filter_batch(self, batch: List[Any]) -> Dict[str, List[Any]]:
-        filtered = [
-            row for row in batch
-            if row.amount_paid is not None and row.amount_paid < self.threshold
-        ]
+        filtered = []
+
+        for row in batch:
+            value = getattr(row, self.field_name, None)
+            
+            if value is not None and value < self.threshold:
+                filtered.append(row)
+
+        if not filtered:
+            return {}
+
+        return { self.output_queue: filtered }
+    
+class FieldGreaterThanStrategy(FilterStrategy):
+    def __init__(self, output_queue: str, field_name: str, threshold: float) -> None:
+        self.output_queue = output_queue
+        self.field_name = field_name
+        self.threshold = threshold
+
+    def __str__(self) -> str:
+        return f"FieldGreaterThanStrategy(field={self.field_name}, threshold={self.threshold}, output_queue={self.output_queue})"
+
+    def filter_batch(self, batch: List[Any]) -> Dict[str, List[Any]]:
+        filtered = []
+
+        for row in batch:
+            value = getattr(row, self.field_name, None)
+            
+            if value is not None and value > self.threshold:
+                filtered.append(row)
 
         if not filtered:
             return {}
@@ -99,6 +129,21 @@ class DateRangeRoute:
         return f"{self.queue}_shard_{shard_id}"
 
 
+class PaymentFormatStrategy(FilterStrategy):
+    def __init__(self, output_queue: str, formats: List[str]) -> None:
+        self.output_queue = output_queue
+        self.formats: Set[str] = set(formats)
+
+    def __str__(self) -> str:
+        return f"PaymentFormatStrategy(formats={sorted(self.formats)}, output_queue={self.output_queue})"
+
+    def filter_batch(self, batch: List[Any]) -> Dict[str, List[Any]]:
+        filtered = [row for row in batch if row.payment_format in self.formats]
+        if not filtered:
+            return {}
+        return {self.output_queue: filtered}
+
+
 class DateStrategy(FilterStrategy):
     def __init__(self, routes: List[DateRangeRoute]) -> None:
         self.routes = routes
@@ -109,7 +154,12 @@ class DateStrategy(FilterStrategy):
     def filter_batch(self, batch: List[Any]) -> Dict[str, List[Any]]:
         routed = defaultdict(list)
         for row in batch:
-            row_date = row.date
+            if row.timestamp is None:
+                continue
+            try:
+                row_dt = datetime.strptime(row.timestamp, _TIMESTAMP_FMT)
+            except ValueError:
+                continue
             for route in self.routes:
                 if not route.matches(row_date):
                     continue
@@ -175,4 +225,19 @@ class HistoricalAverageFilterStrategy(FilterStrategy):
         if not filtered:
             return {}
 
+        return {self.output_queue: filtered}
+
+
+class OriginNotEqualDestinationStrategy(FilterStrategy):
+    def __init__(self, output_queue: str) -> None:
+        self.output_queue = output_queue
+
+    def __str__(self) -> str:
+        return f"OriginNotEqualDestinationStrategy(output_queue={self.output_queue})"
+
+    def filter_batch(self, batch: List[Any]) -> Dict[str, List[Any]]:
+        filtered = [
+            tx for tx in batch
+            if tx.from_bank != tx.to_bank or tx.from_account != tx.to_account
+        ]
         return {self.output_queue: filtered}

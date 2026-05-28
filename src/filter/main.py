@@ -21,14 +21,16 @@ from src.communication.protocols.queue_protocol.internal import (
 )
 
 from .strategies import (
-    AmountLessThanStrategy,
+    FieldLessThanStrategy,
     CurrencyStrategy,
     DateStrategy,
+    DateRangeRoute,
     FilterStrategy,
+    HistoricalAverageFilterStrategy,
     NoStrategy,
     DateRangeRoute,
+    OriginNotEqualDestinationStrategy,
     ShardConfig,
-    HistoricalAverageFilterStrategy,
 )
 
 
@@ -71,8 +73,14 @@ def _parse_strategy_config(
     if strategy_type == "currency":
         return CurrencyStrategy(default_output, params["target_currency"])
 
-    if strategy_type == "amount_less_than":
-        return AmountLessThanStrategy(default_output, float(params["threshold"]))
+    if strategy_type == "field_less_than":
+        return FieldLessThanStrategy(params["output_queue"], params["field_name"],float(params["threshold"]))
+
+    if strategy_type == "field_greater_than":
+        return FieldGreaterThanStrategy(params["output_queue"], params["field_name"], float(params["threshold"]))
+
+    if strategy_type == "payment_format":
+        return PaymentFormatStrategy(default_output, params.get("formats", []))
 
     if strategy_type == "date_routing":
         raw_routes = params.get("routes", [])
@@ -176,8 +184,8 @@ def process_message(
 ) -> Optional[Dict[str, bytes]]:
     decoded = deserialize(message_bytes)
 
-    if decoded["type"] != "raw_transactions":
-        return None
+    # if decoded["type"] != "raw_transactions":
+    #     return None
 
     batch = decoded["payload"]["batch"]
     routed_batches = strategy.filter_batch(batch)
@@ -195,7 +203,7 @@ def process_message(
             msg_id=str(uuid.uuid4()),
             batch=rows,
         )
-
+        logging.info("Filtered batch for queue %s", queue_name)
         result[queue_name] = serialize(new_msg)
 
     return result
@@ -203,10 +211,10 @@ def process_message(
 class FilterService:
     def __init__(self, config: FilterConfig) -> None:
         self.mom_host = config.mom_host
-        self.input_queue = config.input_queue
-        self.output_queues = config.output_queues
         self.strategy = config.strategy
         self.projection_fields = config.projection_fields
+        self.input_queue = config.input_queue
+        self.output_queues = config.output_queues
         self.control_queue = config.control_queue
         self._input_middleware: Optional[MessageMiddlewareQueueRabbitMQ] = None
         self._control_middleware: Optional[MessageMiddlewareQueueRabbitMQ] = None
@@ -383,6 +391,8 @@ def main() -> int:
     config = init_config()
     logging.basicConfig(level=getattr(logging, config.log_level.upper(), logging.INFO))
     log_config(config)
+    logging.getLogger("pika").setLevel(logging.WARNING)
+
     service = FilterService(config)
 
     def handle_sigterm(signum, frame):

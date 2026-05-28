@@ -1,0 +1,11 @@
+mom_host: rabbitmq
+
+input_queue: q4_filtered_count
+
+output_exchange: groupby_account_route
+
+strategy:
+  type: Account
+  params:
+    base_routing_key: groupby_account_route
+    shard_amount: 1

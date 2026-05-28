@@ -1,28 +1,30 @@
 import logging
 import os
 import signal
+import uuid
 from dataclasses import dataclass
-import threading
 from typing import Any, Dict
 
 import yaml
 
+from src.common import middleware
+from src.common.eof import EofCoordinator
 from src.communication.protocols.queue_protocol.internal import (
     build_batch_message,
+    build_eof_message,
     deserialize,
     serialize,
-    build_eof_message,
 )
 
 from .strategies import (
-    AggregatorStrategy,
-    NoStrategy,
-    BankMaxAmountStrategy,
     AccountPairCountStategy,
+    AggregatorStrategy,
+    BankMaxAmountStrategy,
+    NoStrategy,
 )
-from src.common import middleware
 
 CONFIG_PATH = "./config.yaml"
+
 
 @dataclass
 class AggregatorConfig:
@@ -30,22 +32,20 @@ class AggregatorConfig:
     input_queue: str
     output_queue: str
     log_level: str
+    eof_fanout: str
+    expected_eofs: int
     strategy: AggregatorStrategy
+
 
 def _parse_strategy_config(strategy_type: str) -> AggregatorStrategy:
     if strategy_type == "BankMaxAmount":
         return BankMaxAmountStrategy()
 
-    if strategy_type == "BankMaxAmount":
-        return BankMaxAmountStrategy()
-    
-    if strategy_type == "AccountPairCount":
-        return AccountPairCountStategy()
-
     if strategy_type == "AccountPairCount":
         return AccountPairCountStategy()
 
     return NoStrategy()
+
 
 def _load_file_config() -> Dict[str, Any]:
     try:
@@ -54,6 +54,7 @@ def _load_file_config() -> Dict[str, Any]:
             return data if isinstance(data, dict) else {}
     except FileNotFoundError:
         return {}
+
 
 def init_config() -> AggregatorConfig:
     file_config = _load_file_config()
@@ -64,61 +65,93 @@ def init_config() -> AggregatorConfig:
         input_queue=os.getenv("INPUT_QUEUE", file_config.get("input_queue", "")),
         output_queue=os.getenv("OUTPUT_QUEUE", file_config.get("output_queue", "")),
         log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
+        eof_fanout=os.getenv("EOF_FANOUT", file_config.get("eof_fanout", "")),
+        expected_eofs=int(os.getenv("EXPECTED_EOFS", file_config.get("expected_eofs", "1"))),
         strategy=_parse_strategy_config(raw_strategy),
     )
 
+
 def log_config(config: AggregatorConfig) -> None:
     logging.info(
-        "Aggregator startup with: mom_host=%s | input_queue=%s | output_queue=%s | strategy=%s",
+        "Aggregator startup with: mom_host=%s | input_queue=%s | output_queue=%s | "
+        "eof_fanout=%s | expected_eofs=%d | strategy=%s",
         config.mom_host,
         config.input_queue,
         config.output_queue,
-        config.strategy
+        config.eof_fanout,
+        config.expected_eofs,
+        config.strategy,
     )
 
+
 class AggregatorService:
+    """Stateful aggregator. Cuenta `expected_eofs` antes de flushear por cliente."""
+
     def __init__(self, config: AggregatorConfig) -> None:
-        self.mom_host = config.mom_host
-        self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(self.mom_host, config.input_queue)
-        self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(self.mom_host, config.output_queue)
+        self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(
+            config.mom_host, config.input_queue
+        )
+        self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(
+            config.mom_host, config.output_queue
+        )
         self.strategy = config.strategy
-        self.lock = threading.Lock()
-        self._running = False
+        self.coord = EofCoordinator(
+            mom_host=config.mom_host,
+            fanout_name=config.eof_fanout,
+            expected_eofs=config.expected_eofs,
+            on_flush=self._flush_client,
+        )
 
     def start(self) -> None:
-        self._running = True
-        self.input_queue.start_consuming(self.process_data_messsage)
+        self.coord.start()
+        self.input_queue.start_consuming(self._on_input)
 
     def stop(self) -> None:
         logging.info("Stopping aggregator service")
-        self._running = False
+        try:
+            self.input_queue.stop_consuming()
+        except Exception:
+            logging.exception("error stopping input consumer")
+        self.coord.stop(timeout=10)
 
-    def process_data_messsage(self, message, ack, nack):
-        message = deserialize(message)
-        with self.lock:
-            if message["type"] == "eof":
-                logging.info("Received EOF message from client %s", message["client"])
-                output_for_client = self.strategy.get_result_for_client(message["client"])
-                self.output_queue.send(serialize(
-                    build_batch_message(
-                        message_type="batch",
-                        client=message["client"],
-                        msg_id=message["msg_id"],
-                        batch=output_for_client,
-                    )
-                ))
-                eof_message = build_eof_message(
-                    client=message["client"],
-                    msg_id=message["msg_id"],
-                )
-                self.output_queue.send(serialize(eof_message))
-            else:
-                logging.info("Processing data message from client %s", message["client"])               
-                self.strategy.aggregate_batch(
-                    message["payload"]["batch"],
-                    message["client"],
-                )
+    def close(self) -> None:
+        for closeable in (self.input_queue, self.output_queue):
+            try:
+                closeable.close()
+            except Exception:
+                logging.exception("error closing middleware")
+        self.coord.close()
+
+    def _on_input(self, message, ack, _nack):
+        decoded = deserialize(message)
+        client = decoded["client"]
+        if decoded["type"] == "eof":
+            logging.info("Received EOF from upstream for client %s", client)
+            self.coord.broadcast(client)
+        else:
+            with self.coord.lock():
+                logging.debug("Processing data message for client %s", client)
+                self.strategy.aggregate_batch(decoded["payload"]["batch"], client)
         ack()
+
+    def _flush_client(self, client: str) -> None:
+        """Se invoca bajo `coord.lock()` cuando llegaron `expected_eofs` EOFs."""
+        logging.info("Flushing aggregated result for client %s", client)
+        batch = self.strategy.get_result_for_client(client)
+        self.output_queue.send(
+            serialize(
+                build_batch_message(
+                    message_type="batch",
+                    client=client,
+                    msg_id=str(uuid.uuid4()),
+                    batch=batch,
+                )
+            )
+        )
+        self.output_queue.send(
+            serialize(build_eof_message(client=client, msg_id=str(uuid.uuid4())))
+        )
+
 
 def main() -> int:
     config = init_config()
@@ -128,13 +161,16 @@ def main() -> int:
 
     service = AggregatorService(config)
 
-    def handle_sigterm(signum, frame):
+    def handle_sigterm(_signum, _frame):
         logging.info("Received SIGTERM signal")
         service.stop()
 
     signal.signal(signal.SIGTERM, handle_sigterm)
     signal.signal(signal.SIGINT, handle_sigterm)
-    service.start()
+    try:
+        service.start()
+    finally:
+        service.close()
     return 0
 
 

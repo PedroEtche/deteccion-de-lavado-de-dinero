@@ -1,29 +1,31 @@
 import logging
 import os
 import signal
+import uuid
 from dataclasses import dataclass
-import threading
-import yaml
 from typing import Any, Dict
 
+import yaml
+
+from src.common import middleware
+from src.common.eof import EofCoordinator
 from src.communication.protocols.queue_protocol.internal import (
     build_batch_message,
+    build_eof_message,
     deserialize,
     serialize,
-    build_eof_message,
 )
 
 from .strategies import (
-    GroupStrategy, 
-    NoStrategy, 
-    BankMaxAmountStrategy, 
-    PaymentFormatAverageStrategy, 
     AccountPairCountStategy,
+    BankMaxAmountStrategy,
+    GroupStrategy,
+    NoStrategy,
+    PaymentFormatAverageStrategy,
 )
 
-from src.common import middleware
-
 CONFIG_PATH = "./config.yaml"
+
 
 @dataclass
 class GroupConfig:
@@ -31,20 +33,22 @@ class GroupConfig:
     input_queue: str
     output_exchange: str
     log_level: str
+    eof_fanout: str
+    expected_eofs: int
     strategy: GroupStrategy
 
-def _parse_strategy_config(strategy_type: str, base_routing_key: str, total_aggregators: int) -> GroupStrategy:
-   
+
+def _parse_strategy_config(
+    strategy_type: str, base_routing_key: str, total_aggregators: int
+) -> GroupStrategy:
     if strategy_type == "BankMaxAmount":
         return BankMaxAmountStrategy(base_routing_key)
-
     if strategy_type == "PaymentFormatAverage":
         return PaymentFormatAverageStrategy(base_routing_key, total_aggregators)
-    
     if strategy_type == "AccountPairCount":
         return AccountPairCountStategy(base_routing_key)
-
     return NoStrategy(base_routing_key)
+
 
 def _load_file_config() -> Dict[str, Any]:
     try:
@@ -54,11 +58,13 @@ def _load_file_config() -> Dict[str, Any]:
     except FileNotFoundError:
         return {}
 
+
 def init_config() -> GroupConfig:
     file_config = _load_file_config()
     raw_strategy = os.getenv("STRATEGY", file_config.get("strategy", "NoStrategy"))
-
-    total_aggregators = int(os.getenv("TOTAL_AGGREGATORS", file_config.get("total_aggregators", "1")))
+    total_aggregators = int(
+        os.getenv("TOTAL_AGGREGATORS", file_config.get("total_aggregators", "1"))
+    )
     base_routing_key = os.getenv("BASE_ROUTING_KEY", file_config.get("base_routing_key", ""))
 
     return GroupConfig(
@@ -66,86 +72,92 @@ def init_config() -> GroupConfig:
         input_queue=os.getenv("INPUT_QUEUE", file_config.get("input_queue", "")),
         output_exchange=os.getenv("OUTPUT_EXCHANGE", file_config.get("output_exchange", "")),
         log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
+        eof_fanout=os.getenv("EOF_FANOUT", file_config.get("eof_fanout", "")),
+        expected_eofs=int(os.getenv("EXPECTED_EOFS", file_config.get("expected_eofs", "1"))),
         strategy=_parse_strategy_config(raw_strategy, base_routing_key, total_aggregators),
     )
 
+
 def log_config(config: GroupConfig) -> None:
     logging.info(
-        "Group startup with: mom_host=%s | input_queue=%s | output_exchange=%s | strategy=%s",
+        "Group startup with: mom_host=%s | input_queue=%s | output_exchange=%s | "
+        "eof_fanout=%s | expected_eofs=%d | strategy=%s",
         config.mom_host,
         config.input_queue,
         config.output_exchange,
-        config.strategy
+        config.eof_fanout,
+        config.expected_eofs,
+        config.strategy,
     )
 
+
 class GroupService:
+    """Group por batch (stateless cross-batch). Emite EOF a cada route luego de
+    contar `expected_eofs` desde upstream."""
+
     def __init__(self, config: GroupConfig) -> None:
-        self.mom_host = config.mom_host
-        self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(self.mom_host, config.input_queue)
-        
+        self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(
+            config.mom_host, config.input_queue
+        )
         self.output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            host=self.mom_host, 
-            exchange_name=config.output_exchange
+            host=config.mom_host, exchange_name=config.output_exchange
+        )
+        self.strategy = config.strategy
+        self.coord = EofCoordinator(
+            mom_host=config.mom_host,
+            fanout_name=config.eof_fanout,
+            expected_eofs=config.expected_eofs,
+            on_flush=self._flush_client,
         )
 
-        self.strategy = config.strategy
-        self.lock = threading.Lock()
-        self._running = False
-
     def start(self) -> None:
-        # eof_control_thread = threading.Thread(target=self._listen_for_eof)
-        # eof_control_thread.start()
-
-        self._running = True
-        self.input_queue.start_consuming(self.process_data_messsage)
-
-        # eof_control_thread.join()
+        self.coord.start()
+        self.input_queue.start_consuming(self._on_input)
 
     def stop(self) -> None:
         logging.info("Stopping group service")
-        self._running = False
+        try:
+            self.input_queue.stop_consuming()
+        except Exception:
+            logging.exception("error stopping input consumer")
+        self.coord.stop(timeout=10)
 
-    def _listen_for_eof(self):
-        logging.info("Starting EOF control thread")
-        # control_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-        #     MOM_HOST, SUM_CONTROL_EXCHANGE, [EOF_BROADCAST]
-        # )
+    def close(self) -> None:
+        for closeable in (self.input_queue, self.output_exchange):
+            try:
+                closeable.close()
+            except Exception:
+                logging.exception("error closing middleware")
+        self.coord.close()
 
-        # control_exchange.start_consuming(self._process_eof_message)
-
-    def process_data_messsage(self, message, ack, nack):
-        message = deserialize(message)
-        with self.lock:
-            if message["type"] == "eof":
-                logging.info("Received EOF message from client %s", message["client"])
-                eof_message = build_eof_message(
-                    client=message["client"],
-                    msg_id=message["msg_id"],
-                )
-
-                eof_routes = self.strategy.get_eof_routes()
-                logging.info("Sending EOF message to routes: %s", eof_routes)
-                for route in eof_routes:
-                    logging.info("Sending EOF message to route: %s", route)
-                    self._output_exchange.send(serialize(eof_message), routing_key=route)
-
-            else: # aca ver condicion para procesar otros mensajes
-                logging.info("Processing data message from client %s", message["client"])
-                
-                # Fetch dynamically routed grouped batches from the strategy
-                routed_batches = self.strategy.group_and_route(message["payload"]["batch"])
-                
-                for route, grouped_batch in routed_batches:
-                    batch_message = build_batch_message(
+    def _on_input(self, message, ack, _nack):
+        decoded = deserialize(message)
+        client = decoded["client"]
+        if decoded["type"] == "eof":
+            logging.info("Received EOF from upstream for client %s", client)
+            self.coord.broadcast(client)
+        else:
+            with self.coord.lock():
+                logging.debug("Processing data message for client %s", client)
+                routed = self.strategy.group_and_route(decoded["payload"]["batch"])
+                for route, grouped in routed:
+                    if not grouped:
+                        continue
+                    batch_msg = build_batch_message(
                         message_type="batch",
-                        client=message["client"],
-                        msg_id=message["msg_id"],
-                        batch=grouped_batch,
+                        client=client,
+                        msg_id=str(uuid.uuid4()),
+                        batch=grouped,
                     )
-                    logging.info("Sending grouped batch message to output queue %s: %s", route, batch_message)
-                    self._output_exchange.send(serialize(batch_message), routing_key=route)
-
+                    self.output_exchange.send(serialize(batch_msg), routing_key=route)
         ack()
+
+    def _flush_client(self, client: str) -> None:
+        """Bajo `coord.lock()`. No hay estado por cliente: solo propaga el EOF."""
+        for route in self.strategy.get_eof_routes():
+            eof_msg = build_eof_message(client=client, msg_id=str(uuid.uuid4()))
+            self.output_exchange.send(serialize(eof_msg), routing_key=route)
+
 
 def main() -> int:
     config = init_config()
@@ -155,13 +167,16 @@ def main() -> int:
 
     service = GroupService(config)
 
-    def handle_sigterm(signum, frame):
+    def handle_sigterm(_signum, _frame):
         logging.info("Received SIGTERM signal")
         service.stop()
 
     signal.signal(signal.SIGTERM, handle_sigterm)
     signal.signal(signal.SIGINT, handle_sigterm)
-    service.start()
+    try:
+        service.start()
+    finally:
+        service.close()
     return 0
 
 

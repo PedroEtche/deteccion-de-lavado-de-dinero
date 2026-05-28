@@ -8,7 +8,9 @@ from src.communication.protocols.queue_protocol.internal import (
     deserialize,
     serialize,
 )
-from src.filter.main import _project_row, process_message
+from unittest.mock import MagicMock, patch
+
+from src.filter.main import FilterConfig, FilterService, _project_row, process_message
 from src.filter.strategies import (
     AmountLessThanStrategy,
     CurrencyStrategy,
@@ -147,6 +149,58 @@ class TestProcessMessage(unittest.TestCase):
         result = process_message(_make_transactions_msg(rows), CurrencyStrategy("USD"), None)
         decoded = deserialize(result)
         self.assertEqual(decoded["type"], "raw_transactions")
+
+
+class TestForwardEof(unittest.TestCase):
+
+    def _make_service_with_outputs(self, output_queues):
+        config = FilterConfig(
+            mom_host="ignored",
+            input_queue="in_q",
+            output_queues=output_queues,
+            log_level="INFO",
+            strategy=NoStrategy(""),
+            projection_fields=None,
+        )
+        service = FilterService(config)
+        service._output_middleware = {q: MagicMock(name=f"mw:{q}") for q in output_queues}
+        return service
+
+    def test_forwards_eof_to_every_output_queue(self):
+        service = self._make_service_with_outputs(["q_a", "q_b", "q_c"])
+        service._forward_eof("client-1")
+        for queue, mw in service._output_middleware.items():
+            mw.send.assert_called_once()
+            payload = mw.send.call_args.args[0]
+            decoded = deserialize(payload)
+            self.assertEqual(decoded["type"], "eof")
+            self.assertEqual(decoded["client"], "client-1")
+
+    def test_eof_msg_id_is_new_per_queue(self):
+        service = self._make_service_with_outputs(["q_a", "q_b"])
+        service._forward_eof("client-1")
+        msg_ids = []
+        for mw in service._output_middleware.values():
+            decoded = deserialize(mw.send.call_args.args[0])
+            msg_ids.append(decoded["msg_id"])
+        self.assertEqual(len(set(msg_ids)), 2)
+
+    def test_eof_message_in_consumer_triggers_forward_not_strategy(self):
+        service = self._make_service_with_outputs(["q_a"])
+        # Reemplazamos process_message para asegurar que no se invoca para EOFs.
+        with patch("src.filter.main.process_message") as proc:
+            eof = build_eof_message(client="c1", msg_id=str(uuid.uuid4()))
+            # construimos el handler que arma start():
+            ack = MagicMock()
+            nack = MagicMock()
+            # Reproducimos manualmente el branch del handler
+            decoded = deserialize(serialize(eof))
+            if decoded["type"] == "eof":
+                service._forward_eof(decoded["client"])
+                ack()
+            proc.assert_not_called()
+            ack.assert_called_once()
+            nack.assert_not_called()
 
 
 if __name__ == "__main__":

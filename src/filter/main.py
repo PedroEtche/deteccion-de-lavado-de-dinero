@@ -11,6 +11,7 @@ import yaml
 from src.common.middleware import MessageMiddlewareQueueRabbitMQ
 from src.communication.protocols.queue_protocol.internal import (
     TransactionRow,
+    build_eof_message,
     build_raw_transactions_message,
     deserialize,
     serialize,
@@ -34,10 +35,6 @@ DATETIME_FORMAT = "%Y/%m/%d %H:%M"
 class FilterConfig:
     mom_host: str
     input_queue: str
-    # TODO multi-output queue (D3): filter_usd se reusa por Q2, Q3 y Q5, que
-    # consumen de colas distintas (q2_queue, q5_queue, date_filter_queue).
-    # Para soportar fanout, output_queue tiene que pasar a List[str] y
-    # FilterService debe publicar a todas. Por ahora single-output (Q1).
     output_queues: List[str]
     log_level: str
     strategy: FilterStrategy
@@ -139,9 +136,6 @@ def process_message(
 ) -> Optional[Dict[str, bytes]]:
     decoded = deserialize(message_bytes)
 
-    # TODO: EOF propagation: por ahora se ignora cualquier mensaje que no sea
-    # raw_transactions (incluido EOF). Esto es OK mientras downstream no
-    # necesita saber cuándo termina el stream pero tiene que resolverse a futuro.
     if decoded["type"] != "raw_transactions":
         return None
 
@@ -186,6 +180,11 @@ class FilterService:
 
         def on_message(message, ack, nack):
             try:
+                decoded = deserialize(message)
+                if decoded["type"] == "eof":
+                    self._forward_eof(decoded["client"])
+                    ack()
+                    return
                 result = process_message(message, self.strategy, self.projection_fields)
                 if result is not None:
                     for queue, message in result.items():
@@ -199,6 +198,13 @@ class FilterService:
             self._input_middleware.start_consuming(on_message)
         finally:
             self._close_middlewares()
+
+    def _forward_eof(self, client: str) -> None:
+        """Reenvía un EOF a todas las colas de salida con msg_id nuevo."""
+        for queue_name, mw in self._output_middleware.items():
+            eof = build_eof_message(client=client, msg_id=str(uuid.uuid4()))
+            logging.info("Forwarding EOF for client %s to queue %s", client, queue_name)
+            mw.send(serialize(eof))
 
     def stop(self) -> None:
         logging.info("Stopping filter service")

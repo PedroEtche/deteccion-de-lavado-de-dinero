@@ -1,29 +1,30 @@
 import logging
 import os
 import signal
+import uuid
 from dataclasses import dataclass
 from typing import Any, Dict
-import threading
 
 import yaml
 
+from src.common import middleware
+from src.common.eof import EofCoordinator
 from src.communication.protocols.queue_protocol.internal import (
     build_batch_message,
+    build_eof_message,
     deserialize,
     serialize,
-    build_eof_message,
 )
 
-from src.common import middleware
-
 from .strategies import (
-    JoinStrategy,
-    CountStrategy,
-    NoStrategy,
     BankMaxAmountStrategy,
+    CountStrategy,
+    JoinStrategy,
+    NoStrategy,
 )
 
 CONFIG_PATH = "./config.yaml"
+
 
 @dataclass
 class JoinConfig:
@@ -31,17 +32,18 @@ class JoinConfig:
     input_queue: str
     output_queue: str
     log_level: str
+    eof_fanout: str
+    expected_eofs: int
     strategy: JoinStrategy
 
-def _parse_strategy_config(strategy_type: str) -> JoinStrategy:
 
+def _parse_strategy_config(strategy_type: str) -> JoinStrategy:
     if strategy_type == "CountStrategy":
         return CountStrategy()
-    
     if strategy_type == "BankMaxAmount":
         return BankMaxAmountStrategy()
-
     return NoStrategy()
+
 
 def _load_file_config() -> Dict[str, Any]:
     try:
@@ -50,6 +52,7 @@ def _load_file_config() -> Dict[str, Any]:
             return data if isinstance(data, dict) else {}
     except FileNotFoundError:
         return {}
+
 
 def init_config() -> JoinConfig:
     file_config = _load_file_config()
@@ -60,63 +63,98 @@ def init_config() -> JoinConfig:
         input_queue=os.getenv("INPUT_QUEUE", file_config.get("input_queue", "")),
         output_queue=os.getenv("OUTPUT_QUEUE", file_config.get("output_queue", "")),
         log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
+        eof_fanout=os.getenv("EOF_FANOUT", file_config.get("eof_fanout", "")),
+        expected_eofs=int(os.getenv("EXPECTED_EOFS", file_config.get("expected_eofs", "1"))),
         strategy=_parse_strategy_config(raw_strategy),
     )
 
+
 def log_config(config: JoinConfig) -> None:
     logging.info(
-        "Join startup with: mom_host=%s | input_queue=%s | output_queue=%s | strategy=%s", 
+        "Join startup with: mom_host=%s | input_queue=%s | output_queue=%s | "
+        "eof_fanout=%s | expected_eofs=%d | strategy=%s",
         config.mom_host,
         config.input_queue,
         config.output_queue,
-        config.strategy
+        config.eof_fanout,
+        config.expected_eofs,
+        config.strategy,
     )
 
-class JoinService: 
+
+class JoinService:
+    """Single-input join. Cuenta `expected_eofs` antes de emitir el resultado.
+
+    Si en el futuro el join requiere dos inputs distintos (build/probe),
+    instanciar un segundo `EofCoordinator` con su propio fanout y combinar los
+    callbacks en un único `_emit_result` cuando ambos lados completen.
+    """
+
     def __init__(self, config: JoinConfig) -> None:
-        self.mom_host = config.mom_host
-        self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(self.mom_host, config.input_queue)
-        self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(self.mom_host, config.output_queue)
+        self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(
+            config.mom_host, config.input_queue
+        )
+        self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(
+            config.mom_host, config.output_queue
+        )
         self.strategy = config.strategy
-        self.lock = threading.Lock()
-        self._running = False
+        self.coord = EofCoordinator(
+            mom_host=config.mom_host,
+            fanout_name=config.eof_fanout,
+            expected_eofs=config.expected_eofs,
+            on_flush=self._flush_client,
+        )
 
     def start(self) -> None:
-        self._running = True
-        self.input_queue.start_consuming(self.process_data_messsage)
+        self.coord.start()
+        self.input_queue.start_consuming(self._on_input)
 
     def stop(self) -> None:
-        logging.info("Stopping Join service")
-        self._running = False
+        logging.info("Stopping join service")
+        try:
+            self.input_queue.stop_consuming()
+        except Exception:
+            logging.exception("error stopping input consumer")
+        self.coord.stop(timeout=10)
 
-    def process_data_messsage(self, message, ack, nack):
-        message = deserialize(message)
-        logging.info("Received message from client %s: %s", message["client"], message)
-        with self.lock:
-            if message["type"] == "eof":
-                logging.info("Received EOF message from client %s", message["client"])
-                batch = self.strategy.get_joined_for_client(message["client"])
-                
-                logging.info("Joined batch: %s", batch)
+    def close(self) -> None:
+        for closeable in (self.input_queue, self.output_queue):
+            try:
+                closeable.close()
+            except Exception:
+                logging.exception("error closing middleware")
+        self.coord.close()
 
-                batch_message = build_batch_message(
+    def _on_input(self, message, ack, _nack):
+        decoded = deserialize(message)
+        client = decoded["client"]
+        if decoded["type"] == "eof":
+            logging.info("Received EOF from upstream for client %s", client)
+            self.coord.broadcast(client)
+        else:
+            with self.coord.lock():
+                logging.debug("Joining batch for client %s", client)
+                self.strategy.join_batch(decoded["payload"]["batch"], client)
+        ack()
+
+    def _flush_client(self, client: str) -> None:
+        """Bajo `coord.lock()`. Emite el resultado joineado + EOF downstream."""
+        logging.info("Flushing joined result for client %s", client)
+        batch = self.strategy.get_joined_for_client(client)
+        self.output_queue.send(
+            serialize(
+                build_batch_message(
                     message_type="joined_data",
-                    client=message["client"],
-                    msg_id=message["msg_id"],
+                    client=client,
+                    msg_id=str(uuid.uuid4()),
                     batch=batch,
                 )
-                self.output_queue.send(serialize(batch_message))
+            )
+        )
+        self.output_queue.send(
+            serialize(build_eof_message(client=client, msg_id=str(uuid.uuid4())))
+        )
 
-                eof_message = build_eof_message(
-                    client=message["client"],
-                    msg_id=message["msg_id"],
-                )
-                self.output_queue.send(serialize(eof_message))
-            else:
-                logging.info("Processing data message from client %s", message["client"])               
-                self.strategy.join_batch(message["payload"]["batch"], message["client"])
-
-        ack()
 
 def main() -> int:
     config = init_config()
@@ -124,16 +162,18 @@ def main() -> int:
     log_config(config)
     logging.getLogger("pika").setLevel(logging.WARNING)
 
-    logging.debug("Initialized configuration: %s", config)
     service = JoinService(config)
 
-    def handle_sigterm(signum, frame):
+    def handle_sigterm(_signum, _frame):
         logging.info("Received SIGTERM signal")
         service.stop()
 
     signal.signal(signal.SIGTERM, handle_sigterm)
     signal.signal(signal.SIGINT, handle_sigterm)
-    service.start()
+    try:
+        service.start()
+    finally:
+        service.close()
     return 0
 
 

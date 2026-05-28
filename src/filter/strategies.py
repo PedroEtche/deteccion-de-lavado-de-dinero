@@ -163,7 +163,7 @@ class DateStrategy(FilterStrategy):
             except ValueError:
                 continue
             for route in self.routes:
-                if not route.matches(row_date):
+                if not route.matches(row_dt):
                     continue
                 queue_name = route.resolve_queue(row)
                 routed[queue_name].append(row)
@@ -203,7 +203,6 @@ class HistoricalAverageFilterStrategy(FilterStrategy):
         self.averages_by_client.pop(client, None)
 
     def filter_batch(self, batch: List[Any]) -> Dict[str, List[Any]]:
-        # Expecting the service to set this attribute before calling
         client = getattr(self, "_current_client", None)
         if client is None:
             return {}
@@ -256,9 +255,7 @@ class ScatterFilterStrategy(FilterStrategy):
         filtered = []
 
         for record in batch:
-            # The Aggregator sends dictionaries. We check the unique destination count.
             if record.get("unique_destinations", 0) > self.threshold:
-                # Unroll the stored transactions back into a flat list
                 transactions = record.get("transactions", [])
                 filtered.extend(transactions)
 

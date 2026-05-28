@@ -63,7 +63,8 @@ def _parse_strategy_config(
     params = raw_strategy.get("params", {})
     # Estrategias single-output (currency, amount_less_than, no-op) usan la
     # primera cola configurada. `date` lleva su propia tabla de routes.
-    default_output = output_queues[0] if output_queues else ""
+    # output_queues contiene tuplas (type, name); extraemos solo el nombre.
+    default_output = output_queues[0][NAME] if output_queues else ""
 
     if strategy_type == "currency":
         return CurrencyStrategy(default_output, params["target_currency"])

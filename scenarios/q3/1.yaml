@@ -28,10 +28,10 @@ services:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
     - TRANSACTIONS_QUEUE=transactions_queue
+    - ACCOUNTS_QUEUE=accounts_queue
     - INPUT_QUEUE=result_queue
     - SERVER_PORT=5678
 
-  # Filtro USD: solo transacciones en dolares
   filter_usd_0:
     build:
       context: .
@@ -46,7 +46,6 @@ services:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
 
-  # Filtro fecha: rutea 1/9-5/9 (x3 shards) y 6/9-15/9 (sin shard)
   filter_date_0:
     build:
       context: .
@@ -61,7 +60,6 @@ services:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
 
-  # Group: agrupa por (banco, cuenta, formato_pago) y rutea a aggregators
   group_q3_0:
     build:
       context: .
@@ -104,7 +102,6 @@ services:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
 
-  # Aggregators: acumulan totales por formato_pago y calculan promedio
   agg_q3_0:
     build:
       context: .
@@ -147,7 +144,6 @@ services:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
 
-  # Join: unifica los promedios de los 3 aggregators
   join_q3_0:
     build:
       context: .
@@ -162,7 +158,6 @@ services:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
 
-  # Filtro promedio historico: filtra transacciones 6/9-15/9 con monto < 1% del promedio
   filter_hist_avg_q3_0:
     build:
       context: .
@@ -177,6 +172,7 @@ services:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
 
+  # 3 clientes simultáneos - cada uno recibe su UUID y sus propios resultados
   client_0:
     build:
       context: .
@@ -185,10 +181,48 @@ services:
     depends_on:
     - gateway
     volumes:
-    - ./data/LI-Small_Trans.csv:/data/dataset.csv:ro
+    - ./data/LI-Small_Trans.csv:/data/transactions.csv:ro
+    - ./data/LI-Small_accounts.csv:/data/accounts.csv:ro
     environment:
     - PYTHONUNBUFFERED=1
     - SERVER_HOST=gateway
     - SERVER_PORT=5678
-    - DATASET_PATH=/data/dataset.csv
+    - TRANSACTIONS_DATASET_PATH=/data/transactions.csv
+    - ACCOUNTS_DATASET_PATH=/data/accounts.csv
+    - BATCH_SIZE=500
+
+  client_1:
+    build:
+      context: .
+      dockerfile: src/client/Dockerfile
+    container_name: client_1
+    depends_on:
+    - gateway
+    volumes:
+    - ./data/LI-Small_Trans.csv:/data/transactions.csv:ro
+    - ./data/LI-Small_accounts.csv:/data/accounts.csv:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - SERVER_HOST=gateway
+    - SERVER_PORT=5678
+    - TRANSACTIONS_DATASET_PATH=/data/transactions.csv
+    - ACCOUNTS_DATASET_PATH=/data/accounts.csv
+    - BATCH_SIZE=500
+
+  client_2:
+    build:
+      context: .
+      dockerfile: src/client/Dockerfile
+    container_name: client_2
+    depends_on:
+    - gateway
+    volumes:
+    - ./data/LI-Small_Trans.csv:/data/transactions.csv:ro
+    - ./data/LI-Small_accounts.csv:/data/accounts.csv:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - SERVER_HOST=gateway
+    - SERVER_PORT=5678
+    - TRANSACTIONS_DATASET_PATH=/data/transactions.csv
+    - ACCOUNTS_DATASET_PATH=/data/accounts.csv
     - BATCH_SIZE=500

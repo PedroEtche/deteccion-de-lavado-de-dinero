@@ -1,0 +1,10 @@
+mom_host: rabbitmq
+
+input_exchange: selfmerge_route
+
+base_routing_key: selfmerge_route
+
+output_queue: q4_merged_with_self_queue
+
+strategy:
+  type: self_merge

@@ -8,6 +8,7 @@ strategy:
   params:
     threshold: 50
     output_queue: result_queue
+    field_name: amount_paid
 
 projection:
   fields:

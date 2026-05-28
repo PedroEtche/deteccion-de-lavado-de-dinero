@@ -1,0 +1,12 @@
+mom_host: rabbitmq
+
+input_queue: aggregator_count_pairs_queue
+
+output_queue: q4_filtered_count
+
+strategy:
+  type: field_greater_than
+  params:
+    threshold: 0
+    output_queue: q4_filtered_count
+    field_name: count

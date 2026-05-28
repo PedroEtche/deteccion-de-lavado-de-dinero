@@ -1,8 +1,8 @@
 mom_host: rabbitmq
 
-input_queue: q3_queue
+input_queue: q4_queue
 
-output_queue: queue_6/9-15/9, queue_9/1-9/5
+output_queue: queue_6/9-15/9, queue_9/1-9/5, queue_9/1-9/6
 
 strategy:
   type: date
@@ -15,3 +15,7 @@ strategy:
       - from: "2022/09/01 00:01"
         to: "2022/09/05 23:59"
         queue: "queue_9/1-9/5"
+
+      - from: "2022/09/01 00:01"
+        to: "2022/09/06 23:59"
+        queue: "queue_9/1-9/6"

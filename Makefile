@@ -1,44 +1,5 @@
 SHELL := /bin/bash
-PWD := $(shell pwd)
 
-up:
-	COMPOSE_HTTP_TIMEOUT=300 docker compose -f docker-compose.yaml up --build --remove-orphans --detach
-	docker compose -f docker-compose.yaml logs --follow
-.PHONY: up
-
-down:
-	docker compose -f docker-compose.yaml stop -t 5
-	docker compose -f docker-compose.yaml down
-.PHONY: down
-
-logs:
-	docker compose -f docker-compose.yaml logs
-.PHONY: logs
-
-test:
-	# Procesar los datos de forma secuencial y compararlo con nuestro resultado
-.PHONY: test
-
-q1_switch:
-	@echo Escenarios de prueba:
-	@echo "1) Un cliente, set de datos LI-Small, una sola replica de cada elemento"
-	@read -p "Selecciona uno: " option;	\
-	cp ./scenarios/q1/$${option}.yaml docker-compose.yaml
-.PHONY: q1_switch
-
-q3_switch:
-	@echo Escenarios de prueba:
-	@echo "1) Un cliente, set de datos LI-Small, una sola replica de cada elemento"
-	@read -p "Selecciona uno: " option;	\
-	cp ./scenarios/q3/$${option}.yaml docker-compose.yaml
-.PHONY: q3_switch
-
-q4_switch:
-	@echo Escenarios de prueba:
-	@echo "1) Un cliente, set de datos LI-Small, una sola replica de cada elemento"
-	@read -p "Selecciona uno: " option;	\
-	cp ./scenarios/q4/$${option}.yaml docker-compose.yaml
-.PHONY: q4_switch
 # Genera un sample chico del dataset para iterar rapido. Por default toma las
 # primeras SAMPLE_ROWS filas de HI-Large_Trans.csv (head es O(filas pedidas),
 # no del archivo, asi que samplear desde Large o Small cuesta lo mismo).
@@ -67,14 +28,6 @@ sample:
 # porque los target $(SAMPLE_FILE) etc. solo se generan si NO existen.
 samples-all: sample sample-q3 sample-q4 sample-q5
 .PHONY: samples-all
-
-DEMO_COMPOSE := docker-compose.q1.yaml
-
-# Levanta el pipeline Q1 end-to-end: rabbit + gateway + filters + cliente.
-# Si data/sample.csv no existe, genera uno con `make sample` antes de buildear.
-demo: $(SAMPLE_FILE)
-	docker compose -f $(DEMO_COMPOSE) up --build --remove-orphans
-.PHONY: demo
 
 $(SAMPLE_FILE):
 	@$(MAKE) sample
@@ -126,22 +79,6 @@ sample-q4:
 
 $(SAMPLE_Q4_FILE):
 	@$(MAKE) sample-q4
-
-demo-down:
-	docker compose -f $(DEMO_COMPOSE) down -t 5
-.PHONY: demo-down
-
-DEMO_Q2_COMPOSE := docker-compose.q2.yaml
-
-# Levanta el pipeline Q2 end-to-end: rabbit + gateway + filter_usd + group +
-# aggregator + join + cliente. Requiere data/sample.csv (lo genera automaticamente).
-demo-q2: $(SAMPLE_FILE)
-	docker compose -f $(DEMO_Q2_COMPOSE) up --build --remove-orphans
-.PHONY: demo-q2
-
-demo-q2-down:
-	docker compose -f $(DEMO_Q2_COMPOSE) down -t 5
-.PHONY: demo-q2-down
 
 # ─── Demo parameters ─────────────────────────────────────────────────────────
 #
@@ -250,6 +187,102 @@ show-last:
 	echo ""; \
 	cat results/$$last/summary.txt
 .PHONY: show-last
+
+# Muestra el ultimo summary de una query especifica (q1..q5).
+#   make show-q4
+show-q1 show-q2 show-q3 show-q4 show-q5:
+	@q=$$(echo $@ | sed 's/show-//'); \
+	last=$$(ls -1t results/ 2>/dev/null | grep "_$${q}$$" | head -1); \
+	if [[ -z "$$last" ]]; then echo "No results for $$q yet."; exit 1; fi; \
+	echo "==> $$last"; echo ""; \
+	cat results/$$last/meta.txt; \
+	echo ""; \
+	cat results/$$last/summary.txt
+.PHONY: show-q1 show-q2 show-q3 show-q4 show-q5
+
+# Lista todos los servicios con sus logs en una corrida.
+#   make logs RUN=<dir>          (lista archivos + tamaños)
+#   make logs                    (lista de la ultima corrida)
+logs:
+	@dir=$(RUN); \
+	if [[ -z "$$dir" ]]; then dir=$$(ls -1t results/ 2>/dev/null | head -1); fi; \
+	if [[ -z "$$dir" ]]; then echo "No results yet."; exit 1; fi; \
+	echo "==> results/$$dir/logs/"; \
+	ls -lhS results/$$dir/logs/ | awk 'NR>1 {printf "  %-40s  %s\n", $$9, $$5}'
+.PHONY: logs
+
+# Muestra el log de un servicio especifico.
+#   make log SERVICE=q4_aggregator_count_pairs_0          (de la ultima corrida)
+#   make log RUN=<dir> SERVICE=gateway
+log:
+	@if [[ -z "$(SERVICE)" ]]; then echo "Usage: make log SERVICE=<name> [RUN=<dir>]"; exit 1; fi; \
+	dir=$(RUN); \
+	if [[ -z "$$dir" ]]; then dir=$$(ls -1t results/ 2>/dev/null | head -1); fi; \
+	if [[ -z "$$dir" ]]; then echo "No results yet."; exit 1; fi; \
+	logfile="results/$$dir/logs/$(SERVICE).log"; \
+	if [[ ! -f "$$logfile" ]]; then \
+		echo "Log not found: $$logfile"; \
+		echo ""; echo "Available services in results/$$dir/logs/:"; \
+		ls results/$$dir/logs/ | sed 's/\.log$$//' | sed 's/^/  /'; \
+		exit 1; \
+	fi; \
+	echo "==> $$logfile"; \
+	cat "$$logfile"
+.PHONY: log
+
+# Tail de las ultimas N lineas de un servicio.
+#   make tail SERVICE=gateway N=100
+tail:
+	@if [[ -z "$(SERVICE)" ]]; then echo "Usage: make tail SERVICE=<name> [RUN=<dir>] [N=50]"; exit 1; fi; \
+	dir=$(RUN); n=$${N:-50}; \
+	if [[ -z "$$dir" ]]; then dir=$$(ls -1t results/ 2>/dev/null | head -1); fi; \
+	logfile="results/$$dir/logs/$(SERVICE).log"; \
+	if [[ ! -f "$$logfile" ]]; then echo "Log not found: $$logfile"; exit 1; fi; \
+	echo "==> tail -n $$n $$logfile"; \
+	tail -n $$n "$$logfile"
+.PHONY: tail
+
+# Busca errores/excepciones/tracebacks en TODOS los logs de una corrida.
+# Muestra qué servicios fallaron y un excerpt del error.
+#   make errors                  (de la ultima corrida)
+#   make errors RUN=<dir>
+errors:
+	@dir=$(RUN); \
+	if [[ -z "$$dir" ]]; then dir=$$(ls -1t results/ 2>/dev/null | head -1); fi; \
+	if [[ -z "$$dir" ]]; then echo "No results yet."; exit 1; fi; \
+	echo "==> Buscando errores en results/$$dir/"; \
+	echo ""; \
+	exit_code=$$(grep -E '^exit_code:' results/$$dir/meta.txt 2>/dev/null | awk '{print $$2}'); \
+	echo "exit_code: $$exit_code"; \
+	echo ""; \
+	found=0; \
+	for log in results/$$dir/logs/*.log; do \
+		[[ -f "$$log" ]] || continue; \
+		errors=$$(grep -nE "Traceback|Error:|Exception:|MessageMiddleware|missed heartbeats|writer,send_failed|alarm" "$$log" 2>/dev/null | head -5); \
+		if [[ -n "$$errors" ]]; then \
+			found=1; \
+			svc=$$(basename "$$log" .log); \
+			echo "── $$svc ──"; \
+			echo "$$errors" | sed 's/^/  /'; \
+			echo ""; \
+		fi; \
+	done; \
+	if [[ "$$found" == "0" ]]; then echo "No errors found in logs."; fi
+.PHONY: errors
+
+# Lista solo las corridas que fallaron (exit != 0) en las ultimas 20.
+results-failed:
+	@if [[ ! -d results ]]; then echo "No results yet."; exit 1; fi; \
+	ls -1t results/ 2>/dev/null | head -20 | while read d; do \
+		meta="results/$$d/meta.txt"; \
+		[[ -f "$$meta" ]] || continue; \
+		ec=$$(grep -E '^exit_code:' "$$meta" | awk '{print $$2}'); \
+		if [[ "$$ec" != "0" && -n "$$ec" ]]; then \
+			dur=$$(grep -E '^duration_seconds:' "$$meta" | awk '{print $$2}'); \
+			printf "%-40s  %3ss  exit=%s\n" "$$d" "$$dur" "$$ec"; \
+		fi; \
+	done
+.PHONY: results-failed
 
 # Limpia containers/volumes de los escenarios sin tocar results/.
 run-clean:

@@ -3,7 +3,7 @@ import os
 import signal
 import uuid
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import yaml
 
@@ -21,6 +21,7 @@ from .strategies import (
     AggregatorStrategy,
     BankMaxAmountStrategy,
     NoStrategy,
+    PaymentFormatAverageStrategy,
 )
 
 CONFIG_PATH = "./config.yaml"
@@ -35,16 +36,25 @@ class AggregatorConfig:
     eof_fanout: str
     expected_eofs: int
     strategy: AggregatorStrategy
+    input_exchange: Optional[str] = None
 
 
-def _parse_strategy_config(strategy_type: str) -> AggregatorStrategy:
+def _extract_strategy_type(raw_strategy) -> str:
+    if isinstance(raw_strategy, dict):
+        return str(raw_strategy.get("type", "NoStrategy"))
+    return str(raw_strategy or "NoStrategy")
+
+
+def _parse_strategy_config(raw_strategy) -> AggregatorStrategy:
+    strategy_type = _extract_strategy_type(raw_strategy)
+
     if strategy_type == "BankMaxAmount":
         return BankMaxAmountStrategy()
 
     if strategy_type == "AccountPairCount":
         return AccountPairCountStategy()
 
-    if strategy_type in {"PaymentFormatAverage", "MergeRouting"}:
+    if strategy_type in ("PaymentFormatAverage", "MergeRouting"):
         return PaymentFormatAverageStrategy()
 
     return NoStrategy()
@@ -71,6 +81,7 @@ def init_config() -> AggregatorConfig:
         eof_fanout=os.getenv("EOF_FANOUT", file_config.get("eof_fanout", "")),
         expected_eofs=int(os.getenv("EXPECTED_EOFS", file_config.get("expected_eofs", "1"))),
         strategy=_parse_strategy_config(raw_strategy),
+        input_exchange=os.getenv("INPUT_EXCHANGE", file_config.get("input_exchange", None)),
     )
 
 
@@ -91,9 +102,17 @@ class AggregatorService:
     """Stateful aggregator. Cuenta `expected_eofs` antes de flushear por cliente."""
 
     def __init__(self, config: AggregatorConfig) -> None:
-        self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(
-            config.mom_host, config.input_queue
-        )
+        if config.input_exchange:
+            self.input_queue = middleware.MessageMiddlewareExchangeRabbitMQ(
+                config.mom_host,
+                config.input_exchange,
+                routing_keys=[config.input_queue],
+                queue_name=config.input_queue,
+            )
+        else:
+            self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(
+                config.mom_host, config.input_queue
+            )
         self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(
             config.mom_host, config.output_queue
         )

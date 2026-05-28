@@ -2,7 +2,7 @@ import logging
 import os
 import signal
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from typing import Any, Dict
 
 import yaml
@@ -43,7 +43,7 @@ def _parse_strategy_config(
 ) -> GroupStrategy:
     if strategy_type == "BankMaxAmount":
         return BankMaxAmountStrategy(base_routing_key)
-    if strategy_type == "PaymentFormatAverage":
+    if strategy_type in ("PaymentFormatAverage", "MergeRouting"):
         return PaymentFormatAverageStrategy(base_routing_key, total_aggregators)
     if strategy_type == "AccountPairCount":
         return AccountPairCountStategy(base_routing_key)
@@ -74,10 +74,20 @@ def _load_file_config() -> Dict[str, Any]:
 def init_config() -> GroupConfig:
     file_config = _load_file_config()
     raw_strategy = os.getenv("STRATEGY", file_config.get("strategy", "NoStrategy"))
+
+    strategy_type = _read_strategy_type(raw_strategy)
+    strategy_params = _read_strategy_params(raw_strategy)
+
     total_aggregators = int(
-        os.getenv("TOTAL_AGGREGATORS", file_config.get("total_aggregators", "1"))
+        os.getenv(
+            "TOTAL_AGGREGATORS",
+            file_config.get("total_aggregators", strategy_params.get("shard_amount", "1")),
+        )
     )
-    base_routing_key = os.getenv("BASE_ROUTING_KEY", file_config.get("base_routing_key", ""))
+    base_routing_key = os.getenv(
+        "BASE_ROUTING_KEY",
+        file_config.get("base_routing_key", strategy_params.get("base_routing_key", "")),
+    )
 
     return GroupConfig(
         mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
@@ -86,7 +96,7 @@ def init_config() -> GroupConfig:
         log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
         eof_fanout=os.getenv("EOF_FANOUT", file_config.get("eof_fanout", "")),
         expected_eofs=int(os.getenv("EXPECTED_EOFS", file_config.get("expected_eofs", "1"))),
-        strategy=_parse_strategy_config(raw_strategy, base_routing_key, total_aggregators),
+        strategy=_parse_strategy_config(strategy_type, base_routing_key, total_aggregators),
     )
 
 
@@ -151,7 +161,9 @@ class GroupService:
         else:
             with self.coord.lock():
                 logging.debug("Processing data message for client %s", client)
-                routed = self.strategy.group_and_route(decoded["payload"]["batch"])
+                batch = decoded["payload"]["batch"]
+                batch = [asdict(row) if hasattr(row, "__dataclass_fields__") else row for row in batch]
+                routed = self.strategy.group_and_route(batch)
                 for route, grouped in routed:
                     if not grouped:
                         continue

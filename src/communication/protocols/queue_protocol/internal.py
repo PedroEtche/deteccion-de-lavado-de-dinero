@@ -1,6 +1,9 @@
 import json
+from datetime import datetime
 from json import JSONEncoder
 from dataclasses import dataclass, asdict
+
+_TIMESTAMP_FORMATS = ("%Y/%m/%d %H:%M", "%Y/%m/%d %H:%M:%S")
 
 # Metadata about registered message types and their validation rules
 MESSAGE_TYPES = {}
@@ -79,6 +82,17 @@ class TransactionRow(Payload):
     amount_paid: float | None = None
     payment_currency: str | None = None
     payment_format: str | None = None
+
+    @property
+    def date(self) -> datetime | None:
+        if self.timestamp is None:
+            return None
+        for fmt in _TIMESTAMP_FORMATS:
+            try:
+                return datetime.strptime(self.timestamp, fmt)
+            except (ValueError, TypeError):
+                continue
+        return None
 
 class _MessageEncoder(JSONEncoder):
     def default(self, o):

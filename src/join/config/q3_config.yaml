@@ -1,10 +1,9 @@
 mom_host: rabbitmq
 
 input_queue: q3_join_queue
-
-output_queue: result_queue
-
-log_level: INFO
+output_queue: q3_averages_queue
+eof_fanout: q3_join_eof
+expected_eofs: 3
 
 strategy:
   type: JoinUnion

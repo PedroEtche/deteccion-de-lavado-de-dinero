@@ -13,7 +13,9 @@ from src.common.communication.tcp import TCPSocket
 from src.common.middleware import MessageMiddlewareQueueRabbitMQ
 from src.communication.protocols.queue_protocol.internal import (
     TransactionRow,
+    build_eof_message,
     build_raw_transactions_message,
+    deserialize,
     serialize,
 )
 
@@ -149,6 +151,12 @@ class GatewayService:
 
         def forward_to_client(message, ack, nack):
             try:
+                decoded = deserialize(message)
+                if decoded.get("type") == "eof":
+                    logging.info("Pipeline EOF received, closing client connection")
+                    forward_failed.set()
+                    ack()
+                    return
                 tcp.send_bytes(message)
                 ack()
             except Exception:
@@ -174,10 +182,9 @@ class GatewayService:
                     batch=txs,
                 )
                 self._input_mw.send(serialize(msg))
-            # Sin EOF propagation, no sabemos cuando termina el procesamiento.
-            # Mantenemos el socket abierto hasta que el cliente cierre, momento
-            # en el cual el forward_to_client falla y setea el event.
-            logging.info("Inbound EOF received; waiting for client to close the socket")
+            eof = build_eof_message(client="client-0", msg_id=str(uuid.uuid4()))
+            self._input_mw.send(serialize(eof))
+            logging.info("All transactions sent, EOF propagated to pipeline")
             forward_failed.wait()
         except ConnectionError:
             logging.info("Client disconnected during inbound")

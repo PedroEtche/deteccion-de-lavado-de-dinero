@@ -1,0 +1,21 @@
+mom_host: rabbitmq
+
+inputs:
+  - type: queue
+    name: "queue_6/9-15/9"
+
+outputs:
+  - type: queue
+    name: result_queue
+
+strategy:
+  type: historical_average
+  params:
+    output_queue: result_queue
+    control_queue: q3_averages_queue
+    threshold: 0.01
+
+projection:
+  fields:
+    - from_account
+    - amount_paid

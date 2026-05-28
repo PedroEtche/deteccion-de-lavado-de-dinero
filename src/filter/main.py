@@ -1,10 +1,11 @@
 import logging
 import os
 import signal
+import threading
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import yaml
 
@@ -90,7 +91,6 @@ def _parse_strategy_config(raw_strategy: Dict[str, Any]) -> FilterStrategy:
         return DateStrategy(routes=routes)
 
     if strategy_type == "historical_average":
-        # params: output_queue, control_queue, threshold
         out = params.get("output_queue")
         thresh = params.get("threshold", 0.01)
         return HistoricalAverageFilterStrategy(output_queue=out, threshold_multiplier=thresh)
@@ -198,14 +198,18 @@ class FilterService:
         self.output_queues = config.output_queues
         self.strategy = config.strategy
         self.projection_fields = config.projection_fields
+        self.control_queue = config.control_queue
         self._input_middleware: Optional[MessageMiddlewareQueueRabbitMQ] = None
+        self._control_middleware: Optional[MessageMiddlewareQueueRabbitMQ] = None
         self._output_middleware: Dict[str, Any] = {}
         self._running = False
+        # Buffering for HistoricalAverageFilterStrategy: data arriving before averages
+        self._pending_buffer: Dict[str, List[bytes]] = {}
+        self._pending_eofs: Set[str] = set()
 
     def start(self) -> None:
         logging.info("Starting filter service")
         self._running = True
-        #TODO: Instanciar Exchange o Queue dependiendo de los nombres que llegan del config
         self._input_middleware = MessageMiddlewareQueueRabbitMQ(self.mom_host, self.input_queue)
         for queue_data in self.output_queues:
             if queue_data[TYPE] == "exchange":
@@ -213,29 +217,96 @@ class FilterService:
             else:
                 self._output_middleware[queue_data[NAME]] = MessageMiddlewareQueueRabbitMQ(self.mom_host, queue_data[NAME])
 
-        def on_message(message, ack, nack):
-            try:
-                decoded = deserialize(message)
-                if decoded["type"] == "eof":
-                    self._forward_eof(decoded["client"])
-                    ack()
-                    return
-                result = process_message(message, self.strategy, self.projection_fields)
-                if result is not None:
-                    for queue, message in result.items():
-                        self._output_middleware[queue].send(message)
-                ack()
-            except Exception:
-                logging.exception("error processing message")
-                nack()
+        if self.control_queue and isinstance(self.strategy, HistoricalAverageFilterStrategy):
+            self._control_middleware = MessageMiddlewareQueueRabbitMQ(self.mom_host, self.control_queue)
+            control_thread = threading.Thread(
+                target=self._consume_control,
+                daemon=True,
+                name="filter-control-consumer",
+            )
+            control_thread.start()
 
         try:
-            self._input_middleware.start_consuming(on_message)
+            self._input_middleware.start_consuming(self._on_data_message)
         finally:
             self._close_middlewares()
 
+    def _consume_control(self) -> None:
+        try:
+            self._control_middleware.start_consuming(self._on_control_message)
+        except Exception:
+            logging.exception("error in control consumer thread")
+
+    def _on_control_message(self, message: bytes, ack, nack) -> None:
+        try:
+            decoded = deserialize(message)
+            client = decoded["client"]
+            msg_type = decoded.get("type")
+            if msg_type in ("joined_data", "batch") and isinstance(self.strategy, HistoricalAverageFilterStrategy):
+                batch = decoded["payload"]["batch"]
+                self.strategy.update_averages(client, batch)
+                logging.info("Averages received for client %s, scheduling buffer flush", client)
+                # Schedule flush on the main pika event loop so output middlewares
+                # are only used from a single thread.
+                if self._input_middleware is not None:
+                    self._input_middleware.connection.add_callback_threadsafe(
+                        lambda c=client: self._flush_client_buffer(c)
+                    )
+            ack()
+        except Exception:
+            logging.exception("error processing control message")
+            nack()
+
+    def _on_data_message(self, message: bytes, ack, nack) -> None:
+        try:
+            decoded = deserialize(message)
+            client = decoded["client"]
+
+            if decoded["type"] == "eof":
+                if self._averages_ready(client):
+                    self._forward_eof(client)
+                else:
+                    logging.info("Data EOF received but no averages yet for client %s, buffering", client)
+                    self._pending_eofs.add(client)
+                ack()
+                return
+
+            if isinstance(self.strategy, HistoricalAverageFilterStrategy):
+                if not self._averages_ready(client):
+                    self._pending_buffer.setdefault(client, []).append(message)
+                    ack()
+                    return
+                self.strategy._current_client = client
+
+            result = process_message(message, self.strategy, self.projection_fields)
+            if result is not None:
+                for queue, out_msg in result.items():
+                    self._output_middleware[queue].send(out_msg)
+            ack()
+        except Exception:
+            logging.exception("error processing data message")
+            nack()
+
+    def _averages_ready(self, client: str) -> bool:
+        if not isinstance(self.strategy, HistoricalAverageFilterStrategy):
+            return True
+        return bool(self.strategy.averages_by_client.get(client))
+
+    def _flush_client_buffer(self, client: str) -> None:
+        """Called in the main pika event loop via add_callback_threadsafe."""
+        self.strategy._current_client = client
+        buffered = self._pending_buffer.pop(client, [])
+        logging.info("Flushing %d buffered messages for client %s", len(buffered), client)
+        for buffered_msg in buffered:
+            result = process_message(buffered_msg, self.strategy, self.projection_fields)
+            if result is not None:
+                for queue, out_msg in result.items():
+                    self._output_middleware[queue].send(out_msg)
+        if client in self._pending_eofs:
+            self._pending_eofs.discard(client)
+            self._forward_eof(client)
+
     def _forward_eof(self, client: str) -> None:
-        """Reenvía un EOF a todas las colas de salida con msg_id nuevo."""
         for queue_name, mw in self._output_middleware.items():
             eof = build_eof_message(client=client, msg_id=str(uuid.uuid4()))
             logging.info("Forwarding EOF for client %s to queue %s", client, queue_name)
@@ -256,6 +327,12 @@ class FilterService:
                 self._input_middleware.close()
             except Exception:
                 logging.exception("error closing input middleware")
+
+        if self._control_middleware is not None:
+            try:
+                self._control_middleware.close()
+            except Exception:
+                logging.exception("error closing control middleware")
 
         for mw in self._output_middleware.values():
             try:

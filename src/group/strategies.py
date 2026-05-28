@@ -58,7 +58,8 @@ class BankMaxAmountStrategy(GroupStrategy):
         return [self.output_route]
             
 class PaymentFormatAverageStrategy(GroupStrategy):
-    """A sharded strategy that distributes data across multiple aggregators."""
+    """Shards by payment_format so each aggregator owns all transactions for its
+    formats. This guarantees each aggregator computes the correct full average."""
     def __init__(self, base_route: str, total_aggregators: int):
         self.base_route = base_route
         self.total_aggregators = total_aggregators
@@ -66,40 +67,34 @@ class PaymentFormatAverageStrategy(GroupStrategy):
     def __str__(self) -> str:
         return "PaymentFormatAverageStrategy"
 
-    def _get_shard_route(self, string_key: str) -> str:
-        hash = zlib.crc32(string_key.encode('utf-8'))
-        shard_id = hash % self.total_aggregators
+    def _get_shard_route(self, payment_format: str) -> str:
+        h = zlib.crc32(str(payment_format).encode('utf-8'))
+        shard_id = h % self.total_aggregators
         return f"{self.base_route}_{shard_id}"
 
     def group_and_route(self, batch: List[Any]) -> List[Tuple[str, List[Any]]]:
-        grouped_stats = {}
+        # Aggregate by payment_format within the batch, then route by format.
+        # Sharding by format ensures one aggregator owns all partial sums for
+        # a given format, so it can compute the correct global average.
+        grouped = {}
 
         for tx in batch:
-            bank = tx["from_bank"]
-            account = tx["from_account"]
             fmt = tx["payment_format"]
-            amount = tx["amount_paid"]
+            amount = tx["amount_paid"] or 0.0
 
-            key = (bank, account, fmt)
+            if fmt not in grouped:
+                grouped[fmt] = {"total_amount": 0.0, "tx_quantity": 0}
 
-            if key not in grouped_stats:
-                grouped_stats[key] = {"total_amount": 0.0, "tx_quantity": 0}
-
-            grouped_stats[key]["total_amount"] += amount
-            grouped_stats[key]["tx_quantity"] += 1
+            grouped[fmt]["total_amount"] += amount
+            grouped[fmt]["tx_quantity"] += 1
 
         routed_batches = {}
-        
-        for (bank, account, fmt), stats in grouped_stats.items():
-            string_key = f"{bank}_{account}_{fmt}"
-            route = self._get_shard_route(string_key)
-            
+
+        for fmt, stats in grouped.items():
+            route = self._get_shard_route(str(fmt))
             if route not in routed_batches:
                 routed_batches[route] = []
-                
             routed_batches[route].append({
-                "from_bank": bank,
-                "from_account": account,
                 "payment_format": fmt,
                 "total_amount": stats["total_amount"],
                 "tx_quantity": stats["tx_quantity"],

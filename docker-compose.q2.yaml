@@ -46,23 +46,66 @@ services:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
     - INPUT_QUEUE=transactions_queue
-    - OUTPUT_QUEUE=q1_queue
+    - OUTPUT_QUEUE=q2_queue
 
-  q1_filter_less_than_fifty_0:
+  q2_group_max_amount_0:
     build:
       context: .
-      dockerfile: src/filter/Dockerfile
-    container_name: q1_filter_less_than_fifty_0
+      dockerfile: src/group/Dockerfile
+    container_name: q2_group_max_amount_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=q2_queue
+    - OUTPUT_EXCHANGE=q2_group_output_exchange
+    - STRATEGY=BankMaxAmount
+    - BASE_ROUTING_KEY=q2_aggregator_input
+    - TOTAL_AGGREGATORS=1
+    - EOF_FANOUT=q2_group_max_amount_eof
+    - EXPECTED_EOFS=1
+
+  q2_aggregator_max_amount_0:
+    build:
+      context: .
+      dockerfile: src/aggregator/Dockerfile
+    container_name: q2_aggregator_max_amount_0
     depends_on:
       rabbitmq:
         condition: service_healthy
     volumes:
-    - ./src/filter/config/q1_amount_less_than_50_config.yaml:/app/config.yaml:ro
+    - ./src/aggregator/config/max_amount_per_bank_config.yaml:/app/config.yaml:ro
     environment:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
-    - INPUT_QUEUE=q1_queue
+    - INPUT_EXCHANGE=q2_group_output_exchange
+    - INPUT_QUEUE=q2_aggregator_input
+    - OUTPUT_QUEUE=q2_aggregator_output_queue
+    - STRATEGY=BankMaxAmount
+    - EOF_FANOUT=q2_aggregator_max_amount_eof
+    - EXPECTED_EOFS=1
+
+  q2_join_bank_max_amount_0:
+    build:
+      context: .
+      dockerfile: src/join/Dockerfile
+    container_name: q2_join_bank_max_amount_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/join/config/q2_bank_max_amount_config.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=q2_aggregator_output_queue
+    - ACCOUNTS_INPUT_QUEUE=accounts_queue
     - OUTPUT_QUEUE=result_queue
+    - STRATEGY=BankMaxAmount
+    - EOF_FANOUT=q2_join_bank_max_amount_eof
+    - EXPECTED_EOFS=1
 
   client_0:
     build:
@@ -73,7 +116,7 @@ services:
     - gateway
     volumes:
     - ./data/sample.csv:/data/transactions.csv:ro
-    - /home/matias/facultad/HI-Small_accounts.csv:/data/accounts.csv:ro
+    - ./data/accounts_sample.csv:/data/accounts.csv:ro
     environment:
     - PYTHONUNBUFFERED=1
     - SERVER_HOST=gateway

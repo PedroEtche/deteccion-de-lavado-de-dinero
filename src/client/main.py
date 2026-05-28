@@ -2,7 +2,13 @@ import logging
 import os
 import time
 
-from src.common.communication import connect, send_csv
+from src.common.communication import (
+    STREAM_ACCOUNTS,
+    STREAM_TRANSACTIONS,
+    connect,
+    send_csv,
+    send_eof,
+)
 
 
 _CONNECT_RETRY_DELAY = 1.0
@@ -23,11 +29,13 @@ def _connect_with_retry(host, port):
             time.sleep(_CONNECT_RETRY_DELAY)
 
 
-def run_client(host, port, dataset_path, batch_size):
+def run_client(host, port, accounts_path, transactions_path, batch_size):
     sock = _connect_with_retry(host, port)
     try:
-        send_csv(sock, dataset_path, batch_size)
-        logging.info("CSV sent; waiting for results")
+        send_csv(sock, accounts_path, batch_size, STREAM_ACCOUNTS)
+        send_csv(sock, transactions_path, batch_size, STREAM_TRANSACTIONS)
+        send_eof(sock)
+        logging.info("Datasets sent; waiting for results")
         result_count = 0
         while True:
             try:
@@ -46,17 +54,19 @@ def main():
 
     host = os.environ["SERVER_HOST"]
     port = int(os.environ["SERVER_PORT"])
-    dataset_path = os.environ["DATASET_PATH"]
+    accounts_path = os.environ["ACCOUNTS_DATASET_PATH"]
+    transactions_path = os.environ["TRANSACTIONS_DATASET_PATH"]
     batch_size = int(os.environ.get("BATCH_SIZE", "500"))
 
     logging.info(
-        "Client starting: host=%s port=%s dataset=%s batch_size=%s",
+        "Client starting: host=%s port=%s accounts=%s transactions=%s batch_size=%s",
         host,
         port,
-        dataset_path,
+        accounts_path,
+        transactions_path,
         batch_size,
     )
-    run_client(host, port, dataset_path, batch_size)
+    run_client(host, port, accounts_path, transactions_path, batch_size)
     logging.info("Client done")
 
 

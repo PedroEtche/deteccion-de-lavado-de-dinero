@@ -67,3 +67,18 @@ $(SAMPLE_FILE):
 demo-down:
 	docker compose -f $(DEMO_COMPOSE) down -t 5
 .PHONY: demo-down
+
+DEMO_Q2_COMPOSE := docker-compose.q2.yaml
+
+# Levanta el pipeline Q2 end-to-end: rabbit + gateway + filter_usd + group +
+# aggregator + join + cliente. Requiere data/sample.csv (lo genera automaticamente).
+# NOTA: ver "Bugs pendientes para smoke Q2" en la respuesta del bot — esta
+# pipeline tiene bugs en codigo upstream (group/aggregator) que la van a hacer
+# fallar hasta que se arreglen. Los bugs estan marcados con `TODO BUG:` en el codigo.
+demo-q2: $(SAMPLE_FILE)
+	docker compose -f $(DEMO_Q2_COMPOSE) up --build --remove-orphans
+.PHONY: demo-q2
+
+demo-q2-down:
+	docker compose -f $(DEMO_Q2_COMPOSE) down -t 5
+.PHONY: demo-q2-down

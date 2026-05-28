@@ -3,14 +3,18 @@ import uuid
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
-from src.communication.protocols.queue_protocol.internal import deserialize, serialize
+from src.communication.protocols.queue_protocol.internal import (
+    TransactionRow,
+    deserialize,
+    serialize,
+)
 from src.group.main import GroupConfig, GroupService
 from src.group.strategies import BankMaxAmountStrategy
 
 
 def _data_msg(client, batch):
     return serialize({
-        "type": "batch",
+        "type": "raw_transactions",
         "client": client,
         "msg_id": str(uuid.uuid4()),
         "payload": {"batch_size": len(batch), "batch": batch},
@@ -65,9 +69,9 @@ class GroupServiceTest(unittest.TestCase):
 
         service._on_input(
             _data_msg("c1", [
-                {"from_bank": "B1", "from_account": "a1", "amount_paid": 50.0},
-                {"from_bank": "B1", "from_account": "a2", "amount_paid": 200.0},
-                {"from_bank": "B2", "from_account": "a3", "amount_paid": 30.0},
+                TransactionRow(from_bank="B1", from_account="a1", amount_paid=50.0),
+                TransactionRow(from_bank="B1", from_account="a2", amount_paid=200.0),
+                TransactionRow(from_bank="B2", from_account="a3", amount_paid=30.0),
             ]),
             MagicMock(),
             MagicMock(),

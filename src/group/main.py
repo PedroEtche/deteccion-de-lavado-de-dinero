@@ -24,6 +24,7 @@ from .strategies import (
     PaymentFormatAverageStrategy,
     AccountStrategy,
     MergeRoutingStrategy,
+    AccountStrategy,
 )
 
 CONFIG_PATH = "./config.yaml"
@@ -54,6 +55,9 @@ def _parse_strategy_config(raw_strategy: str) -> GroupStrategy:
     
     if strategy_type == "MergeRouting":
         return MergeRoutingStrategy(params["base_routing_key"], params["shard_amount"])
+    
+    if strategy_type == "Account":
+        return AccountStrategy(params["base_routing_key"], params["shard_amount"])
 
     return NoStrategy(params["base_routing_key"])
 

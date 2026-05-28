@@ -101,6 +101,41 @@ services:
     environment:
     - SHARD_ID=0
 
+  q4_filter_by_count_0:
+    build:
+      context: .
+      dockerfile: src/filter/Dockerfile
+    container_name: q4_filter_by_count_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/filter/config/q4_count_more_than_5.yaml:/app/config.yaml:ro
+
+  q4_group_by_account_0:
+    build:
+      context: .
+      dockerfile: src/group/Dockerfile
+    container_name: q4_group_by_account_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/group/config/q4_group_by_account.yaml:/app/config.yaml:ro
+
+  q4_aggregator_accounts_0:
+    build:
+      context: .
+      dockerfile: src/aggregator/Dockerfile
+    container_name: q4_aggregator_accounts_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/aggregator/config/q4_aggregator_accounts.yaml:/app/config.yaml:ro
+    environment:
+    - SHARD_ID=0
+
   client_0:
     build:
       context: .

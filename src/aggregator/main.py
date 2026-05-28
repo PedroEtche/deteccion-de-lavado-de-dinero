@@ -21,6 +21,7 @@ from .strategies import (
     AggregatorStrategy,
     BankMaxAmountStrategy,
     NoStrategy,
+    AccountStrategy,
 )
 
 CONFIG_PATH = "./config.yaml"
@@ -49,8 +50,14 @@ def _parse_strategy_config(raw_strategy: str) -> AggregatorStrategy:
     if strategy_type == "BankMaxAmount":
         return BankMaxAmountStrategy()
 
+    if strategy_type == "BankMaxAmount":
+        return BankMaxAmountStrategy()
+    
     if strategy_type == "AccountPairCount":
         return AccountPairCountStategy()
+
+    if strategy_type == "Account":
+        return AccountStrategy()
 
     return NoStrategy()
 
@@ -156,7 +163,6 @@ class AggregatorService:
             with self.coord.lock():
                 logging.debug("Processing data message for client %s", client)
                 self.strategy.aggregate_batch(decoded["payload"]["batch"], client)
-        ack()
 
     def _flush_client(self, client: str) -> None:
         """Se invoca bajo `coord.lock()` cuando llegaron `expected_eofs` EOFs."""
@@ -172,6 +178,8 @@ class AggregatorService:
                 )
             )
         )
+        self.strategy.clear_client_state(client)
+
         self.output_queue.send(
             serialize(build_eof_message(client=client, msg_id=str(uuid.uuid4())))
         )

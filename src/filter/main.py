@@ -24,6 +24,7 @@ from .strategies import (
     FilterStrategy,
     NoStrategy,
     DateRangeRoute,
+    FieldGreaterThanStrategy,
 )
 
 
@@ -62,8 +63,11 @@ def _parse_strategy_config(
     if strategy_type == "currency":
         return CurrencyStrategy(default_output, params["target_currency"])
 
-    if strategy_type == "amount_less_than":
-        return FieldLessThanStrategy(params["output_queue"], float(params["threshold"]), params["field_name"])
+    if strategy_type == "field_less_than":
+        return FieldLessThanStrategy(params["output_queue"], params["field_name"],float(params["threshold"]))
+
+    if strategy_type == "field_greater_than":
+        return FieldGreaterThanStrategy(params["output_queue"], params["field_name"], float(params["threshold"]))
 
     if strategy_type == "date":
         raw_routes = params.get("routes", [])
@@ -143,14 +147,15 @@ def process_message(
 ) -> Optional[Dict[str, bytes]]:
     decoded = deserialize(message_bytes)
 
-    if decoded["type"] != "raw_transactions":
-        return None
+    # if decoded["type"] != "raw_transactions":
+    #     return None
 
     batch = decoded["payload"]["batch"]
     routed_batches = strategy.filter_batch(batch)
     result: Dict[str, bytes] = {}
 
     for queue_name, rows in routed_batches.items():
+        logging.info("Strategy %s routed batch of size %d to queue %s", strategy, len(rows), queue_name)
         if projection_fields:
             rows = [ _project_row(row, projection_fields) for row in rows ]
 
@@ -162,7 +167,7 @@ def process_message(
             msg_id=str(uuid.uuid4()),
             batch=rows,
         )
-
+        logging.info("Filtered batch for queue %s", queue_name)
         result[queue_name] = serialize(new_msg)
 
     return result

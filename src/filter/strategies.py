@@ -73,6 +73,29 @@ class FieldLessThanStrategy(FilterStrategy):
             return {}
 
         return { self.output_queue: filtered }
+    
+class FieldGreaterThanStrategy(FilterStrategy):
+    def __init__(self, output_queue: str, field_name: str, threshold: float) -> None:
+        self.output_queue = output_queue
+        self.field_name = field_name
+        self.threshold = threshold
+
+    def __str__(self) -> str:
+        return f"FieldGreaterThanStrategy(field={self.field_name}, threshold={self.threshold}, output_queue={self.output_queue})"
+
+    def filter_batch(self, batch: List[Any]) -> Dict[str, List[Any]]:
+        filtered = []
+
+        for row in batch:
+            value = getattr(row, self.field_name, None)
+            
+            if value is not None and value > self.threshold:
+                filtered.append(row)
+
+        if not filtered:
+            return {}
+
+        return { self.output_queue: filtered }
 
 
 @dataclass(frozen=True)

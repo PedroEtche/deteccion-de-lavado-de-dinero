@@ -1,0 +1,12 @@
+mom_host: rabbitmq
+
+input_exchange: groupby_orig_dest_route
+
+output_queue: aggregator_count_pairs_queue
+
+base_routing_key: groupby_orig_dest_route
+
+log_level: DEBUG
+
+strategy:
+  type: AccountPairCount

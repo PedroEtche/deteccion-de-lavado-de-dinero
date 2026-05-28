@@ -29,7 +29,9 @@ CONFIG_PATH = "./config.yaml"
 @dataclass
 class AggregatorConfig:
     mom_host: str
-    input_queue: str
+    input_exchange: str
+    shard_id: str
+    base_routing_key: str
     output_queue: str
     log_level: str
     eof_fanout: str
@@ -40,8 +42,10 @@ class AggregatorConfig:
     # cuando el upstream publica a un exchange direct con sharding por route.
     input_exchange: Optional[str] = None
 
+def _parse_strategy_config(raw_strategy: str) -> AggregatorStrategy:
+    strategy_type = raw_strategy.get("type", "noop")
+    # params = raw_strategy.get("params", {})
 
-def _parse_strategy_config(strategy_type: str) -> AggregatorStrategy:
     if strategy_type == "BankMaxAmount":
         return BankMaxAmountStrategy()
 
@@ -71,7 +75,9 @@ def init_config() -> AggregatorConfig:
 
     return AggregatorConfig(
         mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
-        input_queue=os.getenv("INPUT_QUEUE", file_config.get("input_queue", "")),
+        input_exchange=os.getenv("INPUT_EXCHANGE", file_config.get("input_exchange", "")),
+        shard_id=os.getenv("SHARD_ID", file_config.get("shard_id", "")),
+        base_routing_key=os.getenv("BASE_ROUTING_KEY", file_config.get("base_routing_key", "")),
         output_queue=os.getenv("OUTPUT_QUEUE", file_config.get("output_queue", "")),
         log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
         eof_fanout=os.getenv("EOF_FANOUT", file_config.get("eof_fanout", "")),
@@ -86,7 +92,7 @@ def log_config(config: AggregatorConfig) -> None:
         "Aggregator startup with: mom_host=%s | input_queue=%s | output_queue=%s | "
         "eof_fanout=%s | expected_eofs=%d | strategy=%s",
         config.mom_host,
-        config.input_queue,
+        config.input_exchange,
         config.output_queue,
         config.eof_fanout,
         config.expected_eofs,
@@ -121,7 +127,8 @@ class AggregatorService:
 
     def start(self) -> None:
         self.coord.start()
-        self.input_queue.start_consuming(self._on_input)
+        self._running = True
+        self.input_exchange.start_consuming(self.process_data_messsage)
 
     def stop(self) -> None:
         logging.info("Stopping aggregator service")

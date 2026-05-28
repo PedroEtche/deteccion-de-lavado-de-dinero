@@ -1,11 +1,13 @@
 import logging
 import os
 import signal
+import struct
+import tempfile
 import threading
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, IO, List, Optional, Set, Tuple
 
 import yaml
 
@@ -210,8 +212,10 @@ class FilterService:
         self._control_middleware: Optional[MessageMiddlewareQueueRabbitMQ] = None
         self._output_middleware: Dict[str, Any] = {}
         self._running = False
-        # Buffering for HistoricalAverageFilterStrategy: data arriving before averages
-        self._pending_buffer: Dict[str, List[bytes]] = {}
+        # Disk buffer for HistoricalAverageFilterStrategy: messages that arrive
+        # before the historical averages are ready are spilled to temp files so
+        # memory is not exhausted on large datasets.
+        self._buffer_files: Dict[str, IO[bytes]] = {}
         self._pending_eofs: Set[str] = set()
 
     def start(self) -> None:
@@ -280,7 +284,7 @@ class FilterService:
 
             if isinstance(self.strategy, HistoricalAverageFilterStrategy):
                 if not self._averages_ready(client):
-                    self._pending_buffer.setdefault(client, []).append(message)
+                    self._write_to_disk(client, message)
                     ack()
                     return
                 self.strategy._current_client = client
@@ -299,16 +303,36 @@ class FilterService:
             return True
         return bool(self.strategy.averages_by_client.get(client))
 
+    def _write_to_disk(self, client: str, message: bytes) -> None:
+        if client not in self._buffer_files:
+            self._buffer_files[client] = tempfile.TemporaryFile()
+        f = self._buffer_files[client]
+        f.write(struct.pack(">I", len(message)))
+        f.write(message)
+
     def _flush_client_buffer(self, client: str) -> None:
         """Called in the main pika event loop via add_callback_threadsafe."""
         self.strategy._current_client = client
-        buffered = self._pending_buffer.pop(client, [])
-        logging.info("Flushing %d buffered messages for client %s", len(buffered), client)
-        for buffered_msg in buffered:
-            result = process_message(buffered_msg, self.strategy, self.projection_fields)
-            if result is not None:
-                for queue, out_msg in result.items():
-                    self._output_middleware[queue].send(out_msg)
+        f = self._buffer_files.pop(client, None)
+        count = 0
+        if f is not None:
+            f.flush()
+            f.seek(0)
+            while True:
+                hdr = f.read(4)
+                if len(hdr) < 4:
+                    break
+                (length,) = struct.unpack(">I", hdr)
+                buffered_msg = f.read(length)
+                if len(buffered_msg) < length:
+                    break
+                count += 1
+                result = process_message(buffered_msg, self.strategy, self.projection_fields)
+                if result is not None:
+                    for queue, out_msg in result.items():
+                        self._output_middleware[queue].send(out_msg)
+            f.close()
+        logging.info("Flushed %d buffered messages from disk for client %s", count, client)
         if client in self._pending_eofs:
             self._pending_eofs.discard(client)
             self._forward_eof(client)
@@ -329,6 +353,13 @@ class FilterService:
                 logging.exception("error stopping consumer")
 
     def _close_middlewares(self) -> None:
+        for f in self._buffer_files.values():
+            try:
+                f.close()
+            except Exception:
+                pass
+        self._buffer_files.clear()
+
         if self._input_middleware is not None:
             try:
                 self._input_middleware.close()

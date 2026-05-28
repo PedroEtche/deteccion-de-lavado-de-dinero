@@ -1,0 +1,8 @@
+mom_host: rabbitmq
+
+strategy:
+  type: payment_format
+  params:
+    formats:
+      - Wire
+      - ACH

@@ -97,6 +97,26 @@ class AccountPairCountStategy(AggregatorStrategy):
 
         return results
         
+class CountStrategy(AggregatorStrategy):
+    """Counts rows per client; emits [{"count": N}] on flush."""
+
+    def __init__(self) -> None:
+        self._counts: Dict[str, int] = {}
+
+    def __str__(self) -> str:
+        return "CountStrategy"
+
+    def aggregate_batch(self, batch: List[Any], client: Optional[str] = None) -> List[Any]:
+        if client is None:
+            raise ValueError("client is required for CountStrategy")
+        self._counts[client] = self._counts.get(client, 0) + len(batch)
+        return []
+
+    def get_result_for_client(self, client: str) -> List[Any]:
+        count = self._counts.pop(client, 0)
+        return [{"count": count}]
+
+
 class PaymentFormatAverageStrategy(AggregatorStrategy):
     def __init__(self):
         self.stats_by_client: Dict[str, Dict[tuple, Dict[str, Any]]] = {}

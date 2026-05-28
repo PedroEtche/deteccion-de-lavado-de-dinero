@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 from src.aggregator.main import AggregatorConfig, AggregatorService
-from src.aggregator.strategies import BankMaxAmountStrategy
+from src.aggregator.strategies import BankMaxAmountStrategy, CountStrategy
 from src.communication.protocols.queue_protocol.internal import deserialize, serialize
 
 
@@ -136,6 +136,54 @@ class AggregatorServiceTest(unittest.TestCase):
         service.stop()
         service.input_queue.stop_consuming.assert_called_once()
         self.assertTrue(coord.stopped)
+
+
+class CountStrategyTest(unittest.TestCase):
+
+    def test_accumulates_count_across_batches(self):
+        strategy = CountStrategy()
+        strategy.aggregate_batch([1, 2, 3], client="c1")
+        strategy.aggregate_batch([4, 5], client="c1")
+        result = strategy.get_result_for_client("c1")
+        self.assertEqual(result, [{"count": 5}])
+
+    def test_separate_counts_per_client(self):
+        strategy = CountStrategy()
+        strategy.aggregate_batch([1, 2], client="c1")
+        strategy.aggregate_batch([1, 2, 3], client="c2")
+        self.assertEqual(strategy.get_result_for_client("c1"), [{"count": 2}])
+        self.assertEqual(strategy.get_result_for_client("c2"), [{"count": 3}])
+
+    def test_get_result_clears_state(self):
+        strategy = CountStrategy()
+        strategy.aggregate_batch([1, 2], client="c1")
+        strategy.get_result_for_client("c1")
+        # Second call should return 0 (state was cleared)
+        self.assertEqual(strategy.get_result_for_client("c1"), [{"count": 0}])
+
+    def test_empty_batch_contributes_zero(self):
+        strategy = CountStrategy()
+        strategy.aggregate_batch([], client="c1")
+        self.assertEqual(strategy.get_result_for_client("c1"), [{"count": 0}])
+
+    def test_client_required(self):
+        with self.assertRaises(ValueError):
+            CountStrategy().aggregate_batch([1], client=None)
+
+    def test_flush_sends_count_then_eof(self):
+        service, _ = _make_service(CountStrategy())
+        service.strategy.aggregate_batch([{"x": 1}, {"x": 2}], client="c1")
+
+        service._flush_client("c1")
+
+        sent = [call.args[0] for call in service.output_queue.send.call_args_list]
+        self.assertEqual(len(sent), 2)
+
+        batch_msg = deserialize(sent[0])
+        eof_msg = deserialize(sent[1])
+        self.assertEqual(batch_msg["type"], "batch")
+        self.assertEqual(batch_msg["payload"]["batch"], [{"count": 2}])
+        self.assertEqual(eof_msg["type"], "eof")
 
 
 if __name__ == "__main__":

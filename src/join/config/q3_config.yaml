@@ -1,0 +1,10 @@
+mom_host: rabbitmq
+
+input_queue: q3_join_queue
+
+output_queue: result_queue
+
+log_level: INFO
+
+strategy:
+  type: JoinUnion

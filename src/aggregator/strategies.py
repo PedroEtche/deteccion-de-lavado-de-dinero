@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from datetime import date
 from typing import Any, Dict, List, Optional
 import logging
 
@@ -99,7 +98,7 @@ class AccountPairCountStategy(AggregatorStrategy):
         
 class PaymentFormatAverageStrategy(AggregatorStrategy):
     def __init__(self):
-        self.stats_by_client: Dict[str, Dict[tuple, Dict[str, Any]]] = {}
+        self.stats_by_client: Dict[str, Dict[str, Dict[str, Any]]] = {}
 
     def __str__(self) -> str:
         return f"PaymentFormatAverageStrategy()"
@@ -110,14 +109,10 @@ class PaymentFormatAverageStrategy(AggregatorStrategy):
 
         stats = self.stats_by_client.setdefault(client, {})
         for tx in batch:
-            bank = tx["from_bank"]
-            account = tx["from_account"]
             fmt = tx["payment_format"]
-
-            partial_amount = tx["total_amount"]
-            partial_count = tx["tx_quantity"]
-
-            key = (bank, account, fmt)
+            partial_amount = tx["total_amount"] or 0.0
+            partial_count = tx["tx_quantity"] or 0
+            key = str(fmt)
 
             if key not in stats:
                 stats[key] = {"count": 0, "total": 0.0}
@@ -132,13 +127,11 @@ class PaymentFormatAverageStrategy(AggregatorStrategy):
         stats = self.stats_by_client.pop(client, {})
 
         results = []
-        for (bank, account, fmt), stat in stats.items():
+        for fmt, stat in stats.items():
             count = stat["count"]
             average = stat["total"] / count if count > 0 else 0.0
 
             results.append({
-                "from_bank": bank,
-                "from_account": account,
                 "payment_format": fmt,
                 "average_amount": average,
             })

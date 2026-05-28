@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
-from src.common.middleware import MessageMiddlewareQueueRabbitMQ
+from src.common.middleware import (MessageMiddlewareQueueRabbitMQ, MessageMiddlewareExchangeRabbitMQ)
 from src.communication.protocols.queue_protocol.internal import (
     TransactionRow,
     build_raw_transactions_message,
@@ -24,11 +24,14 @@ from .strategies import (
     NoStrategy,
     DateRangeRoute,
     ShardConfig,
+    HistoricalAverageFilterStrategy,
 )
 
 
 CONFIG_PATH = "./config.yaml"
 DATETIME_FORMAT = "%Y/%m/%d %H:%M"
+TYPE = 0
+NAME = 1
 
 
 @dataclass
@@ -43,6 +46,7 @@ class FilterConfig:
     log_level: str
     strategy: FilterStrategy
     projection_fields: Optional[List[str]] = None
+    control_queue: Optional[str] = None
 
 
 def _load_file_config() -> Dict[str, Any]:
@@ -53,37 +57,6 @@ def _load_file_config() -> Dict[str, Any]:
     except FileNotFoundError:
         return {}
 
-#
-# def _parse_strategy_config(raw_strategy: Dict[str, Any]) -> FilterStrategy:
-#     strategy_type = raw_strategy.get("type", "noop")
-#     params = raw_strategy.get("params", {})
-#
-#     if strategy_type == "currency":
-#         return CurrencyStrategy(params["output_queue"], params["target_currency"])
-#
-#     if strategy_type == "amount_less_than":
-#         return AmountLessThanStrategy(params["output_queue"], float(params["threshold"]))
-#
-#     if strategy_type == "date":
-#         raw_routes = params.get("routes", [])
-#         routes: List[DateRangeRoute] = []
-#         for raw_route in raw_routes:
-#             routes.append(
-#                 DateRangeRoute(
-#                     from_date=datetime.strptime(
-#                         raw_route["from"],
-#                         DATETIME_FORMAT,
-#                     ),
-#                     to_date=datetime.strptime(
-#                         raw_route["to"],
-#                         DATETIME_FORMAT,
-#                     ),
-#                     queue=raw_route["queue"],
-#                 )
-#             )
-#         return DateStrategy(routes=routes)
-#
-#     return NoStrategy("")
 
 def _parse_strategy_config(raw_strategy: Dict[str, Any]) -> FilterStrategy:
     strategy_type = raw_strategy.get("type", "noop")
@@ -118,6 +91,12 @@ def _parse_strategy_config(raw_strategy: Dict[str, Any]) -> FilterStrategy:
                     ),
                     queue=raw_route["output"], shard=shard_config))
         return DateStrategy(routes=routes)
+
+    if strategy_type == "historical_average":
+        # params: output_queue, control_queue, threshold
+        out = params.get("output_queue")
+        thresh = params.get("threshold", 0.01)
+        return HistoricalAverageFilterStrategy(output_queue=out, threshold_multiplier=thresh)
 
     return NoStrategy("")
 
@@ -156,6 +135,8 @@ def init_config() -> FilterConfig:
 
     if raw_inputs:
         input_queue = raw_inputs[0]["name"]
+    strategy_params = raw_strategy.get("params", {})
+    control_queue = os.getenv("CONTROL_QUEUE", strategy_params.get("control_queue", None))
 
     return FilterConfig(
         mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
@@ -164,6 +145,7 @@ def init_config() -> FilterConfig:
         log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
         strategy=_parse_strategy_config(raw_strategy),
         projection_fields=_parse_projection_config(raw_projection),
+        control_queue=control_queue,
     )
 
 def log_config(config: FilterConfig) -> None:
@@ -223,7 +205,7 @@ class FilterService:
         self.strategy = config.strategy
         self.projection_fields = config.projection_fields
         self._input_middleware: Optional[MessageMiddlewareQueueRabbitMQ] = None
-        self._output_middleware: Dict[str, MessageMiddlewareQueueRabbitMQ] = {}
+        self._output_middleware: Dict[str, Any] = {}
         self._running = False
 
     def start(self) -> None:
@@ -231,8 +213,11 @@ class FilterService:
         self._running = True
         #TODO: Instanciar Exchange o Queue dependiendo de los nombres que llegan del config
         self._input_middleware = MessageMiddlewareQueueRabbitMQ(self.mom_host, self.input_queue)
-        for queue_name in self.output_queues:
-            self._output_middleware[queue_name] = MessageMiddlewareQueueRabbitMQ(self.mom_host, queue_name)
+        for queue_data in self.output_queues:
+            if queue_data[TYPE] == "exchange":
+                self._output_middleware[queue_data[NAME]] = MessageMiddlewareExchangeRabbitMQ(self.mom_host, queue_data[NAME])
+            else:
+                self._output_middleware[queue_data[NAME]] = MessageMiddlewareQueueRabbitMQ(self.mom_host, queue_data[NAME])
 
         def on_message(message, ack, nack):
             try:

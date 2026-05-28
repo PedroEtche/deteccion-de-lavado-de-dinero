@@ -20,6 +20,7 @@ from .strategies import (
     JoinStrategy,
     CountStrategy,
     NoStrategy,
+    UnionStrategy,
     BankMaxAmountStrategy,
 )
 
@@ -35,13 +36,16 @@ class JoinConfig:
 
 def _parse_strategy_config(strategy_type: str) -> JoinStrategy:
 
+    if strategy_type in {"JoinUnion", "UnionStrategy", "Union"}:
+        return UnionStrategy()
+
     if strategy_type == "CountStrategy":
         return CountStrategy()
     
     if strategy_type == "BankMaxAmount":
         return BankMaxAmountStrategy()
 
-    return NoStrategy()
+    return UnionStrategy()
 
 def _load_file_config() -> Dict[str, Any]:
     try:
@@ -53,7 +57,7 @@ def _load_file_config() -> Dict[str, Any]:
 
 def init_config() -> JoinConfig:
     file_config = _load_file_config()
-    raw_strategy = os.getenv("STRATEGY", file_config.get("strategy", "NoStrategy"))
+    raw_strategy = os.getenv("STRATEGY", file_config.get("strategy", "JoinUnion"))
 
     return JoinConfig(
         mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),

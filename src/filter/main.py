@@ -155,7 +155,6 @@ def process_message(
     result: Dict[str, bytes] = {}
 
     for queue_name, rows in routed_batches.items():
-        logging.info("Strategy %s routed batch of size %d to queue %s", strategy, len(rows), queue_name)
         if projection_fields:
             rows = [ _project_row(row, projection_fields) for row in rows ]
 

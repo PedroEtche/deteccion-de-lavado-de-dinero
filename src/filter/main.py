@@ -208,7 +208,7 @@ def process_message(
     message_bytes: bytes,
     strategy: FilterStrategy,
     projection_fields: Optional[List[str]],
-    output_message_type: str,
+    output_message_type: str = "raw_transactions",
 ) -> Optional[Dict[str, bytes]]:
     decoded = deserialize(message_bytes)
 

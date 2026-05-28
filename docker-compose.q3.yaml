@@ -1,0 +1,196 @@
+services:
+  rabbitmq:
+    build:
+      context: ./src/rabbitmq
+      dockerfile: Dockerfile
+    container_name: rabbitmq
+    environment:
+    - RABBITMQ_LOG_LEVELS=error
+    healthcheck:
+      interval: 5s
+      retries: 10
+      start_period: 50s
+      test: rabbitmq-diagnostics check_port_connectivity
+      timeout: 3s
+    ports:
+    - 5672:5672
+    - 15672:15672
+
+  gateway:
+    build:
+      context: .
+      dockerfile: src/gateway/Dockerfile
+    container_name: gateway
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+    - TRANSACTIONS_QUEUE=transactions_queue
+    - ACCOUNTS_QUEUE=accounts_queue
+    - INPUT_QUEUE=result_queue
+    - SERVER_PORT=5678
+
+  # Stage 1: keep only USD transactions
+  filter_usd_0:
+    build:
+      context: .
+      dockerfile: src/filter/Dockerfile
+    container_name: filter_usd_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/filter/config/q3_usd_config.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+
+  # Stage 2: multiplex by date — 3-shard fan-out for [9/1-9/5], single queue for [9/6-9/15]
+  filter_date_0:
+    build:
+      context: .
+      dockerfile: src/filter/Dockerfile
+    container_name: filter_date_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/filter/config/date_multiplex_config.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+
+  # Stage 3: group partial PaymentFormat averages, sharded x3
+  group_q3_0:
+    build:
+      context: .
+      dockerfile: src/group/Dockerfile
+    container_name: group_q3_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/group/config/q3_shard_0_config.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+
+  group_q3_1:
+    build:
+      context: .
+      dockerfile: src/group/Dockerfile
+    container_name: group_q3_1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/group/config/q3_shard_1_config.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+
+  group_q3_2:
+    build:
+      context: .
+      dockerfile: src/group/Dockerfile
+    container_name: group_q3_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/group/config/q3_shard_2_config.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+
+  # Stage 4: aggregate PaymentFormat averages globally, x3 (one per shard)
+  agg_q3_0:
+    build:
+      context: .
+      dockerfile: src/aggregator/Dockerfile
+    container_name: agg_q3_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/aggregator/config/q3_shard_0_config.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+
+  agg_q3_1:
+    build:
+      context: .
+      dockerfile: src/aggregator/Dockerfile
+    container_name: agg_q3_1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/aggregator/config/q3_shard_1_config.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+
+  agg_q3_2:
+    build:
+      context: .
+      dockerfile: src/aggregator/Dockerfile
+    container_name: agg_q3_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/aggregator/config/q3_shard_2_config.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+
+  # Stage 5: union the partial averages from the 3 aggregators
+  join_q3_0:
+    build:
+      context: .
+      dockerfile: src/join/Dockerfile
+    container_name: join_q3_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/join/config/q3_config.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+
+  # Stage 6: filter [9/6-9/15] rows whose amount < threshold * historical_average
+  filter_hist_avg_q3_0:
+    build:
+      context: .
+      dockerfile: src/filter/Dockerfile
+    container_name: filter_hist_avg_q3_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/filter/config/q3_historical_avg_config.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+
+  client_0:
+    build:
+      context: .
+      dockerfile: src/client/Dockerfile
+    depends_on:
+    - gateway
+    volumes:
+    - ./data/sample_q3.csv:/data/transactions.csv:ro
+    - ./data/accounts_sample.csv:/data/accounts.csv:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - SERVER_HOST=gateway
+    - SERVER_PORT=5678
+    - TRANSACTIONS_DATASET_PATH=/data/transactions.csv
+    - ACCOUNTS_DATASET_PATH=/data/accounts.csv
+    - BATCH_SIZE=${BATCH_SIZE:-500}

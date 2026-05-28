@@ -74,6 +74,19 @@ case "${scenario}" in
         # filter + group scale freely; aggregator/join need EXPECTED_EOFS=N if scaled
         scale_args+=" --scale filter_usd_0=${workers} --scale q2_group_max_amount_0=${workers}"
         ;;
+    q3)
+        # Stateless stages: filter_usd, filter_date. Q3 groups y aggregators ya
+        # estan fijos en 3 shards (uno por payment_format mod 3); no escalan.
+        scale_args+=" --scale filter_usd_0=${workers} --scale filter_date_0=${workers}"
+        ;;
+    q4)
+        # Stateless stages: filter_usd, filter_by_datetime, filter_by_count.
+        # Los groups/aggregators/joiner son stateful sharded (shard=1) — no se
+        # escalan sin tocar EXPECTED_EOFS.
+        scale_args+=" --scale q4_filter_usd_0=${workers}"
+        scale_args+=" --scale q4_filter_by_datetime_0=${workers}"
+        scale_args+=" --scale q4_filter_by_count_0=${workers}"
+        ;;
     q5)
         scale_args+=" --scale filter_q5_date_0=${workers}"
         scale_args+=" --scale filter_q5_wire_ach_0=${workers}"

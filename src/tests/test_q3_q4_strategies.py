@@ -423,11 +423,15 @@ class AggregatorAccountPairCountTest(unittest.TestCase):
 
 class GroupAccountStrategyTest(unittest.TestCase):
 
+    # Q4 AccountStrategy en `group` consume del filter `field_greater_than`,
+    # cuyo upstream emite dicts (los pares contados por el aggregator). De ahí
+    # que esta strategy acceda con tx["from_bank"] y no .from_bank.
+
     def test_emits_each_unique_account_once_per_batch(self):
         strategy = GroupAccountStrategy("r", shard_amount=1)
         routed = strategy.group_and_route([
-            TransactionRow(from_bank="A", from_account="a1", to_bank="B", to_account="b1"),
-            TransactionRow(from_bank="A", from_account="a1", to_bank="C", to_account="c1"),
+            _tx_dict("A", "a1", "B", "b1"),
+            _tx_dict("A", "a1", "C", "c1"),
         ])
         rows = routed[0][1]
         keys = {(r["bank"], r["account"]) for r in rows}
@@ -436,12 +440,8 @@ class GroupAccountStrategyTest(unittest.TestCase):
 
     def test_same_account_always_same_shard(self):
         strategy = GroupAccountStrategy("r", shard_amount=5)
-        routed_a = dict(strategy.group_and_route([
-            TransactionRow(from_bank="A", from_account="a1", to_bank="B", to_account="b1")
-        ]))
-        routed_b = dict(strategy.group_and_route([
-            TransactionRow(from_bank="A", from_account="a1", to_bank="C", to_account="c1")
-        ]))
+        routed_a = dict(strategy.group_and_route([_tx_dict("A", "a1", "B", "b1")]))
+        routed_b = dict(strategy.group_and_route([_tx_dict("A", "a1", "C", "c1")]))
         shard_a = next(route for route, rows in routed_a.items()
                        if {"bank": "A", "account": "a1"} in rows)
         shard_b = next(route for route, rows in routed_b.items()

@@ -87,6 +87,37 @@ sample-q5:
 $(SAMPLE_Q5_FILE):
 	@$(MAKE) sample-q5
 
+# Q3 necesita transacciones del 2022-09-01 al 2022-09-15 (averages [9/1-9/5] +
+# filtro historico [9/6-9/15]). Filtrado por fecha + head.
+SAMPLE_Q3_FILE := $(DATA_DIR)/sample_q3.csv
+SAMPLE_Q3_ROWS ?= 200000
+
+sample-q3:
+	@mkdir -p $(DATA_DIR)
+	@echo "Sampling $(SAMPLE_Q3_ROWS) rows with 2022/09 dates from $(SOURCE_DATASET)"
+	@head -1 $(SOURCE_DATASET) > $(SAMPLE_Q3_FILE)
+	@grep -E "^2022/09/(0[1-9]|1[0-5])" $(SOURCE_DATASET) | head -n $(SAMPLE_Q3_ROWS) >> $(SAMPLE_Q3_FILE)
+	@echo "Done: $$(wc -l < $(SAMPLE_Q3_FILE)) rows (including header)"
+.PHONY: sample-q3
+
+$(SAMPLE_Q3_FILE):
+	@$(MAKE) sample-q3
+
+# Q4 necesita transacciones del 2022-09-01 al 2022-09-06 (matches notebook patrón).
+SAMPLE_Q4_FILE := $(DATA_DIR)/sample_q4.csv
+SAMPLE_Q4_ROWS ?= 200000
+
+sample-q4:
+	@mkdir -p $(DATA_DIR)
+	@echo "Sampling $(SAMPLE_Q4_ROWS) rows with 2022-09-0[1-6] dates from $(SOURCE_DATASET)"
+	@head -1 $(SOURCE_DATASET) > $(SAMPLE_Q4_FILE)
+	@grep -E "^2022/09/0[1-6]" $(SOURCE_DATASET) | head -n $(SAMPLE_Q4_ROWS) >> $(SAMPLE_Q4_FILE)
+	@echo "Done: $$(wc -l < $(SAMPLE_Q4_FILE)) rows (including header)"
+.PHONY: sample-q4
+
+$(SAMPLE_Q4_FILE):
+	@$(MAKE) sample-q4
+
 demo-down:
 	docker compose -f $(DEMO_COMPOSE) down -t 5
 .PHONY: demo-down
@@ -135,12 +166,20 @@ run-q2: $(SAMPLE_FILE)
 	BATCH_SIZE=$(BATCH_SIZE) CLIENTS=$(CLIENTS) WORKERS=$(WORKERS) ./scripts/run.sh q2
 .PHONY: run-q2
 
+run-q3: $(SAMPLE_Q3_FILE)
+	BATCH_SIZE=$(BATCH_SIZE) CLIENTS=$(CLIENTS) WORKERS=$(WORKERS) ./scripts/run.sh q3
+.PHONY: run-q3
+
+run-q4: $(SAMPLE_Q4_FILE)
+	BATCH_SIZE=$(BATCH_SIZE) CLIENTS=$(CLIENTS) WORKERS=$(WORKERS) ./scripts/run.sh q4
+.PHONY: run-q4
+
 run-q5: $(SAMPLE_Q5_FILE)
 	BATCH_SIZE=$(BATCH_SIZE) CLIENTS=$(CLIENTS) WORKERS=$(WORKERS) ./scripts/run.sh q5
 .PHONY: run-q5
 
-# Corre Q1, Q2 y Q5 en serie (cada uno en su propio results/<timestamp>_<escenario>/).
-run-all: run-q1 run-q2 run-q5
+# Corre las 5 queries en serie (cada una en su propio results/<timestamp>_<escenario>/).
+run-all: run-q1 run-q2 run-q3 run-q4 run-q5
 .PHONY: run-all
 
 # Corre el escenario dos veces y verifica que el resultado (sin UUIDs ni
@@ -152,6 +191,14 @@ verify-q1: $(SAMPLE_FILE)
 verify-q2: $(SAMPLE_FILE)
 	BATCH_SIZE=$(BATCH_SIZE) CLIENTS=$(CLIENTS) WORKERS=$(WORKERS) ./scripts/verify.sh q2
 .PHONY: verify-q2
+
+verify-q3: $(SAMPLE_Q3_FILE)
+	BATCH_SIZE=$(BATCH_SIZE) CLIENTS=$(CLIENTS) WORKERS=$(WORKERS) ./scripts/verify.sh q3
+.PHONY: verify-q3
+
+verify-q4: $(SAMPLE_Q4_FILE)
+	BATCH_SIZE=$(BATCH_SIZE) CLIENTS=$(CLIENTS) WORKERS=$(WORKERS) ./scripts/verify.sh q4
+.PHONY: verify-q4
 
 verify-q5: $(SAMPLE_Q5_FILE)
 	BATCH_SIZE=$(BATCH_SIZE) CLIENTS=$(CLIENTS) WORKERS=$(WORKERS) ./scripts/verify.sh q5
@@ -198,5 +245,7 @@ show-last:
 run-clean:
 	-docker compose -f docker-compose.q1.yaml down -t 3 2>/dev/null
 	-docker compose -f docker-compose.q2.yaml down -t 3 2>/dev/null
+	-docker compose -f docker-compose.q3.yaml down -t 3 2>/dev/null
+	-docker compose -f docker-compose.q4.yaml down -t 3 2>/dev/null
 	-docker compose -f docker-compose.q5.yaml down -t 3 2>/dev/null
 .PHONY: run-clean

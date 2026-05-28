@@ -64,19 +64,18 @@ services:
     volumes:
     - ./src/group/config/q4_selfmerge_route.yaml:/app/config.yaml:ro
 
-  # q4_merge_with_self_0:
-  #   build:
-  #     context: .
-  #     dockerfile: src/joiner/Dockerfile
-  #   container_name: q4_merge_with_self_0
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   environment:
-  #   - PYTHONUNBUFFERED=1
-  #   - MOM_HOST=rabbitmq
-  #   - INPUT_QUEUE=result_queue
-  #   - OUTPUT_QUEUE=result_queue
+  q4_merge_with_self_0:
+    build:
+      context: .
+      dockerfile: src/joiner/Dockerfile
+    container_name: q4_merge_with_self_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/joiner/config/q4_merge_with_self.yaml:/app/config.yaml:ro
+    environment:
+    - SHARD_ID=0
 
   # q4_filter_by_orig_dest_0:
   #   build:

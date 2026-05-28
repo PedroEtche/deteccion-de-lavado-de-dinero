@@ -104,3 +104,18 @@ class DateStrategy(FilterStrategy):
 
         return dict(routed)
 
+class OriginNotEqualDestinationStrategy(FilterStrategy):
+    def __init__(self, output_queue: str) -> None:
+        self.output_queue = output_queue
+
+    def __str__(self) -> str:
+        return f"OriginNotEqualDestinationStrategy(output_queue={self.output_queue})"
+
+    def filter_batch(self, batch: List[Any]) -> Dict[str, List[Any]]:
+        filtered = []
+
+        for tx in batch:
+            if tx.from_bank != tx.to_bank or tx.from_account != tx.to_account:
+                filtered.append(tx)
+
+        return { self.output_queue: filtered }

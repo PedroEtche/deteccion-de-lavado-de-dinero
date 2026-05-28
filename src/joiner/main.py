@@ -2,13 +2,23 @@ import logging
 import os
 import signal
 from dataclasses import dataclass
-from datetime import date
 from typing import Any, Dict
+import threading
+
+from src.communication.protocols.queue_protocol.internal import (
+    build_batch_message,
+    deserialize,
+    serialize,
+    build_eof_message,
+)
+
+from src.common import middleware
 
 from .strategies import (
     JoinerStrategy,
     NoStrategy,
     AccountsStrategy,
+    SelfMergeStrategy,
 )
 import yaml
 
@@ -19,7 +29,9 @@ CONFIG_PATH = "./config.yaml"
 @dataclass
 class JoinerConfig:
     mom_host: str
-    input_queue: str
+    input_exchange: str
+    shard_id: str
+    base_routing_key: str
     output_queue: str
     log_level: str
     strategy: JoinerStrategy
@@ -40,6 +52,9 @@ def _parse_strategy_config(raw_strategy: Dict[str, Any]) -> JoinerStrategy:
 
     if strategy_type == "accounts":
         return AccountsStrategy()
+    
+    if strategy_type == "self_merge":
+        return SelfMergeStrategy()
 
     # if strategy_type == "date":
         # return DateStrategy(
@@ -56,7 +71,9 @@ def init_config() -> JoinerConfig:
 
     return JoinerConfig(
         mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
-        input_queue=os.getenv("INPUT_QUEUE", file_config.get("input_queue", "")),
+        input_exchange=os.getenv("INPUT_EXCHANGE", file_config.get("input_exchange", "")),
+        shard_id=os.getenv("SHARD_ID", file_config.get("shard_id", "")),
+        base_routing_key=os.getenv("BASE_ROUTING_KEY", file_config.get("base_routing_key", "")),
         output_queue=os.getenv("OUTPUT_QUEUE", file_config.get("output_queue", "")),
         log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
         strategy=_parse_strategy_config(raw_strategy),
@@ -65,58 +82,59 @@ def init_config() -> JoinerConfig:
 
 def log_config(config: JoinerConfig) -> None:
     logging.info(
-        "Joiner startup with: mom_host=%s | input_queue=%s | output_queue=%s | strategy=%s",
+        "Joiner startup with: mom_host=%s | input_exchange=%s | shard_id=%s | output_queue=%s | strategy=%s",
         config.mom_host,
-        config.input_queue,
+        config.input_exchange,
+        config.shard_id,
         config.output_queue,
-        str(config.strategy),
+        config.strategy,
     )
 
 
 class JoinerService:
     def __init__(self, config: JoinerConfig) -> None:
         self.mom_host = config.mom_host
-        self.input_queue = config.input_queue
-        self.output_queue = config.output_queue
+
+        route = f"{config.base_routing_key}_{config.shard_id}"
+        self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(self.mom_host, config.input_exchange, routing_keys=[route])
+        self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(self.mom_host, config.output_queue)
+        
         self.strategy = config.strategy
         self._running = False
+        self.lock = threading.Lock()
 
     def start(self) -> None:
         logging.info("Starting filter service")
-        # eof_control_thread = threading.Thread(target=self._listen_for_eof)
-        # eof_control_thread.start()
-
         self._running = True
-        self.input_queue.start_consuming(self.process_data_messsage)
-
-        # eof_control_thread.join()
-
-
+        self.input_exchange.start_consuming(self.process_data_messsage)
 
     def stop(self) -> None:
         logging.info("Stopping Joiner service")
         self._running = False
+        if getattr(self, '_input_middleware', None):
+            self._input_middleware.stop_consuming()
 
     def process_data_messsage(self, message, ack, nack):
-        message = communication_protocol.deserialize(message)
+        message = deserialize(message)
         with self.lock:
             if message["type"] == "eof":
                 logging.info("Received EOF message from client %s", message["client"])
-                eof_message = communication_protocol.build_eof_message(client=message["client"], msg_id=message["msg_id"])
-                self.control_exchange.send(communication_protocol.serialize(eof_message))
+                self.strategy.clear_client_state(message["client"])
+                
+                eof_message = build_eof_message(client=message["client"], msg_id=message["msg_id"])
+                self.output_queue.send(serialize(eof_message))
 
             else:
-                logging.info("Processing data message from client %s", message["client"])
-                self.strategy.joiner_batch(message["payload"]["batch"])
+                batch = self.strategy.joiner_batch(message["payload"]["batch"], message["client"])
 
-            # TODO: Esto es el codigo del Group BY, habria que hacer algo similar cuando llega el eof sobre la cola de control de EOF
-                # batch_message = communication_protocol.build_batch_message(
-                #     message_type="grouped_data",
-                #     client=message["client"],
-                #     msg_id=message["msg_id"],
-                #     batch=grouped_batch,
-                # )
-                # self.output_queue.send(communication_protocol.serialize(batch_message))
+                batch_message = build_batch_message(
+                    message_type="grouped_data",
+                    client=message["client"],
+                    msg_id=message["msg_id"],
+                    batch=batch,
+                )
+                logging.info("Joined batch for client %s", message["client"])
+                self.output_queue.send(serialize(batch_message))
 
         ack()
 
@@ -126,6 +144,8 @@ def main() -> int:
     config = init_config()
     logging.basicConfig(level=getattr(logging, config.log_level.upper(), logging.INFO))
     log_config(config)
+    logging.getLogger("pika").setLevel(logging.WARNING)
+    
     service = JoinerService(config)
 
     def handle_sigterm(signum, frame):

@@ -161,13 +161,13 @@ class AccountStrategy(GroupStrategy):
     def group_and_route(self, batch: List[Any]) -> List[Tuple[str, List[Any]]]:
         accounts = set()
         for tx in batch:
-            accounts.add((tx.from_bank, tx.from_account))
-            accounts.add((tx.to_bank, tx.to_account))
+            accounts.add((tx["from_bank"], tx["from_account"]))
+            accounts.add((tx["to_bank"], tx["to_account"]))
 
         routed_batches = {}
         for bank, account in accounts:
             string_key = f"{bank}_{account}"
-            route = self._get_shard_route(string_key, self.shard_amount, self.base_route)
+            route = _get_shard_route(string_key, self.shard_amount, self.base_route)
             
             if route not in routed_batches:
                 routed_batches[route] = []
@@ -176,7 +176,6 @@ class AccountStrategy(GroupStrategy):
                 "bank": bank, 
                 "account": account
             })
-
         return [(route, b) for route, b in routed_batches.items()]
     
     def get_eof_routes(self) -> List[str]:

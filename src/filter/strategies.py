@@ -87,10 +87,9 @@ class FieldGreaterThanStrategy(FilterStrategy):
 
     def filter_batch(self, batch: List[Any]) -> Dict[str, List[Any]]:
         filtered = []
-
         for row in batch:
-            value = getattr(row, self.field_name, None)
-            
+            value = row.get(self.field_name)
+
             if value is not None and value > self.threshold:
                 filtered.append(row)
 

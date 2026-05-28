@@ -48,7 +48,10 @@ q4_switch:
 # ([2022-09-01, 2022-09-05]) necesitan filas en ese rango de fechas; si el
 # prefijo no las incluye, los resultados van a ser vacios. Para esas queries
 # usar otra estrategia, por ejemplo: grep '2022-09-' SOURCE | head -n N.
-SAMPLE_ROWS ?= 50000
+SAMPLE_ROWS    ?= 50000
+SAMPLE_Q3_ROWS ?= $(SAMPLE_ROWS)
+SAMPLE_Q4_ROWS ?= $(SAMPLE_ROWS)
+SAMPLE_Q5_ROWS ?= $(SAMPLE_ROWS)
 SOURCE_DATASET ?= /home/matias/facultad/HI-Large_Trans.csv
 DATA_DIR := ./data
 SAMPLE_FILE := $(DATA_DIR)/sample.csv
@@ -58,6 +61,12 @@ sample:
 	@echo "Sampling $(SAMPLE_ROWS) rows from $(SOURCE_DATASET) into $(SAMPLE_FILE)"
 	@head -n $$(( $(SAMPLE_ROWS) + 1 )) $(SOURCE_DATASET) > $(SAMPLE_FILE)
 .PHONY: sample
+
+# Regenera los 4 samples (Q1/Q2 = head; Q3/Q4/Q5 = grep por fecha) con el
+# mismo SAMPLE_ROWS. Ejecutalo antes de un run-all si cambiaste SAMPLE_ROWS,
+# porque los target $(SAMPLE_FILE) etc. solo se generan si NO existen.
+samples-all: sample sample-q3 sample-q4 sample-q5
+.PHONY: samples-all
 
 DEMO_COMPOSE := docker-compose.q1.yaml
 
@@ -136,22 +145,23 @@ demo-q2-down:
 
 # ─── Demo parameters ─────────────────────────────────────────────────────────
 #
-#  BATCH_SIZE    filas por mensaje al gateway          (default: 500)
-#  SAMPLE_ROWS   filas del dataset para Q1/Q2          (default: 50000)
-#  SAMPLE_Q5_ROWS filas del dataset para Q5            (default: 50000)
-#  CLIENTS       clientes simuláneos por escenario     (default: 1)
-#  WORKERS       replicas de etapas stateless          (default: 1)
+#  BATCH_SIZE    filas por mensaje al gateway                (default: 500)
+#  SAMPLE_ROWS   filas del dataset (aplica a las 5 queries)  (default: 50000)
+#  CLIENTS       clientes simuláneos por escenario           (default: 1)
+#  WORKERS       replicas de etapas stateless                (default: 1)
 #
-#  Ejemplo demo en vivo:
-#    make run-all BATCH_SIZE=200 SAMPLE_ROWS=20000 CLIENTS=2 WORKERS=2
+#  Ejemplo demo en vivo (regenera samples + corre todo):
+#    make samples-all run-all BATCH_SIZE=200 SAMPLE_ROWS=20000 CLIENTS=2 WORKERS=2
 #
-#  Nota WORKERS:
-#    - Q1/Q5: todas las etapas pre-aggregator escalan libremente (stateless,
-#      competing consumers). El EOF solo llega a una instancia y se forwarda.
-#    - Q2:  filter + group escalan igual. Si querés escalar el aggregator o join
-#      hay que ajustar EXPECTED_EOFS en el compose file (ponele N si escalás
-#      el group a N workers, porque cada group instance flushea al recibir el
-#      broadcast de EOF).
+#  Nota WORKERS (etapas stateless competing-consumers):
+#    - Q1: filter_usd, filter_lt50
+#    - Q2: filter_usd, group
+#    - Q3: filter_usd, filter_date (los aggregators Q3 estan sharded fijo x3)
+#    - Q4: filter_usd, filter_datetime, filter_by_count (los stateful x4)
+#    - Q5: filter_date, filter_wire_ach, currency_converter, filter_lt1
+#
+#  Para escalar etapas stateful (joiner/aggregator) hay que tocar configs YAML
+#  + agregar replicas al compose. Ver la tabla de escalabilidad mas abajo.
 #
 # ─────────────────────────────────────────────────────────────────────────────
 BATCH_SIZE    ?= 500

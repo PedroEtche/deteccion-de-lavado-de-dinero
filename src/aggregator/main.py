@@ -20,6 +20,7 @@ from .strategies import (
     AccountPairCountStategy,
     AggregatorStrategy,
     BankMaxAmountStrategy,
+    CountStrategy,
     NoStrategy,
     AccountStrategy,
 )
@@ -58,6 +59,9 @@ def _parse_strategy_config(raw_strategy: str) -> AggregatorStrategy:
 
     if strategy_type == "Account":
         return AccountStrategy()
+      
+    if strategy_type == "Count":
+        return CountStrategy()
 
     return NoStrategy()
 

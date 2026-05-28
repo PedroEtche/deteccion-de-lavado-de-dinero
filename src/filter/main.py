@@ -21,10 +21,12 @@ from .strategies import (
     FieldLessThanStrategy,
     CurrencyStrategy,
     DateStrategy,
+    DateRangeRoute,
     FilterStrategy,
     NoStrategy,
     DateRangeRoute,
     FieldGreaterThanStrategy,
+    PaymentFormatStrategy,
 )
 
 
@@ -68,6 +70,9 @@ def _parse_strategy_config(
 
     if strategy_type == "field_greater_than":
         return FieldGreaterThanStrategy(params["output_queue"], params["field_name"], float(params["threshold"]))
+
+    if strategy_type == "payment_format":
+        return PaymentFormatStrategy(default_output, params.get("formats", []))
 
     if strategy_type == "date":
         raw_routes = params.get("routes", [])

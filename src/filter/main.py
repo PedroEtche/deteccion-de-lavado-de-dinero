@@ -21,9 +21,10 @@ from .strategies import (
     AmountLessThanStrategy,
     CurrencyStrategy,
     DateStrategy,
+    DateRangeRoute,
     FilterStrategy,
     NoStrategy,
-    DateRangeRoute,
+    PaymentFormatStrategy,
 )
 
 
@@ -64,6 +65,9 @@ def _parse_strategy_config(
 
     if strategy_type == "amount_less_than":
         return AmountLessThanStrategy(default_output, float(params["threshold"]))
+
+    if strategy_type == "payment_format":
+        return PaymentFormatStrategy(default_output, params.get("formats", []))
 
     if strategy_type == "date":
         raw_routes = params.get("routes", [])

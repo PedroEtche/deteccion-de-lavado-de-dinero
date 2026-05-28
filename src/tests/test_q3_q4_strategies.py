@@ -357,6 +357,96 @@ class SelfMergeStrategyTest(unittest.TestCase):
 
 
 # ────────────────────────────────────────────────────────────────────────────
+# Q4 — Sharded SelfMerge: dedup contract (only shard(B) emits the chain)
+# ────────────────────────────────────────────────────────────────────────────
+
+
+import zlib  # noqa: E402  — colocado aquí para mantener el grupo lógico
+
+
+def _shard_of(bank, account, n):
+    key = f"{bank}_{account}"
+    return zlib.crc32(key.encode("utf-8")) % n
+
+
+class ShardedSelfMergeStrategyTest(unittest.TestCase):
+    """The sharded SelfMerge emits chain A→B→C ONLY from the shard that owns B.
+    Without this, the MergeRouting (tx → shard(from) AND shard(to)) makes the
+    chain visible in multiple shards and gets double-counted ~19% of the time
+    with N=4 (when shard(A) == shard(C) ≠ shard(B))."""
+
+    def _feed_chain(self, strategy):
+        """Both txs of a chain A→B→C, fed in order (A→B, B→C)."""
+        strategy.joiner_batch(
+            [_tx_dict("A", "a1", "B", "b1"), _tx_dict("B", "b1", "C", "c1")],
+            client_id="c1",
+        )
+
+    def test_only_shard_of_B_emits_the_chain(self):
+        N = 4
+        b_shard = _shard_of("B", "b1", N)
+        emitted_from = []
+        for shard_id in range(N):
+            strategy = SelfMergeStrategy(shard_amount=N, shard_id=shard_id)
+            strategy.joiner_batch(
+                [_tx_dict("A", "a1", "B", "b1"), _tx_dict("B", "b1", "C", "c1")],
+                client_id="c1",
+            )
+            # Cada shard ve la misma chain (test in-memory) pero solo el de B la emite.
+            result = strategy.joiner_batch(
+                [_tx_dict("A", "a1", "B", "b1"), _tx_dict("B", "b1", "C", "c1")],
+                client_id="c2",
+            )
+            if result:
+                emitted_from.append(shard_id)
+        self.assertEqual(emitted_from, [b_shard])
+
+    def test_default_shard_amount_1_is_pass_through(self):
+        # Comportamiento backwards-compatible: sin sharding, todos los chains se emiten.
+        strategy = SelfMergeStrategy()  # shard_amount=1, shard_id=0
+        result = strategy.joiner_batch(
+            [_tx_dict("A", "a1", "B", "b1"), _tx_dict("B", "b1", "C", "c1")],
+            client_id="c1",
+        )
+        self.assertEqual(len(result), 1)
+
+    def test_sharded_chain_total_emissions_is_exactly_one(self):
+        """Reparte el procesamiento entre N shards y verifica que la chain salga
+        UNA sola vez en total. Garantiza dedup ante el caso shard(A)==shard(C)."""
+        N = 4
+        total = 0
+        # Caso fácil: shard(B) único; pero también probamos varias chains.
+        chains = [
+            ("A", "a1", "B", "b1", "C", "c1"),
+            ("X", "x1", "Y", "y1", "Z", "z1"),
+            ("P", "p1", "Q", "q1", "R", "r1"),
+        ]
+        for fb, fa, mb, ma, tb, ta in chains:
+            emitted_per_chain = 0
+            for shard_id in range(N):
+                strategy = SelfMergeStrategy(shard_amount=N, shard_id=shard_id)
+                result = strategy.joiner_batch(
+                    [_tx_dict(fb, fa, mb, ma), _tx_dict(mb, ma, tb, ta)],
+                    client_id="c1",
+                )
+                emitted_per_chain += len(result)
+            self.assertEqual(emitted_per_chain, 1, f"chain {fb}→{mb}→{tb} should emit once across all shards")
+            total += emitted_per_chain
+        self.assertEqual(total, len(chains))
+
+    def test_sharded_drops_self_cycle(self):
+        # Z→X→Z debe descartarse aunque la chain caiga en shard(X).
+        N = 4
+        x_shard = _shard_of("X", "x1", N)
+        strategy = SelfMergeStrategy(shard_amount=N, shard_id=x_shard)
+        result = strategy.joiner_batch(
+            [_tx_dict("Z", "z1", "X", "x1"), _tx_dict("X", "x1", "Z", "z1")],
+            client_id="c1",
+        )
+        self.assertEqual(result, [])
+
+
+# ────────────────────────────────────────────────────────────────────────────
 # Q4 — Group: AccountPairCount (rutea por par origen/destino)
 # ────────────────────────────────────────────────────────────────────────────
 

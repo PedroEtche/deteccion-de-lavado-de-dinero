@@ -83,7 +83,10 @@ services:
     - EOF_FANOUT=q4_selfmerge_route_eof
     - EXPECTED_EOFS=1
 
-  # Stage 4: detect chains A→B→C (per client, with A != C)
+  # Stage 4: detect chains A→B→C (per client, with A != C). 4 shards by
+  # intermediary account — SelfMerge emits a chain only from the shard that
+  # owns its B to avoid double counting (the MergeRouting ships each tx to 2
+  # shards, so chains can be visible in shard(B) and shard(A)=shard(C) too).
   q4_merge_with_self_0:
     build:
       context: .
@@ -98,10 +101,66 @@ services:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
     - SHARD_ID=0
-    - EOF_FANOUT=q4_selfmerge_eof
+    - SHARD_AMOUNT=4
+    - EOF_FANOUT=q4_selfmerge_eof_0
     - EXPECTED_EOFS=1
 
-  # Stage 5: group by (origin, destination) per shard
+  q4_merge_with_self_1:
+    build:
+      context: .
+      dockerfile: src/joiner/Dockerfile
+    container_name: q4_merge_with_self_1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/joiner/config/q4_merge_with_self.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+    - SHARD_ID=1
+    - SHARD_AMOUNT=4
+    - EOF_FANOUT=q4_selfmerge_eof_1
+    - EXPECTED_EOFS=1
+
+  q4_merge_with_self_2:
+    build:
+      context: .
+      dockerfile: src/joiner/Dockerfile
+    container_name: q4_merge_with_self_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/joiner/config/q4_merge_with_self.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+    - SHARD_ID=2
+    - SHARD_AMOUNT=4
+    - EOF_FANOUT=q4_selfmerge_eof_2
+    - EXPECTED_EOFS=1
+
+  q4_merge_with_self_3:
+    build:
+      context: .
+      dockerfile: src/joiner/Dockerfile
+    container_name: q4_merge_with_self_3
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/joiner/config/q4_merge_with_self.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+    - SHARD_ID=3
+    - SHARD_AMOUNT=4
+    - EOF_FANOUT=q4_selfmerge_eof_3
+    - EXPECTED_EOFS=1
+
+  # Stage 5: group by (origin, destination), shard x4. Receives 4 EOFs from
+  # the 4 SelfMerge replicas upstream.
   q4_group_by_orig_dest_0:
     build:
       context: .
@@ -116,9 +175,10 @@ services:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
     - EOF_FANOUT=q4_group_by_orig_dest_eof
-    - EXPECTED_EOFS=1
+    - EXPECTED_EOFS=4
 
-  # Stage 6: aggregate pair counts globally
+  # Stage 6: aggregate pair counts globally — 4 shards, one per shard route.
+  # Each consumes from its own queue groupby_orig_dest_route_X (env override).
   q4_aggregator_count_pairs_0:
     build:
       context: .
@@ -133,7 +193,62 @@ services:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
     - SHARD_ID=0
-    - EOF_FANOUT=q4_aggregator_count_pairs_eof
+    - INPUT_QUEUE=groupby_orig_dest_route_0
+    - EOF_FANOUT=q4_aggregator_count_pairs_eof_0
+    - EXPECTED_EOFS=1
+
+  q4_aggregator_count_pairs_1:
+    build:
+      context: .
+      dockerfile: src/aggregator/Dockerfile
+    container_name: q4_aggregator_count_pairs_1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/aggregator/config/q4_aggregator_count_pairs.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+    - SHARD_ID=1
+    - INPUT_QUEUE=groupby_orig_dest_route_1
+    - EOF_FANOUT=q4_aggregator_count_pairs_eof_1
+    - EXPECTED_EOFS=1
+
+  q4_aggregator_count_pairs_2:
+    build:
+      context: .
+      dockerfile: src/aggregator/Dockerfile
+    container_name: q4_aggregator_count_pairs_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/aggregator/config/q4_aggregator_count_pairs.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+    - SHARD_ID=2
+    - INPUT_QUEUE=groupby_orig_dest_route_2
+    - EOF_FANOUT=q4_aggregator_count_pairs_eof_2
+    - EXPECTED_EOFS=1
+
+  q4_aggregator_count_pairs_3:
+    build:
+      context: .
+      dockerfile: src/aggregator/Dockerfile
+    container_name: q4_aggregator_count_pairs_3
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/aggregator/config/q4_aggregator_count_pairs.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+    - SHARD_ID=3
+    - INPUT_QUEUE=groupby_orig_dest_route_3
+    - EOF_FANOUT=q4_aggregator_count_pairs_eof_3
     - EXPECTED_EOFS=1
 
   # Stage 7: filter pairs with count > 5 (notebook: size > 5)
@@ -153,7 +268,8 @@ services:
     - EOF_FANOUT=q4_filter_by_count_eof
     - EXPECTED_EOFS=1
 
-  # Stage 8: split pair into the two accounts (FlatMap), shard by (bank, account)
+  # Stage 8: split pair into the two accounts (FlatMap), shard by (bank, account).
+  # The filter_by_count forwards 4 EOFs (one per upstream aggregator shard).
   q4_group_by_account_0:
     build:
       context: .
@@ -168,7 +284,7 @@ services:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
     - EOF_FANOUT=q4_group_by_account_eof
-    - EXPECTED_EOFS=1
+    - EXPECTED_EOFS=4
 
   # Stage 9: dedupe accounts globally → emit unique list
   q4_aggregator_accounts_0:

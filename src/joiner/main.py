@@ -48,14 +48,14 @@ def _load_file_config() -> Dict[str, Any]:
         return {}
 
 
-def _parse_strategy_config(raw_strategy: Dict[str, Any]) -> JoinerStrategy:
-    strategy_type = raw_strategy.get("type", "noop")
-    
+def _parse_strategy_config(raw_strategy: Dict[str, Any], shard_id: int, shard_amount: int) -> JoinerStrategy:
+    strategy_type = raw_strategy.get("type", "noop") if isinstance(raw_strategy, dict) else str(raw_strategy)
+
     if strategy_type == "accounts":
         return AccountsStrategy()
-    
+
     if strategy_type == "self_merge":
-        return SelfMergeStrategy()
+        return SelfMergeStrategy(shard_amount=shard_amount, shard_id=shard_id)
 
     return NoStrategy()
 
@@ -63,17 +63,23 @@ def _parse_strategy_config(raw_strategy: Dict[str, Any]) -> JoinerStrategy:
 def init_config() -> JoinerConfig:
     file_config = _load_file_config()
     raw_strategy = file_config.get("strategy", {})
+    raw_params = raw_strategy.get("params", {}) if isinstance(raw_strategy, dict) else {}
+
+    shard_id = int(os.getenv("SHARD_ID", file_config.get("shard_id", "0")) or 0)
+    shard_amount = int(
+        os.getenv("SHARD_AMOUNT", raw_params.get("shard_amount", file_config.get("shard_amount", 1)))
+    )
 
     return JoinerConfig(
         mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
         input_exchange=os.getenv("INPUT_EXCHANGE", file_config.get("input_exchange", "")),
-        shard_id=os.getenv("SHARD_ID", file_config.get("shard_id", "")),
+        shard_id=str(shard_id),
         base_routing_key=os.getenv("BASE_ROUTING_KEY", file_config.get("base_routing_key", "")),
         output_queue=os.getenv("OUTPUT_QUEUE", file_config.get("output_queue", "")),
         log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
         eof_fanout=os.getenv("EOF_FANOUT", file_config.get("eof_fanout", "")),
         expected_eofs=int(os.getenv("EXPECTED_EOFS", file_config.get("expected_eofs", "1"))),
-        strategy=_parse_strategy_config(raw_strategy),
+        strategy=_parse_strategy_config(raw_strategy, shard_id, shard_amount),
     )
 
 

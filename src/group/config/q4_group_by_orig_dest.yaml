@@ -8,4 +8,4 @@ strategy:
   type: AccountPairCount
   params:
     base_routing_key: groupby_orig_dest_route
-    shard_amount: 1
+    shard_amount: 4

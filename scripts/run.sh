@@ -1,14 +1,22 @@
 #!/usr/bin/env bash
-# Corre un escenario (q1, q2, ...) y vuelca meta + logs + resumen a results/.
+# Corre un escenario (q1, q2, q5, ...) y vuelca meta + logs + resumen a results/.
 #
 # Uso:
-#   ./scripts/run.sh <escenario>           # corre docker-compose.<escenario>.yaml
-#   BATCH_SIZE=1000 ./scripts/run.sh q2    # override params via env
+#   ./scripts/run.sh <escenario>
+#   BATCH_SIZE=1000 CLIENTS=2 WORKERS=3 ./scripts/run.sh q5
+#
+# Variables de entorno:
+#   BATCH_SIZE    tamaño de cada batch de transacciones (default: 500)
+#   CLIENTS       instancias del cliente que envian datos en paralelo (default: 1)
+#   WORKERS       replicas de las etapas stateless del pipeline (default: 1)
+#                 Para Q1/Q5: escala filtros y currency converter.
+#                 Para Q2: escala filtros y group; aggregator/join quedan en 1.
+#                 Ver Makefile para detalles sobre EXPECTED_EOFS al escalar Q2.
 #
 # Estructura del output (results/<timestamp>_<escenario>/):
 #   meta.txt           # parametros, duracion, exit codes
 #   summary.txt        # resultados por cliente (batch_size + EOF)
-#   logs/<svc>.log     # logs por contenedor
+#   logs/<svc>.log     # logs por contenedor (todos los replicas combinados)
 #   logs/_startup.log  # output combinado de `compose up`
 
 set -euo pipefail
@@ -29,60 +37,103 @@ if [[ ! -f "$compose_file" ]]; then
 fi
 
 batch_size="${BATCH_SIZE:-500}"
+clients="${CLIENTS:-1}"
+workers="${WORKERS:-1}"
 timestamp="$(date +%Y%m%d_%H%M%S)"
 result_dir="results/${timestamp}_${scenario}"
 mkdir -p "${result_dir}/logs"
 
-# Snapshot of overridable params for reproducibility.
 cat > "${result_dir}/meta.txt" <<EOF
 scenario: ${scenario}
 compose_file: ${compose_file}
 BATCH_SIZE: ${batch_size}
+CLIENTS: ${clients}
+WORKERS: ${workers}
 start: $(date -Iseconds)
 EOF
 
-echo "[$(date +%H:%M:%S)] ${scenario} (BATCH_SIZE=${batch_size}) -> ${result_dir}"
+echo "[$(date +%H:%M:%S)] ${scenario} (BATCH_SIZE=${batch_size} CLIENTS=${clients} WORKERS=${workers}) -> ${result_dir}"
 
 # Avoid stale containers from a previous interrupted run.
 docker compose -f "${compose_file}" down -t 3 >/dev/null 2>&1 || true
 
 start_epoch=$(date +%s)
 
+# Build --scale args: always scale client_0 to $CLIENTS, plus per-scenario
+# worker services to $WORKERS.
+scale_args="--scale client_0=${clients}"
+
+# Per-scenario scalable stateless stages. Stateful stages (aggregators, join)
+# are intentionally left at 1; scaling them requires adjusting EXPECTED_EOFS
+# in the compose file (see Makefile comments).
+case "${scenario}" in
+    q1)
+        scale_args+=" --scale filter_usd_0=${workers} --scale q1_filter_less_than_fifty_0=${workers}"
+        ;;
+    q2)
+        # filter + group scale freely; aggregator/join need EXPECTED_EOFS=N if scaled
+        scale_args+=" --scale filter_usd_0=${workers} --scale q2_group_max_amount_0=${workers}"
+        ;;
+    q3)
+        # Stateless stages: filter_usd, filter_date. Q3 groups y aggregators ya
+        # estan fijos en 3 shards (uno por payment_format mod 3); no escalan.
+        scale_args+=" --scale filter_usd_0=${workers} --scale filter_date_0=${workers}"
+        ;;
+    q4)
+        # Stateless stages: filter_usd, filter_by_datetime, filter_by_count.
+        # Los groups/aggregators/joiner son stateful sharded (shard=1) — no se
+        # escalan sin tocar EXPECTED_EOFS.
+        scale_args+=" --scale q4_filter_usd_0=${workers}"
+        scale_args+=" --scale q4_filter_by_datetime_0=${workers}"
+        scale_args+=" --scale q4_filter_by_count_0=${workers}"
+        ;;
+    q5)
+        scale_args+=" --scale filter_q5_date_0=${workers}"
+        scale_args+=" --scale filter_q5_wire_ach_0=${workers}"
+        scale_args+=" --scale q5_currency_converter_0=${workers}"
+        scale_args+=" --scale filter_q5_amount_lt1_0=${workers}"
+        ;;
+esac
+
 export BATCH_SIZE="${batch_size}"
 set +e
-docker compose -f "${compose_file}" up -d --build --remove-orphans \
+# shellcheck disable=SC2086
+docker compose -f "${compose_file}" up -d --build --remove-orphans ${scale_args} \
     > "${result_dir}/logs/_startup.log" 2>&1
 startup_code=$?
 set -e
 
 if [[ $startup_code -ne 0 ]]; then
     echo "Startup failed (exit=${startup_code}). See ${result_dir}/logs/_startup.log" >&2
-    cat >> "${result_dir}/meta.txt" <<EOF
-end: $(date -Iseconds)
-duration_seconds: $(( $(date +%s) - start_epoch ))
-exit_code: ${startup_code}
-status: startup_failed
-EOF
+    {
+        echo "end: $(date -Iseconds)"
+        echo "duration_seconds: $(( $(date +%s) - start_epoch ))"
+        echo "exit_code: ${startup_code}"
+        echo "status: startup_failed"
+    } >> "${result_dir}/meta.txt"
     exit $startup_code
 fi
 
-# Wait for every client_* container to exit. Sequential wait is fine because
-# clients are running in parallel — total wall time is max(client durations).
-clients=$(docker compose -f "${compose_file}" config --services | grep -E '^client_' || true)
+# Wait for every replica of every client_* service to exit.
+# With --scale client_0=N, `ps -a -q client_0` returns N container IDs.
+client_services=$(docker compose -f "${compose_file}" config --services | grep -E '^client_' || true)
 overall_exit=0
 client_exits=""
-for client in $clients; do
-    container_id=$(docker compose -f "${compose_file}" ps -a -q "$client" 2>/dev/null || true)
-    if [[ -z "$container_id" ]]; then
-        echo "Warning: no container for service ${client}" >&2
-        client_exits+="${client}: missing"$'\n'
+for svc in $client_services; do
+    mapfile -t container_ids < <(docker compose -f "${compose_file}" ps -a -q "$svc" 2>/dev/null || true)
+    if [[ ${#container_ids[@]} -eq 0 ]]; then
+        echo "Warning: no containers for service ${svc}" >&2
+        client_exits+="${svc}: missing"$'\n'
         overall_exit=1
         continue
     fi
-    # Cap at 10 min per client; longer than that should be considered a hang.
-    code=$(timeout 600 docker wait "$container_id" 2>/dev/null || echo "timeout")
-    client_exits+="${client}: ${code}"$'\n'
-    if [[ "$code" != "0" ]]; then overall_exit=1; fi
+    for cid in "${container_ids[@]}"; do
+        [[ -z "$cid" ]] && continue
+        # Cap at 10 min per client; longer means a hang.
+        code=$(timeout 600 docker wait "$cid" 2>/dev/null || echo "timeout")
+        client_exits+="${svc}/${cid:0:12}: ${code}"$'\n'
+        if [[ "$code" != "0" ]]; then overall_exit=1; fi
+    done
 done
 
 end_epoch=$(date +%s)
@@ -96,8 +147,7 @@ for service in $(docker compose -f "${compose_file}" config --services); do
         > "${result_dir}/logs/${service}.log" 2>&1 || true
 done
 
-# Normalize each client's results into a canonical JSON for comparison and
-# display.
+# Normalize each client service's results into a canonical JSON.
 for client_log in "${result_dir}"/logs/client_*.log; do
     [[ -f "$client_log" ]] || continue
     client_name=$(basename "${client_log}" .log)
@@ -105,7 +155,7 @@ for client_log in "${result_dir}"/logs/client_*.log; do
         > "${result_dir}/${client_name}.normalized.json" 2>/dev/null || true
 done
 
-# Build summary by extracting result-relevant lines from each client.
+# Build summary.
 {
     echo "=== Per-client results ==="
     for client_log in "${result_dir}"/logs/client_*.log; do

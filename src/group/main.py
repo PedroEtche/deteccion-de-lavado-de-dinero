@@ -18,13 +18,12 @@ from src.communication.protocols.queue_protocol.internal import (
 
 from .strategies import (
     AccountPairCountStategy,
+    AccountStrategy,
     BankMaxAmountStrategy,
     GroupStrategy,
+    MergeRoutingStrategy,
     NoStrategy,
     PaymentFormatAverageStrategy,
-    AccountStrategy,
-    MergeRoutingStrategy,
-    AccountStrategy,
 )
 
 CONFIG_PATH = "./config.yaml"
@@ -40,26 +39,26 @@ class GroupConfig:
     expected_eofs: int
     strategy: GroupStrategy
 
-def _parse_strategy_config(raw_strategy: str) -> GroupStrategy:
-    strategy_type = raw_strategy.get("type", "noop")
-    params = raw_strategy.get("params", {})
+def _parse_strategy_config(raw_strategy: Any) -> GroupStrategy:
+    strategy_type = _read_strategy_type(raw_strategy)
+    params = _read_strategy_params(raw_strategy)
 
     if strategy_type == "BankMaxAmount":
-        return BankMaxAmountStrategy(params["base_routing_key"], params["shard_amount"])
+        return BankMaxAmountStrategy(params["base_routing_key"])
 
-    if strategy_type in ("PaymentFormatAverage", "MergeRouting"):
+    if strategy_type == "PaymentFormatAverage":
         return PaymentFormatAverageStrategy(params["base_routing_key"], params["shard_amount"])
 
     if strategy_type == "AccountPairCount":
         return AccountPairCountStategy(params["base_routing_key"], params["shard_amount"])
-    
+
     if strategy_type == "MergeRouting":
         return MergeRoutingStrategy(params["base_routing_key"], params["shard_amount"])
-    
+
     if strategy_type == "Account":
         return AccountStrategy(params["base_routing_key"], params["shard_amount"])
 
-    return NoStrategy(params["base_routing_key"])
+    return NoStrategy(params.get("base_routing_key", ""))
 
 
 def _read_strategy_type(raw_strategy: Any) -> str:

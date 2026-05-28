@@ -8,7 +8,9 @@ class MessageMiddlewareQueueRabbitMQ(MessageMiddlewareQueue):
 
     def __init__(self, host, queue_name):
         try:
-            self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=host))
+            self.connection = pika.BlockingConnection(
+                pika.ConnectionParameters(host=host, heartbeat=600, blocked_connection_timeout=300)
+            )
             self.channel = self.connection.channel()
             self.channel.queue_declare(queue=queue_name)
             self.queue_name = queue_name
@@ -37,6 +39,10 @@ class MessageMiddlewareQueueRabbitMQ(MessageMiddlewareQueue):
             on_message_callback(body, ack, nack)
 
         try:
+            # prefetch_count=1: el broker no le da al consumer un mensaje nuevo
+            # hasta que el anterior fue ack-eado. Esto (a) mantiene memoria local
+            # acotada, (b) permite balanceo real con --scale en queues compartidas.
+            self.channel.basic_qos(prefetch_count=1)
             self.channel.basic_consume(
                 queue=self.queue_name,
                 on_message_callback=pika_callback_wrapper,
@@ -68,7 +74,9 @@ class MessageMiddlewareExchangeRabbitMQ(MessageMiddlewareExchange):
 
     def __init__(self, host, exchange_name, routing_keys=None, queue_name=None):
         try:
-            self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=host))
+            self.connection = pika.BlockingConnection(
+                pika.ConnectionParameters(host=host, heartbeat=600, blocked_connection_timeout=300)
+            )
             self.channel = self.connection.channel()
             self.exchange_name = exchange_name
             self.channel.exchange_declare(exchange=exchange_name, exchange_type='direct')
@@ -122,6 +130,7 @@ class MessageMiddlewareExchangeRabbitMQ(MessageMiddlewareExchange):
             on_message_callback(body, ack, nack)
 
         try:
+            self.channel.basic_qos(prefetch_count=1)
             self.channel.basic_consume(queue=self.queue_name, on_message_callback=pika_callback_wrapper, auto_ack=False)
             self.channel.start_consuming()
         except (AMQPConnectionError, AMQPChannelError):

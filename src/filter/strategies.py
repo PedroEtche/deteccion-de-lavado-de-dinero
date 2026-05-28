@@ -59,24 +59,30 @@ class FieldLessThanStrategy(FilterStrategy):
         self.field_name = field_name
         self.threshold = threshold
 
+    def __str__(self) -> str:
+        return f"FieldLessThanStrategy(field={self.field_name}, threshold={self.threshold}, output_queue={self.output_queue})"
+
+    def filter_batch(self, batch: List[Any]) -> Dict[str, List[Any]]:
+        filtered = [
+            row for row in batch
+            if getattr(row, self.field_name, None) is not None
+            and getattr(row, self.field_name) < self.threshold
+        ]
+        if not filtered:
+            return {}
+        return {self.output_queue: filtered}
+
+
+class AmountLessThanStrategy(FieldLessThanStrategy):
+    """Specialization of FieldLessThanStrategy for `amount_paid`."""
+
+    def __init__(self, output_queue: str, threshold: float) -> None:
+        super().__init__(output_queue, "amount_paid", float(threshold))
 
     def __str__(self) -> str:
         return f"AmountLessThanStrategy(threshold={self.threshold}, output_queue={self.output_queue})"
 
-    def filter_batch(self, batch: List[Any]) -> Dict[str, List[Any]]:
-        filtered = []
 
-        for row in batch:
-            value = getattr(row, self.field_name, None)
-            
-            if value is not None and value < self.threshold:
-                filtered.append(row)
-
-        if not filtered:
-            return {}
-
-        return { self.output_queue: filtered }
-    
 class FieldGreaterThanStrategy(FilterStrategy):
     def __init__(self, output_queue: str, field_name: str, threshold: float) -> None:
         self.output_queue = output_queue
@@ -160,7 +166,7 @@ class DateStrategy(FilterStrategy):
             except ValueError:
                 continue
             for route in self.routes:
-                if not route.matches(row_date):
+                if not route.matches(row_dt):
                     continue
                 queue_name = route.resolve_queue(row)
                 routed[queue_name].append(row)

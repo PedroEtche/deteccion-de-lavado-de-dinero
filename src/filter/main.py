@@ -50,15 +50,20 @@ def _load_file_config() -> Dict[str, Any]:
         return {}
 
 
-def _parse_strategy_config(raw_strategy: Dict[str, Any]) -> FilterStrategy:
+def _parse_strategy_config(
+    raw_strategy: Dict[str, Any], output_queues: List[str]
+) -> FilterStrategy:
     strategy_type = raw_strategy.get("type", "noop")
     params = raw_strategy.get("params", {})
+    # Estrategias single-output (currency, amount_less_than, no-op) usan la
+    # primera cola configurada. `date` lleva su propia tabla de routes.
+    default_output = output_queues[0] if output_queues else ""
 
     if strategy_type == "currency":
-        return CurrencyStrategy(params["output_queue"], params["target_currency"])
+        return CurrencyStrategy(default_output, params["target_currency"])
 
     if strategy_type == "amount_less_than":
-        return AmountLessThanStrategy(params["output_queue"], float(params["threshold"]))
+        return AmountLessThanStrategy(default_output, float(params["threshold"]))
 
     if strategy_type == "date":
         raw_routes = params.get("routes", [])
@@ -80,7 +85,7 @@ def _parse_strategy_config(raw_strategy: Dict[str, Any]) -> FilterStrategy:
 
         return DateStrategy(routes=routes)
 
-    return NoStrategy("")
+    return NoStrategy(default_output)
 
 def _parse_projection_config(raw_projection: Dict[str, Any]) -> Optional[List[str]]:
     fields = raw_projection.get("fields")
@@ -104,12 +109,14 @@ def init_config() -> FilterConfig:
     raw_projection = file_config.get("projection", {})
     raw_output_queues = os.getenv("OUTPUT_QUEUE", file_config.get("output_queue", ""))
 
+    output_queues = _parse_output_queues(raw_output_queues)
+
     return FilterConfig(
         mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
         input_queue=os.getenv("INPUT_QUEUE", file_config.get("input_queue", "")),
-        output_queues=_parse_output_queues(raw_output_queues),
+        output_queues=output_queues,
         log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
-        strategy=_parse_strategy_config(raw_strategy),
+        strategy=_parse_strategy_config(raw_strategy, output_queues),
         projection_fields=_parse_projection_config(raw_projection),
     )
 

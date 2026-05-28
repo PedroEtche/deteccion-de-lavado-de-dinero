@@ -28,6 +28,7 @@ services:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
     - TRANSACTIONS_QUEUE=transactions_queue
+    - ACCOUNTS_QUEUE=accounts_queue
     - INPUT_QUEUE=result_queue
     - SERVER_PORT=5678
 
@@ -71,10 +72,12 @@ services:
     depends_on:
     - gateway
     volumes:
-    - ./data/sample.csv:/data/dataset.csv:ro
+    - ./data/sample.csv:/data/transactions.csv:ro
+    - /home/matias/facultad/HI-Small_accounts.csv:/data/accounts.csv:ro
     environment:
     - PYTHONUNBUFFERED=1
     - SERVER_HOST=gateway
     - SERVER_PORT=5678
-    - DATASET_PATH=/data/dataset.csv
-    - BATCH_SIZE=500
+    - TRANSACTIONS_DATASET_PATH=/data/transactions.csv
+    - ACCOUNTS_DATASET_PATH=/data/accounts.csv
+    - BATCH_SIZE=${BATCH_SIZE:-500}

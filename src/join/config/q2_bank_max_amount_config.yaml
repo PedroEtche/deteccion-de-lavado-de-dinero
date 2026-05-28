@@ -1,0 +1,5 @@
+mom_host: rabbitmq
+
+strategy: BankMaxAmount
+
+log_level: INFO

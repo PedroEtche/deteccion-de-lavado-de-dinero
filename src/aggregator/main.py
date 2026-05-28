@@ -3,7 +3,7 @@ import os
 import signal
 import uuid
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import yaml
 
@@ -35,6 +35,10 @@ class AggregatorConfig:
     eof_fanout: str
     expected_eofs: int
     strategy: AggregatorStrategy
+    # Si está seteado, el aggregator se bindea al exchange con routing_key
+    # igual a `input_queue` (en lugar de consumir de una cola directa). Necesario
+    # cuando el upstream publica a un exchange direct con sharding por route.
+    input_exchange: Optional[str] = None
 
 
 def _parse_strategy_config(strategy_type: str) -> AggregatorStrategy:
@@ -60,6 +64,11 @@ def init_config() -> AggregatorConfig:
     file_config = _load_file_config()
     raw_strategy = os.getenv("STRATEGY", file_config.get("strategy", "NoStrategy"))
 
+    input_exchange = os.getenv(
+        "INPUT_EXCHANGE",
+        file_config.get("input_exchange", ""),
+    ) or None
+
     return AggregatorConfig(
         mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
         input_queue=os.getenv("INPUT_QUEUE", file_config.get("input_queue", "")),
@@ -68,6 +77,7 @@ def init_config() -> AggregatorConfig:
         eof_fanout=os.getenv("EOF_FANOUT", file_config.get("eof_fanout", "")),
         expected_eofs=int(os.getenv("EXPECTED_EOFS", file_config.get("expected_eofs", "1"))),
         strategy=_parse_strategy_config(raw_strategy),
+        input_exchange=input_exchange,
     )
 
 
@@ -88,9 +98,16 @@ class AggregatorService:
     """Stateful aggregator. Cuenta `expected_eofs` antes de flushear por cliente."""
 
     def __init__(self, config: AggregatorConfig) -> None:
-        self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(
-            config.mom_host, config.input_queue
-        )
+        if config.input_exchange:
+            self.input_queue = middleware.MessageMiddlewareExchangeRabbitMQ(
+                host=config.mom_host,
+                exchange_name=config.input_exchange,
+                routing_keys=[config.input_queue],
+            )
+        else:
+            self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(
+                config.mom_host, config.input_queue
+            )
         self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(
             config.mom_host, config.output_queue
         )

@@ -20,15 +20,17 @@ from common.communication.internal import (
     serialize,
 )
 from .strategies import (
-    FieldLessThanStrategy,
+    AmountLessThanStrategy,
     CurrencyStrategy,
-    DateStrategy,
     DateRangeRoute,
+    DateStrategy,
+    FieldGreaterThanStrategy,
+    FieldLessThanStrategy,
     FilterStrategy,
     HistoricalAverageFilterStrategy,
     NoStrategy,
-    DateRangeRoute,
     OriginNotEqualDestinationStrategy,
+    PaymentFormatStrategy,
     ShardConfig,
     FieldGreaterThanStrategy,
     PaymentFormatStrategy,
@@ -76,17 +78,34 @@ def _parse_strategy_config(
     if strategy_type == "currency":
         return CurrencyStrategy(default_output, params["target_currency"])
 
+    if strategy_type == "amount_less_than":
+        # Caso especial sobre amount_paid. Permite tanto el formato chico
+        # (solo threshold) como el extendido con output_queue explicito.
+        output = params.get("output_queue", default_output)
+        return AmountLessThanStrategy(output, float(params["threshold"]))
+
     if strategy_type == "field_less_than":
-        return FieldLessThanStrategy(params["output_queue"], params["field_name"],float(params["threshold"]))
+        return FieldLessThanStrategy(
+            params.get("output_queue", default_output),
+            params["field_name"],
+            float(params["threshold"]),
+        )
 
     if strategy_type == "field_greater_than":
-        return FieldGreaterThanStrategy(params["output_queue"], params["field_name"], float(params["threshold"]))
+        return FieldGreaterThanStrategy(
+            params.get("output_queue", default_output),
+            params["field_name"],
+            float(params["threshold"]),
+        )
 
     if strategy_type == "payment_format":
         return PaymentFormatStrategy(default_output, params.get("formats", []))
     
     if strategy_type == "scatter_filter":
         return ScatterFilterStrategy(params.get("output_queues", float(params["threshold"])))
+
+    if strategy_type == "origin_neq_destination":
+        return OriginNotEqualDestinationStrategy(default_output)
 
     if strategy_type == "date_routing":
         raw_routes = params.get("routes", [])
@@ -153,10 +172,17 @@ def init_config() -> FilterConfig:
 
     if raw_inputs:
         input_queue = raw_inputs[0]["name"]
-    strategy_params = raw_strategy.get("params", {})
+    strategy_params = raw_strategy.get("params", {}) if isinstance(raw_strategy, dict) else {}
     control_queue = os.getenv("CONTROL_QUEUE", strategy_params.get("control_queue", None))
 
     output_queues = _parse_output_queues(raw_outputs)
+    # Compatibilidad con el formato "viejo" (Q1/Q5): output_queue singular en
+    # YAML o env var OUTPUT_QUEUE. Si no hay outputs plurales, los promovemos
+    # a una entrada queue para que el service abra el middleware.
+    if not output_queues:
+        env_output = os.getenv("OUTPUT_QUEUE", file_config.get("output_queue", ""))
+        if env_output:
+            output_queues = [("queue", env_output)]
 
     return FilterConfig(
         mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
@@ -188,12 +214,12 @@ def process_message(
     message_bytes: bytes,
     strategy: FilterStrategy,
     projection_fields: Optional[List[str]],
-    output_message_type: str,
+    output_message_type: str = "raw_transactions",
 ) -> Optional[Dict[str, bytes]]:
     decoded = deserialize(message_bytes)
 
-    # if decoded["type"] != "raw_transactions":
-    #     return None
+    if decoded.get("type") != "raw_transactions":
+        return None
 
     batch = decoded["payload"]["batch"]
     routed_batches = strategy.filter_batch(batch)

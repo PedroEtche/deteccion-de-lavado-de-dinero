@@ -1,0 +1,19 @@
+mom_host: rabbitmq
+
+inputs:
+  - type: queue
+    name: q4_queue
+
+outputs:
+  - type: queue
+    name: queue_9/1-9/6
+    shards: 1
+
+strategy:
+  type: date_routing
+  params:
+    routes:
+      - match:
+          from: "2022/09/01 00:00"
+          to: "2022/09/06 23:59"
+        output: queue_9/1-9/6

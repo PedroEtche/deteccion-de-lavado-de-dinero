@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-import logging
 from typing import Any, Dict, List, Optional, Set
 
 class AggregatorStrategy(ABC):
@@ -128,6 +127,9 @@ class CountStrategy(AggregatorStrategy):
     def get_result_for_client(self, client: str) -> List[Any]:
         count = self._counts.pop(client, 0)
         return [{"count": count}]
+
+    def clear_client_state(self, client: str) -> None:
+        self._counts.pop(client, None)
 
 
 class PaymentFormatAverageStrategy(AggregatorStrategy):

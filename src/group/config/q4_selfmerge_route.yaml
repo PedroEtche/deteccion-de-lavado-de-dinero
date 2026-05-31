@@ -8,4 +8,4 @@ strategy:
   type: MergeRouting
   params:
     base_routing_key: selfmerge_route
-    shard_amount: 1
+    shard_amount: 4

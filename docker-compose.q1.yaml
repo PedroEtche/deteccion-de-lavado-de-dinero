@@ -68,7 +68,6 @@ services:
     build:
       context: .
       dockerfile: src/client/Dockerfile
-    container_name: client_0
     depends_on:
     - gateway
     volumes:

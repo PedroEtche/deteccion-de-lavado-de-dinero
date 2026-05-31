@@ -35,8 +35,6 @@ CONFIG_PATH = "./config.yaml"
 class AggregatorConfig:
     mom_host: str
     input_queue: str
-    shard_id: str
-    base_routing_key: str
     output_queue: str
     log_level: str
     eof_fanout: str
@@ -46,6 +44,11 @@ class AggregatorConfig:
     # igual a `input_queue` (en lugar de consumir de una cola directa). Necesario
     # cuando el upstream publica a un exchange direct con sharding por route.
     input_exchange: Optional[str] = None
+    # Identifiers de sharding usados por algunos compose files (Q3/Q4). El
+    # service en sí no los consume, pero los aceptamos para que los configs
+    # sigan siendo aplicables sin warnings.
+    shard_id: str = ""
+    base_routing_key: str = ""
 
 def _extract_strategy_type(raw_strategy) -> str:
     if isinstance(raw_strategy, dict):
@@ -175,6 +178,7 @@ class AggregatorService:
             with self.coord.lock():
                 logging.debug("Processing data message for client %s", client)
                 self.strategy.aggregate_batch(decoded["payload"]["batch"], client)
+        ack()
 
     def _flush_client(self, client: str) -> None:
         """Se invoca bajo `coord.lock()` cuando llegaron `expected_eofs` EOFs."""

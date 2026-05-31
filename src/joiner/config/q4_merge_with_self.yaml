@@ -8,3 +8,5 @@ output_queue: q4_merged_with_self_queue
 
 strategy:
   type: self_merge
+  params:
+    shard_amount: 4

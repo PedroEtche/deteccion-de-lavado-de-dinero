@@ -1,6 +1,7 @@
 import logging
 import os
 import time
+import threading
 
 from src.common.communication import (
     STREAM_ACCOUNTS,
@@ -10,10 +11,8 @@ from src.common.communication import (
     send_eof,
 )
 
-
 _CONNECT_RETRY_DELAY = 1.0
 _CONNECT_MAX_RETRIES = 30
-
 
 def _connect_with_retry(host, port):
     for attempt in range(1, _CONNECT_MAX_RETRIES + 1):
@@ -28,23 +27,28 @@ def _connect_with_retry(host, port):
             )
             time.sleep(_CONNECT_RETRY_DELAY)
 
+def _receive_results(sock):
+    logging.info("Started thread to receive results from server")
+    result_count = 0
+    while True:
+        try:
+            msg = sock.recv_bytes()
+        except ConnectionError:
+            logging.info("Server closed connection (received %d result message(s))", result_count)
+            break
+        result_count += 1
+        logging.info("Result %d: %s", result_count, msg.decode("utf-8", errors="replace"))
 
 def run_client(host, port, accounts_path, transactions_path, batch_size):
     sock = _connect_with_retry(host, port)
+
+    results_thread = threading.Thread(target=_receive_results, args=(sock,))
+    results_thread.start()
     try:
         send_csv(sock, accounts_path, batch_size, STREAM_ACCOUNTS)
         send_csv(sock, transactions_path, batch_size, STREAM_TRANSACTIONS)
         send_eof(sock)
         logging.info("Datasets sent; waiting for results")
-        result_count = 0
-        while True:
-            try:
-                msg = sock.recv_bytes()
-            except ConnectionError:
-                logging.info("Server closed connection (received %d result message(s))", result_count)
-                break
-            result_count += 1
-            logging.info("Result %d: %s", result_count, msg.decode("utf-8", errors="replace"))
     finally:
         sock.close()
 

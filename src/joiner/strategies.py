@@ -1,6 +1,6 @@
 from typing import Any, List, Dict
 from abc import ABC, abstractmethod
-from src.communication.protocols.queue_protocol.internal import (
+from common.communication.internal import (
     TransactionRow
 ) 
 

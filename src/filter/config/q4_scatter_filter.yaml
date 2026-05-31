@@ -1,12 +1,16 @@
 mom_host: rabbitmq
 
-input_queue: q4_scatter_filter_queue
+inputs:
+  - type: queue
+    name: q4_scatter_filter_queue
 
-output_queue: q4_selfmerge_route_queue
+outputs:
+  - type: queue
+    name: q4_selfmerge_route_queue
 
 log_level: DEBUG
 
 strategy:
-  type: scatter
+  type: scatter_filter
   params:
     threshold: 5

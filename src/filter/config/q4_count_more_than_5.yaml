@@ -1,14 +1,20 @@
 mom_host: rabbitmq
 
-input_queue: aggregator_count_pairs_queue
+inputs:
+  - type: queue
+    name: aggregator_count_pairs_queue
 
-output_queue: q4_filtered_count
+outputs:
+  - type: queue
+    name: q4_filtered_count
 
 output_message_type: batch
+
+log_level: DEBUG
 
 strategy:
   type: field_greater_than
   params:
     threshold: 5
-    output_queue: q4_filtered_count
     field_name: count
+    output_queue: q4_filtered_count  # Kept here so your parser doesn't throw a KeyError!

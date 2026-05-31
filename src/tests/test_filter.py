@@ -1,7 +1,7 @@
 import unittest
 import uuid
 
-from src.communication.protocols.queue_protocol.internal import (
+from common.communication.internal import (
     TransactionRow,
     build_eof_message,
     build_raw_transactions_message,

@@ -1,6 +1,6 @@
-import unittest
+wimport unittest
 
-from src.communication.protocols.queue_protocol.internal import TransactionRow
+from common.communication.internal import TransactionRow
 from src.filter.strategies import (
     AmountLessThanStrategy,
     CurrencyStrategy,

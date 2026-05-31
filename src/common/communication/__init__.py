@@ -6,6 +6,13 @@ from .protocol import (
     STREAM_TRANSACTIONS,
     STREAM_ACCOUNTS,
 )
+from .internal import (
+    serialize,
+    build_batch_message,
+    build_eof_message,
+    TransactionRow,
+    AccountRow,
+)
 
 __all__ = [
     "TCPSocket",

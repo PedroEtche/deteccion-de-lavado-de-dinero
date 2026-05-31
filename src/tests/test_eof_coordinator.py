@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from src.common.eof.coordinator import EOF_ROUTING_KEY, EofCoordinator
-from src.communication.protocols.queue_protocol.internal import deserialize
+from common.communication.internal import deserialize
 
 
 class _FakeExchange:

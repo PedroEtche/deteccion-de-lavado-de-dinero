@@ -1,11 +1,17 @@
 mom_host: rabbitmq
 
-input_queue: transactions_queue
+# You can keep input_queue, or use the new 'inputs' list format
+inputs:
+  - name: transactions_queue
 
-output_queue: q4_queue
+# The new outputs list format required by your parser
+outputs:
+  - type: queue
+    name: q4_queue
+
+log_level: DEBUG
 
 strategy:
   type: currency
   params:
     target_currency: "US Dollar"
-    output_queue: q4_queue

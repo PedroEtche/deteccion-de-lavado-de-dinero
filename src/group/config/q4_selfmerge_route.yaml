@@ -1,6 +1,6 @@
 mom_host: rabbitmq
 
-input_queue: queue_9/1-9/6
+input_queue: q4_selfmerge_route_queue
 
 output_exchange: selfmerge_route
 

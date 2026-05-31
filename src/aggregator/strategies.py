@@ -211,3 +211,39 @@ class AccountStrategy(AggregatorStrategy):
 
     def clear_client_state(self, client: str) -> None:
         self.accounts_by_client.pop(client, None)
+
+class ScatterAggregatorStrategy(AggregatorStrategy):
+    def __init__(self):
+        self.state_by_client: Dict[str, Dict[tuple, Dict[str, Any]]] = {}
+
+    def __str__(self) -> str:
+        return "ScatterAggregatorStrategy"
+
+    def aggregate_batch(self, batch: List[Any], client: Optional[str] = None) -> List[Any]:
+        if client is None:
+            raise ValueError("client is required for ScatterAggregatorStrategy")
+
+        client_state = self.state_by_client.setdefault(client, {})
+        
+        for tx in batch:
+            origin = (tx["from_bank"], tx["from_account"])
+            dest = (tx["to_bank"], tx["to_account"])
+
+            data = client_state.setdefault(origin, {"dests": set(), "txs": []})
+            data["dests"].add(dest)
+            data["txs"].append(tx)
+
+        return []
+
+    def get_result_for_client(self, client: str) -> List[Any]:
+        client_state = self.state_by_client.get(client, {})
+        
+        filtered_results = []
+        for origin, data in client_state.items():
+            if len(data["dests"]) > 5:
+                filtered_results.extend(data["txs"])
+                
+        return filtered_results
+
+    def clear_client_state(self, client: str) -> None:
+        self.state_by_client.pop(client, None)

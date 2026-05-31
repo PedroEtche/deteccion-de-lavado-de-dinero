@@ -2,16 +2,20 @@ mom_host: rabbitmq
 
 inputs:
   - type: queue
-    name: q3_queue
+    name: q4_queue
 
 outputs:
   - type: queue
     name: queue_6/9-15/9
     shards: 1
-
   - type: queue
     name: queue_9/1-9/5
     shards: 3
+  - type: queue
+    name: queue_9/1-9/6
+    shards: 3
+
+log_level: DEBUG
 
 strategy:
   type: date_routing
@@ -28,4 +32,3 @@ strategy:
           from: "2022/09/06 00:01"
           to: "2022/09/15 23:59"
         output: queue_6/9-15/9
-

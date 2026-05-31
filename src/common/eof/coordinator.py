@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from typing import Callable, Optional
 
 from src.common.middleware import MessageMiddlewareExchangeRabbitMQ
-from src.communication.protocols.queue_protocol.internal import (
+from common.communication.internal import (
     build_eof_message,
     deserialize,
     serialize,

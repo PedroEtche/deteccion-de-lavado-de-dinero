@@ -12,7 +12,7 @@ from typing import Any, Dict, IO, List, Optional, Set, Tuple
 import yaml
 
 from src.common.middleware import (MessageMiddlewareQueueRabbitMQ, MessageMiddlewareExchangeRabbitMQ)
-from src.communication.protocols.queue_protocol.internal import (
+from common.communication.internal import (
     TransactionRow,
     build_batch_message,
     build_eof_message,
@@ -32,6 +32,9 @@ from .strategies import (
     OriginNotEqualDestinationStrategy,
     PaymentFormatStrategy,
     ShardConfig,
+    FieldGreaterThanStrategy,
+    PaymentFormatStrategy,
+    ScatterFilterStrategy,
 )
 
 
@@ -97,6 +100,9 @@ def _parse_strategy_config(
 
     if strategy_type == "payment_format":
         return PaymentFormatStrategy(default_output, params.get("formats", []))
+    
+    if strategy_type == "scatter_filter":
+        return ScatterFilterStrategy(params.get("output_queues", float(params["threshold"])))
 
     if strategy_type == "origin_neq_destination":
         return OriginNotEqualDestinationStrategy(default_output)
@@ -328,7 +334,7 @@ class FilterService:
                     return
                 self.strategy._current_client = client
 
-            result = process_message(message, self.strategy, self.projection_fields)
+            result = process_message(message, self.strategy, self.projection_fields, self.output_message_type)
             if result is not None:
                 for queue, out_msg in result.items():
                     self._output_middleware[queue].send(out_msg)
@@ -366,7 +372,7 @@ class FilterService:
                 if len(buffered_msg) < length:
                     break
                 count += 1
-                result = process_message(buffered_msg, self.strategy, self.projection_fields)
+                result = process_message(buffered_msg, self.strategy, self.projection_fields, self.output_message_type)
                 if result is not None:
                     for queue, out_msg in result.items():
                         self._output_middleware[queue].send(out_msg)

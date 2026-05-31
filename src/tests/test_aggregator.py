@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from src.aggregator.main import AggregatorConfig, AggregatorService
 from src.aggregator.strategies import BankMaxAmountStrategy, CountStrategy
-from src.communication.protocols.queue_protocol.internal import deserialize, serialize
+from common.communication.internal import deserialize, serialize
 
 
 def _make_data_msg(client, batch):

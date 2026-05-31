@@ -130,3 +130,23 @@ class BankMaxAmountStrategy(JoinStrategy):
                 "amount_paid": entry["amount_paid"],
             })
         return results
+
+class AccountStrategy(JoinStrategy):
+    def __init__(self):
+        self.accounts_by_client: Dict[str, List[Dict[str, str]]] = {}
+
+    def __str__(self) -> str:
+        return "AccountStrategy"
+
+    def join_batch(self, batch: List[Any], client: Optional[str] = None) -> List[Any]:
+        if client is None:
+            raise ValueError("client is required for AccountStrategy.join_batch")
+        
+        client_accounts = self.accounts_by_client.setdefault(client, [])
+        for record in batch:
+            client_accounts.append(record)
+
+        return []
+
+    def get_joined_for_client(self, client: str) -> List[Any]:
+        return self.accounts_by_client.pop(client, [])

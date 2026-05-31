@@ -1,0 +1,9 @@
+mom_host: rabbitmq
+
+input_queue: q4_join_queue               
+
+output_queue: result_queue
+
+log_level: DEBUG
+
+strategy: Account

@@ -1,6 +1,6 @@
 import unittest
 
-from src.communication.protocols.queue_protocol.internal import AccountRow, TransactionRow
+from common.communication.internal import AccountRow, TransactionRow
 from src.gateway.main import _dict_to_account_row, _dict_to_transaction_row
 
 

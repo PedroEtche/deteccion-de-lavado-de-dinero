@@ -9,7 +9,7 @@ import yaml
 
 from src.common import middleware
 from src.common.eof import EofCoordinator
-from src.communication.protocols.queue_protocol.internal import (
+from common.communication.internal import (
     build_batch_message,
     build_eof_message,
     deserialize,
@@ -24,6 +24,8 @@ from .strategies import (
     CountStrategy,
     NoStrategy,
     PaymentFormatAverageStrategy,
+    AccountStrategy,
+    ScatterAggregatorStrategy,
 )
 
 CONFIG_PATH = "./config.yaml"
@@ -53,7 +55,6 @@ def _extract_strategy_type(raw_strategy) -> str:
         return str(raw_strategy.get("type", "NoStrategy"))
     return str(raw_strategy or "NoStrategy")
 
-
 def _parse_strategy_config(raw_strategy) -> AggregatorStrategy:
     strategy_type = _extract_strategy_type(raw_strategy)
 
@@ -71,6 +72,9 @@ def _parse_strategy_config(raw_strategy) -> AggregatorStrategy:
 
     if strategy_type == "Count":
         return CountStrategy()
+    
+    if strategy_type == "ScatterAggregator":
+        return ScatterAggregatorStrategy()
 
     return NoStrategy()
 

@@ -9,7 +9,7 @@ import yaml
 
 from src.common import middleware
 from src.common.eof import EofCoordinator
-from src.communication.protocols.queue_protocol.internal import (
+from common.communication.internal import (
     build_batch_message,
     build_eof_message,
     deserialize,
@@ -24,6 +24,10 @@ from .strategies import (
     MergeRoutingStrategy,
     NoStrategy,
     PaymentFormatAverageStrategy,
+    AccountStrategy,
+    MergeRoutingStrategy,
+    AccountStrategy,
+    ScatterGroupStrategy,
 )
 
 CONFIG_PATH = "./config.yaml"
@@ -57,6 +61,9 @@ def _parse_strategy_config(raw_strategy: Any) -> GroupStrategy:
 
     if strategy_type == "Account":
         return AccountStrategy(params["base_routing_key"], params["shard_amount"])
+    
+    if strategy_type == "ScatterGroup":
+        return ScatterGroupStrategy(params["base_routing_key"], params["shard_amount"])
 
     return NoStrategy(params.get("base_routing_key", ""))
 
@@ -152,7 +159,7 @@ class GroupService:
     def _on_input(self, message, ack, _nack):
         decoded = deserialize(message)
         client = decoded["client"]
-        
+
         if decoded["type"] == "eof":
             logging.info("Received EOF from upstream for client %s", client)
             self.coord.broadcast(client)

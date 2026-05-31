@@ -1,8 +1,9 @@
 import zlib
 from abc import ABC, abstractmethod
+from common.communication.internal import (
+    TransactionRow
+) 
 from typing import Any, Dict, List
-
-from src.communication.protocols.queue_protocol.internal import TransactionRow
 
 class JoinerStrategy(ABC):
     """Abstract strategy for filtering batches of messages.

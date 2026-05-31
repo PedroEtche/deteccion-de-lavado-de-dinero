@@ -3,7 +3,7 @@ import uuid
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
-from src.communication.protocols.queue_protocol.internal import (
+from common.communication.internal import (
     AccountRow,
     deserialize,
     serialize,

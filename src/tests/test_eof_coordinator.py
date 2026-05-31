@@ -3,8 +3,8 @@ import time
 import unittest
 from unittest.mock import MagicMock, patch
 
-from src.common.eof.coordinator import EofCoordinator
-from src.communication.protocols.queue_protocol.internal import deserialize
+from src.common.eof.coordinator import EOF_ROUTING_KEY, EofCoordinator
+from common.communication.internal import deserialize
 
 
 class _FakeExchange:

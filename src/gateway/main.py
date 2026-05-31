@@ -15,7 +15,7 @@ from src.common.communication import (
 )
 from src.common.communication.tcp import TCPSocket
 from src.common.middleware import MessageMiddlewareQueueRabbitMQ
-from src.communication.protocols.queue_protocol.internal import (
+from common.communication.internal import (
     AccountRow,
     TransactionRow,
     build_eof_message,

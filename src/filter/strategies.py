@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from datetime import datetime
 import hashlib
 
+import logging
+
 _TIMESTAMP_FMT = "%Y/%m/%d %H:%M"
 
 class FilterStrategy(ABC):
@@ -96,7 +98,8 @@ class FieldGreaterThanStrategy(FilterStrategy):
         filtered = []
         for row in batch:
             value = row.get(self.field_name)
-
+            if value > 1:
+                logging.info(f"Evaluating row with {self.field_name}={value} against threshold {self.threshold}")
             if value is not None and value > self.threshold:
                 filtered.append(row)
 
@@ -206,7 +209,6 @@ class HistoricalAverageFilterStrategy(FilterStrategy):
         self.averages_by_client.pop(client, None)
 
     def filter_batch(self, batch: List[Any]) -> Dict[str, List[Any]]:
-        # Expecting the service to set this attribute before calling
         client = getattr(self, "_current_client", None)
         if client is None:
             return {}
@@ -232,7 +234,6 @@ class HistoricalAverageFilterStrategy(FilterStrategy):
 
         return {self.output_queue: filtered}
 
-
 class OriginNotEqualDestinationStrategy(FilterStrategy):
     def __init__(self, output_queue: str) -> None:
         self.output_queue = output_queue
@@ -245,4 +246,26 @@ class OriginNotEqualDestinationStrategy(FilterStrategy):
             tx for tx in batch
             if tx.from_bank != tx.to_bank or tx.from_account != tx.to_account
         ]
+        return {self.output_queue: filtered}
+    
+class ScatterFilterStrategy(FilterStrategy):
+    """Filters scatter accounts and unrolls their transactions back into a flat list."""
+    def __init__(self, output_queue: str, threshold: int = 5) -> None:
+        self.output_queue = output_queue
+        self.threshold = threshold
+
+    def __str__(self) -> str:
+        return f"ScatterFilterStrategy(threshold={self.threshold}, output_queue={self.output_queue})"
+
+    def filter_batch(self, batch: List[Any]) -> Dict[str, List[Any]]:
+        filtered = []
+
+        for record in batch:
+            if record.get("unique_destinations", 0) > self.threshold:
+                transactions = record.get("transactions", [])
+                filtered.extend(transactions)
+
+        if not filtered:
+            return {}
+
         return {self.output_queue: filtered}

@@ -9,7 +9,7 @@ import yaml
 
 from src.common import middleware
 from src.common.eof import EofCoordinator
-from common.communication.internal import (
+from src.common.communication.internal import (
     build_batch_message,
     build_eof_message,
     deserialize,

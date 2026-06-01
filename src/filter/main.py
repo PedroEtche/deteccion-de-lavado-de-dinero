@@ -12,13 +12,14 @@ from typing import Any, Dict, IO, List, Optional, Set, Tuple
 import yaml
 
 from src.common.middleware import (MessageMiddlewareQueueRabbitMQ, MessageMiddlewareExchangeRabbitMQ)
-from common.communication.internal import (
+from src.common.communication.internal import (
     TransactionRow,
     build_batch_message,
     build_eof_message,
     deserialize,
     serialize,
 )
+
 from .strategies import (
     AmountLessThanStrategy,
     CurrencyStrategy,

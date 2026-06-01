@@ -11,7 +11,7 @@ from typing import Callable, Dict, List, Optional
 import yaml
 
 from src.common.middleware import MessageMiddlewareQueueRabbitMQ
-from common.communication.internal import (
+from src.common.communication.internal import (
     TransactionRow,
     build_eof_message,
     build_raw_transactions_message,

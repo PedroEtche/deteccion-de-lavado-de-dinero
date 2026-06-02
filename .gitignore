@@ -1,5 +1,6 @@
 __pycache__/
 *.pyc
-data/
 .python-version
 results/
+/data/LI-Small_Trans.csv
+/data/LI-Small_accounts.csv

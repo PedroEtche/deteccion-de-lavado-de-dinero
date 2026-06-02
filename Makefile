@@ -16,15 +16,22 @@ logs:
 .PHONY: logs
 
 test:
-	# Procesar los datos de forma secuencial y compararlo con nuestro resultado
+	# Aca se puede tener un test de las 5 queries a la vez
 .PHONY: test
 
 q1_switch:
 	@echo Escenarios de prueba:
-	@echo "1) Un cliente, set de datos LI-Small, una sola replica de cada elemento"
+	@echo "1) Un cliente, set de datos de prueba (small_trans), una sola replica de cada elemento"
 	@read -p "Selecciona uno: " option;	\
 	cp ./scenarios/q1/$${option}.yaml docker-compose.yaml
 .PHONY: q1_switch
+
+q1_test_fixed:
+	COMPOSE_HTTP_TIMEOUT=300 docker compose -f docker-compose.yaml up --build --remove-orphans --detach
+	# Verificar resultados en /results/clients/client_0/ contra /results/fixed/q1.csv usando /scripts/compare_result.py
+	docker compose -f docker-compose.yaml stop -t 1
+	docker compose -f docker-compose.yaml down
+.PHONY: q1_test
 
 q3_switch:
 	@echo Escenarios de prueba:
@@ -39,6 +46,13 @@ q4_switch:
 	@read -p "Selecciona uno: " option;	\
 	cp ./scenarios/q4/$${option}.yaml docker-compose.yaml
 .PHONY: q4_switch
+
+
+# ----------------------------------
+# De aca para abajo no entiendo nada
+# 	Firma: Pedro
+# ----------------------------------
+
 # Genera un sample chico del dataset para iterar rapido. Por default toma las
 # primeras SAMPLE_ROWS filas de HI-Large_Trans.csv (head es O(filas pedidas),
 # no del archivo, asi que samplear desde Large o Small cuesta lo mismo).

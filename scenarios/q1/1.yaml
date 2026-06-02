@@ -71,10 +71,11 @@ services:
     depends_on:
     - gateway
     volumes:
-    - ./data/LI-Small_Trans.csv:/data/dataset.csv:ro
+    - ./data/small_trans.csv:/data/dataset.csv:ro
     environment:
     - PYTHONUNBUFFERED=1
     - SERVER_HOST=gateway
     - SERVER_PORT=5678
+    - OUTPUT_PATH=/results/clients/client_0/
     - DATASET_PATH=/data/dataset.csv
     - BATCH_SIZE=500

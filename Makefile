@@ -28,10 +28,12 @@ q1_switch:
 
 q1_test_fixed:
 	COMPOSE_HTTP_TIMEOUT=300 docker compose -f docker-compose.yaml up --build --remove-orphans --detach
-	# Verificar resultados en /results/clients/client_0/ contra /results/fixed/q1.csv usando /scripts/compare_result.py
+	@echo "Waiting for client_0 to finish..."
+	@docker wait client_0
+	python3 scripts/compare_results.py q1
 	docker compose -f docker-compose.yaml stop -t 1
 	docker compose -f docker-compose.yaml down
-.PHONY: q1_test
+.PHONY: q1_test_fixed
 
 q3_switch:
 	@echo Escenarios de prueba:

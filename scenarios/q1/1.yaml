@@ -72,6 +72,7 @@ services:
     - gateway
     volumes:
     - ./data/small_trans.csv:/data/dataset.csv:ro
+    - ./results/clients/client_0:/results/clients/client_0
     environment:
     - PYTHONUNBUFFERED=1
     - SERVER_HOST=gateway

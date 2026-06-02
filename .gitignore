@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 .python-version
-results/
+results/20260528_163849_q3
 /data/LI-Small_Trans.csv
 /data/LI-Small_accounts.csv
+.DS_Store

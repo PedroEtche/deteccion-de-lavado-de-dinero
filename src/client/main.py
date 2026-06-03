@@ -1,4 +1,5 @@
 import logging
+import csv
 import os
 import time
 import threading
@@ -10,6 +11,7 @@ from src.common.communication import (
     connect,
     send_csv,
     send_eof,
+    deserialize,
 )
 
 _CONNECT_RETRY_DELAY = 1.0
@@ -33,6 +35,13 @@ def _connect_with_retry(host, port):
                 _CONNECT_RETRY_DELAY,
             )
             time.sleep(_CONNECT_RETRY_DELAY)
+
+
+def persist_rows(output_file, batch):
+    with open(output_file, "a") as csvfile:
+        csv_writer = csv.writer(csvfile, delimiter=",", quotechar='"')
+        for row in batch:
+            csv_writer.writerow(row)
 
 
 # def _receive_results(sock):
@@ -102,7 +111,10 @@ class Client:
         self.server_socket = _connect_with_retry(server_host, server_port)
         self._reader_thread = threading.Thread(
             target=self.recv_results,
-            args=(output_path,),
+            args=(
+                self.server_socket,
+                output_path,
+            ),
             daemon=True,  # si el proceso muere, el thread no bloquea el exit
         )
         self._reader_thread.start()
@@ -144,10 +156,51 @@ class Client:
 
         # Esperamos a que el thread lector termine limpiamente
         self._reader_thread.join()
+        self.server_socket.close()
 
-    def recv_results(self, output_path):
+    def recv_results(self, sock, output_path):
         logging.info("Receiving results")
-        # Guardar resultados en archivos dentro del output path dependiendo de la query
+        query_result_counter = 0
+        while query_result_counter < 5:
+            msg = sock.recv_bytes()
+            decoded = deserialize(msg)
+            query_type = decoded["type"]
+
+            if query_type == "q1_result":
+                output_file = output_path + "q1.csv"
+                batch = decoded["payload"]["batch"]
+                persist_rows(output_file, batch)
+
+            elif query_type == "q2_result":
+                output_file = output_path + "q2.csv"
+                batch = decoded["payload"]["batch"]
+                persist_rows(output_file, batch)
+
+            elif query_type == "q3_result":
+                output_file = output_path + "q3.csv"
+                batch = decoded["payload"]["batch"]
+                persist_rows(output_file, batch)
+
+            elif query_type == "q4_result":
+                output_file = output_path + "q4.csv"
+                batch = decoded["payload"]["batch"]
+                persist_rows(output_file, batch)
+
+            elif query_type == "q5_result":
+                output_file = output_path + "q5.txt"
+                with open(output_file, "a") as txtfile:
+                    txtfile.write(decoded["payload"])
+
+            else:
+                logging.info("Unexpected Message: %s", decoded)
+                continue
+
+            if decoded["eof"]:
+                logging.info("Receive EOF from query number: %s", query_type[1])
+                query_result_counter += 1
+
+        sock.shutdown("rd")
+        sock.close()
 
 
 def main() -> int:

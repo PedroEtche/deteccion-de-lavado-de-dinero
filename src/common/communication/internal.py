@@ -361,6 +361,7 @@ message = {
 
 message = {
     type: "q1_result",
+    eof: true | false,
     payload: {
         batch_size: N,
         batch: [row0, row1, ..., rowN]
@@ -378,6 +379,7 @@ row: {
 
 message = {
     type: "q2_result",
+    eof: true | false,
     payload: {
         batch_size: N,
         batch: [row0, row1, ..., rowN]
@@ -394,6 +396,7 @@ row: {
 
 message = {
     type: "q3_result",
+    eof: true | false,
     payload: {
         batch_size: N,
         batch: [row0, row1, ..., rowN]
@@ -410,6 +413,7 @@ row: {
 
 message = {
     type: "q4_result",
+    eof: true | false,
     payload: {
         batch_size: N,
         batch: [row0, row1, ..., rowN]
@@ -424,6 +428,7 @@ row: {
 
 message = {
     type: "q5_result",
+    eof: true,
     payload: N,
 }
 """

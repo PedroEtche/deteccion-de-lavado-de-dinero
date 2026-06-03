@@ -8,8 +8,11 @@ _TIMESTAMP_FORMATS = ("%Y/%m/%d %H:%M", "%Y/%m/%d %H:%M:%S")
 # Metadata about registered message types and their validation rules
 MESSAGE_TYPES = {}
 
-def register_message_type(name, payload_required=False, required_fields=None, payload_validator=None):
-    """ Registers a new message type with the given name and schema."""
+
+def register_message_type(
+    name, payload_required=False, required_fields=None, payload_validator=None
+):
+    """Registers a new message type with the given name and schema."""
     if required_fields is None:
         required_fields = []
 
@@ -18,6 +21,7 @@ def register_message_type(name, payload_required=False, required_fields=None, pa
         "required_fields": list(required_fields),
         "payload_validator": payload_validator,
     }
+
 
 def _validate_batch_payload(payload):
     if not isinstance(payload, dict):
@@ -36,14 +40,60 @@ def _validate_batch_payload(payload):
         raise MessageValidationError("payload['batch_size'] must be an integer")
 
     if payload["batch_size"] != len(payload["batch"]):
-        raise MessageValidationError("payload['batch_size'] must match the length of payload['batch']")
+        raise MessageValidationError(
+            "payload['batch_size'] must match the length of payload['batch']"
+        )
 
+
+def _validate_payload(payload):
+    if not isinstance(payload, int):
+        raise MessageValidationError("payload must be an integer")
 
 
 # Supported message types
-register_message_type("raw_transactions", payload_required=True, required_fields=["payload"], payload_validator=_validate_batch_payload)
-register_message_type("raw_accounts", payload_required=True, required_fields=["payload"], payload_validator=_validate_batch_payload)
+register_message_type(
+    "raw_transactions",
+    payload_required=True,
+    required_fields=["payload"],
+    payload_validator=_validate_batch_payload,
+)
+register_message_type(
+    "raw_accounts",
+    payload_required=True,
+    required_fields=["payload"],
+    payload_validator=_validate_batch_payload,
+)
 register_message_type("eof")
+register_message_type(
+    "q1_result",
+    payload_required=True,
+    required_fields=["payload"],
+    payload_validator=_validate_batch_payload,
+)
+register_message_type(
+    "q2_result",
+    payload_required=True,
+    required_fields=["payload"],
+    payload_validator=_validate_batch_payload,
+)
+register_message_type(
+    "q3_result",
+    payload_required=True,
+    required_fields=["payload"],
+    payload_validator=_validate_batch_payload,
+)
+register_message_type(
+    "q4_result",
+    payload_required=True,
+    required_fields=["payload"],
+    payload_validator=_validate_batch_payload,
+)
+register_message_type(
+    "q5_result",
+    payload_required=True,
+    required_fields=["payload"],
+    payload_validator=_validate_payload,
+)
 
 
 @dataclass
@@ -54,9 +104,7 @@ class Payload:
     @classmethod
     def from_dict(cls, data):
         if not isinstance(data, dict):
-            raise MessageDecodeError(
-                f"{cls.__name__}.from_dict expects a dict"
-            )
+            raise MessageDecodeError(f"{cls.__name__}.from_dict expects a dict")
 
         return cls(**data)
 
@@ -94,6 +142,7 @@ class TransactionRow(Payload):
                 continue
         return None
 
+
 class _MessageEncoder(JSONEncoder):
     def default(self, o):
         if isinstance(o, Payload):
@@ -113,14 +162,14 @@ class MessageDecodeError(ProtocolError):
     pass
 
 
-
 def _validate_message(message):
     if not isinstance(message, dict):
         raise MessageValidationError("message must be a dictionary")
 
-    for field_name in ("type", "client", "msg_id"):
-        if field_name not in message:
-            raise MessageValidationError(f"message is missing '{field_name}'")
+    # INFO: Dejo esto comentador porque agregue nuevos tipos de mensaje (respuestas de queries) que no tiene un field de client y/o msg_id
+    # for field_name in ("type", "client", "msg_id"):
+    #     if field_name not in message:
+    #         raise MessageValidationError(f"message is missing '{field_name}'")
 
     if not isinstance(message["type"], str) or not message["type"].strip():
         raise MessageValidationError("message['type'] must be a non-empty string")
@@ -131,18 +180,26 @@ def _validate_message(message):
 
     for field_name in schema["required_fields"]:
         if field_name not in message:
-            raise MessageValidationError(f"message type '{message['type']}' is missing '{field_name}'")
+            raise MessageValidationError(
+                f"message type '{message['type']}' is missing '{field_name}'"
+            )
 
     if schema["payload_required"] and "payload" not in message:
-        raise MessageValidationError(f"message type '{message['type']}' requires a payload")
+        raise MessageValidationError(
+            f"message type '{message['type']}' requires a payload"
+        )
 
     if "payload" in message and schema["payload_validator"] is not None:
         schema["payload_validator"](message["payload"])
 
 
-def build_message(message_type, client, msg_id, payload=None):
-    message = {"type": message_type, "client": client, "msg_id": msg_id}
+def build_message(message_type, client=None, msg_id=None, payload=None):
+    message = {"type": message_type}
 
+    if client is not None:
+        message["client"] = client
+    if msg_id is not None:
+        message["msg_id"] = msg_id
     if payload is not None:
         message["payload"] = payload
 
@@ -150,14 +207,14 @@ def build_message(message_type, client, msg_id, payload=None):
     return message
 
 
-def build_batch_message(message_type, client, msg_id, batch):
+def build_batch_message(message_type, batch, client=None, msg_id=None):
     payload = {"batch_size": len(batch), "batch": batch}
 
     return build_message(message_type, client=client, msg_id=msg_id, payload=payload)
 
 
 def build_raw_transactions_message(*, client, msg_id, batch):
-    """ Wrapper for building raw transactions message """
+    """Wrapper for building raw transactions message"""
     if not isinstance(batch, list):
         raise MessageValidationError("message must be a list")
     if not all(isinstance(row, TransactionRow) for row in batch):
@@ -171,7 +228,7 @@ def build_raw_transactions_message(*, client, msg_id, batch):
 
 
 def build_raw_accounts_message(*, client, msg_id, batch):
-    """ Wrapper for building raw accounts message """
+    """Wrapper for building raw accounts message"""
     if not isinstance(batch, list):
         raise MessageValidationError("message must be a list")
     if not all(isinstance(row, AccountRow) for row in batch):
@@ -186,13 +243,28 @@ def build_raw_accounts_message(*, client, msg_id, batch):
 
 
 def build_eof_message(*, client, msg_id):
-    """ Wrapper for building EOF message """
+    """Wrapper for building EOF message"""
     return build_message("eof", client=client, msg_id=msg_id)
+
+
+def build_q1_result(*, batch):
+    """Wrapper for building q1 result message"""
+    if not isinstance(batch, list):
+        raise MessageValidationError("message must be a list")
+    if not all(isinstance(row, TransactionRow) for row in batch):
+        raise MessageValidationError("message must be a list of TransactionRow objects")
+
+    return build_batch_message(
+        "q1_result",
+        batch=batch,
+    )
 
 
 def serialize(message):
     _validate_message(message)
-    return json.dumps(message, ensure_ascii=False, separators=(",", ":"), cls=_MessageEncoder).encode("utf-8")
+    return json.dumps(
+        message, ensure_ascii=False, separators=(",", ":"), cls=_MessageEncoder
+    ).encode("utf-8")
 
 
 def deserialize(message):
@@ -223,8 +295,7 @@ def deserialize(message):
         ]
     elif msg_type == "raw_accounts":
         decoded["payload"]["batch"] = [
-            AccountRow.from_dict(row) if isinstance(row, dict) else row
-            for row in batch
+            AccountRow.from_dict(row) if isinstance(row, dict) else row for row in batch
         ]
 
     return decoded
@@ -238,6 +309,7 @@ Add new message/usage guide:
 
 
 Base messages examples:
+
 message = {
     type: "raw_transactions",
     client: uuid,
@@ -285,5 +357,73 @@ message = {
     type: "eof",
     client: uuid,
     msg_id: uuid,
+}
+
+message = {
+    type: "q1_result",
+    payload: {
+        batch_size: N,
+        batch: [row0, row1, ..., rowN]
+    },
+}
+
+Example row:
+row: {
+    From Bank: 20,
+    Account: 802EABEB0,
+    To Bank: 220270,
+    Account.1: 80E25DFF0,
+    Amount Paid: 9661.410000,
+}
+
+message = {
+    type: "q2_result",
+    payload: {
+        batch_size: N,
+        batch: [row0, row1, ..., rowN]
+    },
+}
+
+Example row:
+row: {
+    From Bank: 20,
+    Account: 802EABEB0,
+    Bank Name: China Bank #2820,
+    Amount Paid: 9661.410000,
+}
+
+message = {
+    type: "q3_result",
+    payload: {
+        batch_size: N,
+        batch: [row0, row1, ..., rowN]
+    },
+}
+
+Example row:
+row: {
+    From Bank: 20,
+    Account: 802EABEB0,
+    Amount Paid: 9661.410000,
+    Payment Format: WIRE,
+}
+
+message = {
+    type: "q4_result",
+    payload: {
+        batch_size: N,
+        batch: [row0, row1, ..., rowN]
+    },
+}
+
+Example row:
+row: {
+    Bank: 20,
+    Account: 802EABEB0,
+}
+
+message = {
+    type: "q5_result",
+    payload: N,
 }
 """

@@ -20,6 +20,18 @@ class TCPSocket:
     def close(self):
         self._sock.close()
 
+    # Used for sending a signal to the other end of communication ending
+    # wr means dont expect more messages
+    # rd means i wont be reading anymore
+    # rdwr means the comunnication is finished
+    def shutdown(self, instruction):
+        if instruction == "wr":
+            self._sock.shutdown(socket.SHUT_WR)
+        elif instruction == "rd":
+            self._sock.shutdown(socket.SHUT_RD)
+        else:
+            self._sock.shutdown(socket.SHUT_RDWR)
+
     def _recv_exact(self, n):
         buf = bytearray()
         while len(buf) < n:

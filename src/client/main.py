@@ -2,6 +2,7 @@ import logging
 import os
 import time
 import threading
+import signal
 
 from src.common.communication import (
     STREAM_ACCOUNTS,
@@ -14,6 +15,7 @@ from src.common.communication import (
 _CONNECT_RETRY_DELAY = 1.0
 _CONNECT_MAX_RETRIES = 30
 
+
 def _connect_with_retry(host, port):
     for attempt in range(1, _CONNECT_MAX_RETRIES + 1):
         try:
@@ -23,55 +25,137 @@ def _connect_with_retry(host, port):
                 raise
             logging.info(
                 "Connection to %s:%s refused (attempt %d/%d): %s. Retrying in %ss",
-                host, port, attempt, _CONNECT_MAX_RETRIES, exc, _CONNECT_RETRY_DELAY,
+                host,
+                port,
+                attempt,
+                _CONNECT_MAX_RETRIES,
+                exc,
+                _CONNECT_RETRY_DELAY,
             )
             time.sleep(_CONNECT_RETRY_DELAY)
 
-def _receive_results(sock):
-    logging.info("Started thread to receive results from server")
-    result_count = 0
-    while True:
+
+# def _receive_results(sock):
+#     logging.info("Started thread to receive results from server")
+#     result_count = 0
+#     while True:
+#         try:
+#             msg = sock.recv_bytes()
+#         except ConnectionError:
+#             logging.info("Server closed connection (received %d result message(s))", result_count)
+#             break
+#         result_count += 1
+#         logging.info("Result %d: %s", result_count, msg.decode("utf-8", errors="replace"))
+
+# def run_client(host, port, accounts_path, transactions_path, batch_size, output_path):
+#     sock = _connect_with_retry(host, port)
+#
+#     results_thread = threading.Thread(target=_receive_results, args=(sock,))
+#     results_thread.start()
+#     try:
+#         send_csv(sock, accounts_path, batch_size, STREAM_ACCOUNTS)
+#         send_csv(sock, transactions_path, batch_size, STREAM_TRANSACTIONS)
+#         send_eof(sock)
+#         logging.info("Datasets sent; waiting for results")
+#     finally:
+#         sock.close()
+
+# def main():
+#     logging.basicConfig(level=logging.INFO)
+#
+#     server_host = os.environ["SERVER_HOST"]
+#     server_port = int(os.environ["SERVER_PORT"])
+#     accounts_path = os.environ["ACCOUNTS_DATASET_PATH"]
+#     transactions_path = os.environ["TRANSACTIONS_DATASET_PATH"]
+#     batch_size = int(os.environ.get("BATCH_SIZE", "500"))
+#     output_path = os.environ["OUTPUT_PATH"]
+#
+#     logging.info(
+#         "Client starting: server_host=%s server_port=%s accounts=%s transactions=%s batch_size=%s output_path=%s",
+#         server_host,
+#         server_port,
+#         accounts_path,
+#         transactions_path,
+#         batch_size,
+#         output_path,
+#     )
+#
+#     run_client(server_host, server_port, accounts_path, transactions_path, batch_size, output_path)
+#     logging.info("Client done")
+#
+#
+# if __name__ == "__main__":
+#     main()
+
+SERVER_HOST = os.environ["SERVER_HOST"]
+SERVER_PORT = int(os.environ["SERVER_PORT"])
+ACCOUNTS_PATH = os.environ["ACCOUNTS_DATASET_PATH"]
+TRANSACTIONS_PATH = os.environ["TRANSACTIONS_DATASET_PATH"]
+BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "500"))
+OUTPUT_PATH = os.environ["OUTPUT_PATH"]
+
+
+class Client:
+    def __init__(self, server_host, server_port, output_path):
+        self.closed = False
+        self._prev_sigterm_handler = signal.signal(signal.SIGTERM, self.handle_sigterm)
+        self.server_socket = _connect_with_retry(server_host, server_port)
+        self._reader_thread = threading.Thread(
+            target=self.recv_results,
+            args=(output_path,),
+            daemon=True,  # si el proceso muere, el thread no bloquea el exit
+        )
+        self._reader_thread.start()
+
+    def handle_sigterm(self, signum, frame):
+        logging.info("Recieved SIGTERM signal")
+        self.closed = True
+        self.disconnect()
+
+        if self._prev_sigterm_handler:
+            self._prev_sigterm_handler(signum, frame)
+
+    def disconnect(self):
+        if self.server_socket:
+            # shutdown() es mejor que close(): señaliza al peer sin cerrar
+            # el fd inmediatamente, dando tiempo al thread lector a drenar.
+            # HOW: SHUT_WR señaliza EOF al server; el thread lector recibe
+            # EOF de vuelta y termina; luego close() libera el fd.
+            self.server_socket.shutdown("rdwr")
+            self.server_socket.close()
+
+        if self._reader_thread and self._reader_thread.is_alive():
+            self._reader_thread.join(timeout=5)
+
+    def start(self, accounts_path, transactions_path, batch_size):
+        logging.info("Sending data")
         try:
-            msg = sock.recv_bytes()
-        except ConnectionError:
-            logging.info("Server closed connection (received %d result message(s))", result_count)
-            break
-        result_count += 1
-        logging.info("Result %d: %s", result_count, msg.decode("utf-8", errors="replace"))
+            send_csv(self.server_socket, accounts_path, batch_size, STREAM_ACCOUNTS)
+            send_csv(
+                self.server_socket, transactions_path, batch_size, STREAM_TRANSACTIONS
+            )
+            send_eof(self.server_socket)
+            logging.info("Datasets sent; waiting for results")
+        finally:
+            # Con o sin error, cerramos escritura: el server sabrá que no
+            # hay más datos y eventualmente cerrará su lado → el thread lector
+            # recibirá EOF y terminará naturalmente
+            self.server_socket.shutdown("wr")
 
-def run_client(host, port, accounts_path, transactions_path, batch_size):
-    sock = _connect_with_retry(host, port)
+        # Esperamos a que el thread lector termine limpiamente
+        self._reader_thread.join()
 
-    results_thread = threading.Thread(target=_receive_results, args=(sock,))
-    results_thread.start()
-    try:
-        send_csv(sock, accounts_path, batch_size, STREAM_ACCOUNTS)
-        send_csv(sock, transactions_path, batch_size, STREAM_TRANSACTIONS)
-        send_eof(sock)
-        logging.info("Datasets sent; waiting for results")
-    finally:
-        sock.close()
+    def recv_results(self, output_path):
+        logging.info("Receiving results")
+        # Guardar resultados en archivos dentro del output path dependiendo de la query
 
 
-def main():
+def main() -> int:
     logging.basicConfig(level=logging.INFO)
+    client = Client(SERVER_HOST, SERVER_PORT, OUTPUT_PATH)
+    client.start(ACCOUNTS_PATH, TRANSACTIONS_PATH, BATCH_SIZE)
 
-    host = os.environ["SERVER_HOST"]
-    port = int(os.environ["SERVER_PORT"])
-    accounts_path = os.environ["ACCOUNTS_DATASET_PATH"]
-    transactions_path = os.environ["TRANSACTIONS_DATASET_PATH"]
-    batch_size = int(os.environ.get("BATCH_SIZE", "500"))
-
-    logging.info(
-        "Client starting: host=%s port=%s accounts=%s transactions=%s batch_size=%s",
-        host,
-        port,
-        accounts_path,
-        transactions_path,
-        batch_size,
-    )
-    run_client(host, port, accounts_path, transactions_path, batch_size)
-    logging.info("Client done")
+    return 0
 
 
 if __name__ == "__main__":

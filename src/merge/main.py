@@ -48,8 +48,14 @@ def _load_file_config() -> Dict[str, Any]:
         return {}
 
 
-def _parse_strategy_config(raw_strategy: Dict[str, Any], shard_id: int, shard_amount: int) -> JoinerStrategy:
-    strategy_type = raw_strategy.get("type", "noop") if isinstance(raw_strategy, dict) else str(raw_strategy)
+def _parse_strategy_config(
+    raw_strategy: Dict[str, Any], shard_id: int, shard_amount: int
+) -> JoinerStrategy:
+    strategy_type = (
+        raw_strategy.get("type", "noop")
+        if isinstance(raw_strategy, dict)
+        else str(raw_strategy)
+    )
 
     if strategy_type == "accounts":
         return AccountsStrategy()
@@ -63,22 +69,33 @@ def _parse_strategy_config(raw_strategy: Dict[str, Any], shard_id: int, shard_am
 def init_config() -> JoinerConfig:
     file_config = _load_file_config()
     raw_strategy = file_config.get("strategy", {})
-    raw_params = raw_strategy.get("params", {}) if isinstance(raw_strategy, dict) else {}
+    raw_params = (
+        raw_strategy.get("params", {}) if isinstance(raw_strategy, dict) else {}
+    )
 
     shard_id = int(os.getenv("SHARD_ID", file_config.get("shard_id", "0")) or 0)
     shard_amount = int(
-        os.getenv("SHARD_AMOUNT", raw_params.get("shard_amount", file_config.get("shard_amount", 1)))
+        os.getenv(
+            "SHARD_AMOUNT",
+            raw_params.get("shard_amount", file_config.get("shard_amount", 1)),
+        )
     )
 
     return JoinerConfig(
         mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
-        input_exchange=os.getenv("INPUT_EXCHANGE", file_config.get("input_exchange", "")),
+        input_exchange=os.getenv(
+            "INPUT_EXCHANGE", file_config.get("input_exchange", "")
+        ),
         shard_id=str(shard_id),
-        base_routing_key=os.getenv("BASE_ROUTING_KEY", file_config.get("base_routing_key", "")),
+        base_routing_key=os.getenv(
+            "BASE_ROUTING_KEY", file_config.get("base_routing_key", "")
+        ),
         output_queue=os.getenv("OUTPUT_QUEUE", file_config.get("output_queue", "")),
         log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
         eof_fanout=os.getenv("EOF_FANOUT", file_config.get("eof_fanout", "")),
-        expected_eofs=int(os.getenv("EXPECTED_EOFS", file_config.get("expected_eofs", "1"))),
+        expected_eofs=int(
+            os.getenv("EXPECTED_EOFS", file_config.get("expected_eofs", "1"))
+        ),
         strategy=_parse_strategy_config(raw_strategy, shard_id, shard_amount),
     )
 
@@ -106,13 +123,10 @@ class JoinerService:
 
         route = f"{config.base_routing_key}_{config.shard_id}"
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            self.mom_host, 
-            config.input_exchange, 
-            routing_keys=[route]
+            self.mom_host, config.input_exchange, routing_keys=[route]
         )
         self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(
-            self.mom_host, 
-            config.output_queue
+            self.mom_host, config.output_queue
         )
         self.coord = EofCoordinator(
             mom_host=config.mom_host,
@@ -168,7 +182,7 @@ class JoinerService:
     def _flush_client(self, client: str) -> None:
         """Se invoca bajo `coord.lock()` cuando llegaron `expected_eofs` EOFs."""
         logging.info("Flushing joiner state for client %s", client)
-        
+
         if hasattr(self.strategy, "clear_client_state"):
             self.strategy.clear_client_state(client)
 
@@ -181,7 +195,7 @@ def main() -> int:
     logging.basicConfig(level=getattr(logging, config.log_level.upper(), logging.INFO))
     log_config(config)
     logging.getLogger("pika").setLevel(logging.WARNING)
-    
+
     service = JoinerService(config)
 
     def handle_sigterm(_signum, _frame):
@@ -190,12 +204,12 @@ def main() -> int:
 
     signal.signal(signal.SIGTERM, handle_sigterm)
     signal.signal(signal.SIGINT, handle_sigterm)
-    
+
     try:
         service.start()
     finally:
         service.close()
-        
+
     return 0
 
 

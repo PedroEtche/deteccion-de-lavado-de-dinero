@@ -4,6 +4,7 @@ Cada query usa varias strategies distribuidas entre los componentes filter,
 group, aggregator, join y joiner. Estos tests cubren cada strategy de forma
 aislada, sin levantar middleware ni dockerizar nada.
 """
+
 import unittest
 
 from src.aggregator.strategies import (
@@ -29,7 +30,6 @@ from src.joiner.strategies import SelfMergeStrategy
 
 
 class GroupPaymentFormatAverageTest(unittest.TestCase):
-
     def test_one_route_per_unique_format(self):
         strategy = GroupPaymentFormatAverageStrategy("aggregate_route", shard_amount=3)
         batch = [
@@ -57,10 +57,12 @@ class GroupPaymentFormatAverageTest(unittest.TestCase):
 
     def test_none_amount_treated_as_zero(self):
         strategy = GroupPaymentFormatAverageStrategy("agg", shard_amount=1)
-        routed = strategy.group_and_route([
-            TransactionRow(payment_format="Wire", amount_paid=None),
-            TransactionRow(payment_format="Wire", amount_paid=10.0),
-        ])
+        routed = strategy.group_and_route(
+            [
+                TransactionRow(payment_format="Wire", amount_paid=None),
+                TransactionRow(payment_format="Wire", amount_paid=10.0),
+            ]
+        )
         rows = routed[0][1]
         self.assertEqual(rows[0]["tx_quantity"], 2)
         self.assertEqual(rows[0]["total_amount"], 10.0)
@@ -79,7 +81,6 @@ class GroupPaymentFormatAverageTest(unittest.TestCase):
 
 
 class AggregatorPaymentFormatAverageTest(unittest.TestCase):
-
     def test_accumulates_partial_sums_across_batches(self):
         strategy = AggregatorPaymentFormatAverageStrategy()
         strategy.aggregate_batch(
@@ -105,8 +106,12 @@ class AggregatorPaymentFormatAverageTest(unittest.TestCase):
             [{"payment_format": "Wire", "total_amount": 200.0, "tx_quantity": 1}],
             client="c2",
         )
-        self.assertEqual(strategy.get_result_for_client("c1")[0]["average_amount"], 100.0)
-        self.assertEqual(strategy.get_result_for_client("c2")[0]["average_amount"], 200.0)
+        self.assertEqual(
+            strategy.get_result_for_client("c1")[0]["average_amount"], 100.0
+        )
+        self.assertEqual(
+            strategy.get_result_for_client("c2")[0]["average_amount"], 200.0
+        )
 
     def test_clear_client_state_removes_only_target_client(self):
         strategy = AggregatorPaymentFormatAverageStrategy()
@@ -145,7 +150,6 @@ class AggregatorPaymentFormatAverageTest(unittest.TestCase):
 
 
 class HistoricalAverageFilterTest(unittest.TestCase):
-
     def _batch_for(self, *txs):
         # Set required attribute manualmente; el service lo hace al recibir
         # mensajes, acá lo simulamos.
@@ -154,17 +158,23 @@ class HistoricalAverageFilterTest(unittest.TestCase):
     def test_no_averages_yields_empty_result(self):
         strategy = HistoricalAverageFilterStrategy(output_queue="out_q")
         strategy._current_client = "c1"
-        result = strategy.filter_batch(self._batch_for(TransactionRow(payment_format="Wire", amount_paid=0.01)))
+        result = strategy.filter_batch(
+            self._batch_for(TransactionRow(payment_format="Wire", amount_paid=0.01))
+        )
         self.assertEqual(result, {})
 
     def test_keeps_rows_below_threshold_multiplier_of_average(self):
-        strategy = HistoricalAverageFilterStrategy(output_queue="out_q", threshold_multiplier=0.01)
-        strategy.update_averages("c1", [{"payment_format": "Wire", "average_amount": 100.0}])
+        strategy = HistoricalAverageFilterStrategy(
+            output_queue="out_q", threshold_multiplier=0.01
+        )
+        strategy.update_averages(
+            "c1", [{"payment_format": "Wire", "average_amount": 100.0}]
+        )
         strategy._current_client = "c1"
         batch = self._batch_for(
-            TransactionRow(payment_format="Wire", amount_paid=0.99),   # < 1.0  ✓
-            TransactionRow(payment_format="Wire", amount_paid=1.0),    # = 1.0  ✗
-            TransactionRow(payment_format="Wire", amount_paid=0.5),    # < 1.0  ✓
+            TransactionRow(payment_format="Wire", amount_paid=0.99),  # < 1.0  ✓
+            TransactionRow(payment_format="Wire", amount_paid=1.0),  # = 1.0  ✗
+            TransactionRow(payment_format="Wire", amount_paid=0.5),  # < 1.0  ✓
         )
         result = strategy.filter_batch(batch)
         self.assertEqual(len(result["out_q"]), 2)
@@ -173,7 +183,9 @@ class HistoricalAverageFilterTest(unittest.TestCase):
 
     def test_drops_rows_with_unknown_format(self):
         strategy = HistoricalAverageFilterStrategy(output_queue="out_q")
-        strategy.update_averages("c1", [{"payment_format": "Wire", "average_amount": 100.0}])
+        strategy.update_averages(
+            "c1", [{"payment_format": "Wire", "average_amount": 100.0}]
+        )
         strategy._current_client = "c1"
         batch = self._batch_for(
             TransactionRow(payment_format="ACH", amount_paid=0.1),
@@ -182,22 +194,34 @@ class HistoricalAverageFilterTest(unittest.TestCase):
 
     def test_separate_averages_per_client(self):
         strategy = HistoricalAverageFilterStrategy(output_queue="out_q")
-        strategy.update_averages("c1", [{"payment_format": "Wire", "average_amount": 100.0}])
-        strategy.update_averages("c2", [{"payment_format": "Wire", "average_amount": 10.0}])
+        strategy.update_averages(
+            "c1", [{"payment_format": "Wire", "average_amount": 100.0}]
+        )
+        strategy.update_averages(
+            "c2", [{"payment_format": "Wire", "average_amount": 10.0}]
+        )
 
         strategy._current_client = "c1"
-        result_c1 = strategy.filter_batch([TransactionRow(payment_format="Wire", amount_paid=0.5)])
+        result_c1 = strategy.filter_batch(
+            [TransactionRow(payment_format="Wire", amount_paid=0.5)]
+        )
         self.assertEqual(len(result_c1["out_q"]), 1)
 
         strategy._current_client = "c2"
         # 0.5 NO es < 10 * 0.01 = 0.1 → debe descartarse para c2
-        result_c2 = strategy.filter_batch([TransactionRow(payment_format="Wire", amount_paid=0.5)])
+        result_c2 = strategy.filter_batch(
+            [TransactionRow(payment_format="Wire", amount_paid=0.5)]
+        )
         self.assertEqual(result_c2, {})
 
     def test_clear_client_drops_only_that_clients_averages(self):
         strategy = HistoricalAverageFilterStrategy(output_queue="out_q")
-        strategy.update_averages("c1", [{"payment_format": "Wire", "average_amount": 100.0}])
-        strategy.update_averages("c2", [{"payment_format": "Wire", "average_amount": 50.0}])
+        strategy.update_averages(
+            "c1", [{"payment_format": "Wire", "average_amount": 100.0}]
+        )
+        strategy.update_averages(
+            "c2", [{"payment_format": "Wire", "average_amount": 50.0}]
+        )
         strategy.clear_client("c1")
         self.assertNotIn("c1", strategy.averages_by_client)
         self.assertIn("c2", strategy.averages_by_client)
@@ -209,7 +233,6 @@ class HistoricalAverageFilterTest(unittest.TestCase):
 
 
 class UnionStrategyTest(unittest.TestCase):
-
     def test_concatenates_batches_per_client(self):
         strategy = UnionStrategy()
         strategy.join_batch([{"a": 1}, {"a": 2}], client="c1")
@@ -241,12 +264,15 @@ class UnionStrategyTest(unittest.TestCase):
 
 
 class MergeRoutingStrategyTest(unittest.TestCase):
-
     def test_single_shard_routes_everything_together(self):
         strategy = MergeRoutingStrategy("selfmerge_route", shard_amount=1)
         batch = [
-            TransactionRow(from_bank="A", from_account="a1", to_bank="B", to_account="b1"),
-            TransactionRow(from_bank="C", from_account="c1", to_bank="D", to_account="d1"),
+            TransactionRow(
+                from_bank="A", from_account="a1", to_bank="B", to_account="b1"
+            ),
+            TransactionRow(
+                from_bank="C", from_account="c1", to_bank="D", to_account="d1"
+            ),
         ]
         routed = strategy.group_and_route(batch)
         self.assertEqual(len(routed), 1)
@@ -256,7 +282,9 @@ class MergeRoutingStrategyTest(unittest.TestCase):
     def test_tx_with_distinct_origin_and_destination_published_to_both_shards(self):
         # Con shard_amount alto la mayoría de los tx terminan en dos shards.
         strategy = MergeRoutingStrategy("route", shard_amount=4)
-        tx = TransactionRow(from_bank="A", from_account="a1", to_bank="B", to_account="b1")
+        tx = TransactionRow(
+            from_bank="A", from_account="a1", to_bank="B", to_account="b1"
+        )
         routed = dict(strategy.group_and_route([tx]))
 
         appearances = sum(1 for batch in routed.values() if tx in batch)
@@ -266,7 +294,9 @@ class MergeRoutingStrategyTest(unittest.TestCase):
     def test_tx_not_duplicated_when_origin_and_destination_share_shard(self):
         # Con shard_amount=1 ambos lados caen en el mismo shard.
         strategy = MergeRoutingStrategy("route", shard_amount=1)
-        tx = TransactionRow(from_bank="A", from_account="a1", to_bank="A", to_account="a1")
+        tx = TransactionRow(
+            from_bank="A", from_account="a1", to_bank="A", to_account="a1"
+        )
         routed = strategy.group_and_route([tx])
         self.assertEqual(len(routed[0][1]), 1)
 
@@ -290,7 +320,6 @@ def _tx_dict(from_bank, from_account, to_bank, to_account):
 
 
 class SelfMergeStrategyTest(unittest.TestCase):
-
     def test_chain_AB_then_BC_produces_AC(self):
         strategy = SelfMergeStrategy()
         result = strategy.joiner_batch(
@@ -430,7 +459,11 @@ class ShardedSelfMergeStrategyTest(unittest.TestCase):
                     client_id="c1",
                 )
                 emitted_per_chain += len(result)
-            self.assertEqual(emitted_per_chain, 1, f"chain {fb}→{mb}→{tb} should emit once across all shards")
+            self.assertEqual(
+                emitted_per_chain,
+                1,
+                f"chain {fb}→{mb}→{tb} should emit once across all shards",
+            )
             total += emitted_per_chain
         self.assertEqual(total, len(chains))
 
@@ -452,14 +485,15 @@ class ShardedSelfMergeStrategyTest(unittest.TestCase):
 
 
 class GroupAccountPairCountTest(unittest.TestCase):
-
     def test_counts_pairs_within_batch(self):
         strategy = GroupAccountPairCountStategy("route", shard_amount=1)
-        routed = strategy.group_and_route([
-            _tx_dict("A", "a1", "B", "b1"),
-            _tx_dict("A", "a1", "B", "b1"),
-            _tx_dict("A", "a1", "C", "c1"),
-        ])
+        routed = strategy.group_and_route(
+            [
+                _tx_dict("A", "a1", "B", "b1"),
+                _tx_dict("A", "a1", "B", "b1"),
+                _tx_dict("A", "a1", "C", "c1"),
+            ]
+        )
         rows = routed[0][1]
         pair_to_count = {(r["from_account"], r["to_account"]): r["count"] for r in rows}
         self.assertEqual(pair_to_count[("a1", "b1")], 2)
@@ -482,7 +516,6 @@ class GroupAccountPairCountTest(unittest.TestCase):
 
 
 class AggregatorAccountPairCountTest(unittest.TestCase):
-
     def test_aggregates_pair_counts_across_batches(self):
         strategy = AggregatorAccountPairCountStategy()
         strategy.aggregate_batch([_tx_dict("A", "a1", "B", "b1")], client="c1")
@@ -512,17 +545,18 @@ class AggregatorAccountPairCountTest(unittest.TestCase):
 
 
 class GroupAccountStrategyTest(unittest.TestCase):
-
     # Q4 AccountStrategy en `group` consume del filter `field_greater_than`,
     # cuyo upstream emite dicts (los pares contados por el aggregator). De ahí
     # que esta strategy acceda con tx["from_bank"] y no .from_bank.
 
     def test_emits_each_unique_account_once_per_batch(self):
         strategy = GroupAccountStrategy("r", shard_amount=1)
-        routed = strategy.group_and_route([
-            _tx_dict("A", "a1", "B", "b1"),
-            _tx_dict("A", "a1", "C", "c1"),
-        ])
+        routed = strategy.group_and_route(
+            [
+                _tx_dict("A", "a1", "B", "b1"),
+                _tx_dict("A", "a1", "C", "c1"),
+            ]
+        )
         rows = routed[0][1]
         keys = {(r["bank"], r["account"]) for r in rows}
         # Cuentas únicas: (A,a1), (B,b1), (C,c1) — la cuenta de origen no se duplica.
@@ -532,10 +566,16 @@ class GroupAccountStrategyTest(unittest.TestCase):
         strategy = GroupAccountStrategy("r", shard_amount=5)
         routed_a = dict(strategy.group_and_route([_tx_dict("A", "a1", "B", "b1")]))
         routed_b = dict(strategy.group_and_route([_tx_dict("A", "a1", "C", "c1")]))
-        shard_a = next(route for route, rows in routed_a.items()
-                       if {"bank": "A", "account": "a1"} in rows)
-        shard_b = next(route for route, rows in routed_b.items()
-                       if {"bank": "A", "account": "a1"} in rows)
+        shard_a = next(
+            route
+            for route, rows in routed_a.items()
+            if {"bank": "A", "account": "a1"} in rows
+        )
+        shard_b = next(
+            route
+            for route, rows in routed_b.items()
+            if {"bank": "A", "account": "a1"} in rows
+        )
         self.assertEqual(shard_a, shard_b)
 
 
@@ -545,7 +585,6 @@ class GroupAccountStrategyTest(unittest.TestCase):
 
 
 class AggregatorAccountStrategyTest(unittest.TestCase):
-
     def test_collects_unique_accounts(self):
         strategy = AggregatorAccountStrategy()
         strategy.aggregate_batch(
@@ -565,8 +604,12 @@ class AggregatorAccountStrategyTest(unittest.TestCase):
         strategy = AggregatorAccountStrategy()
         strategy.aggregate_batch([{"bank": "A", "account": "a1"}], client="c1")
         strategy.aggregate_batch([{"bank": "B", "account": "b1"}], client="c2")
-        keys_c1 = {(r["bank"], r["account"]) for r in strategy.get_result_for_client("c1")}
-        keys_c2 = {(r["bank"], r["account"]) for r in strategy.get_result_for_client("c2")}
+        keys_c1 = {
+            (r["bank"], r["account"]) for r in strategy.get_result_for_client("c1")
+        }
+        keys_c2 = {
+            (r["bank"], r["account"]) for r in strategy.get_result_for_client("c2")
+        }
         self.assertEqual(keys_c1, {("A", "a1")})
         self.assertEqual(keys_c2, {("B", "b1")})
 

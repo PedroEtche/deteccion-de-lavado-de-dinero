@@ -19,6 +19,12 @@ test:
 	# Aca se puede tener un test de las 5 queries a la vez
 .PHONY: test
 
+debug:
+	@echo "Levanto solo Rabbit + Gateawy + cliente para ver si los mensajes llegan"
+	cp ./scenarios/debug-compose.yaml docker-compose.yaml
+.PHONY: debug
+
+
 q1_switch:
 	@echo Escenarios de prueba:
 	@echo "1) Un cliente, set de datos de prueba (small_trans), una sola replica de cada elemento"

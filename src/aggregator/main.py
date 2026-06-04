@@ -50,10 +50,12 @@ class AggregatorConfig:
     shard_id: str = ""
     base_routing_key: str = ""
 
+
 def _extract_strategy_type(raw_strategy) -> str:
     if isinstance(raw_strategy, dict):
         return str(raw_strategy.get("type", "NoStrategy"))
     return str(raw_strategy or "NoStrategy")
+
 
 def _parse_strategy_config(raw_strategy) -> AggregatorStrategy:
     strategy_type = _extract_strategy_type(raw_strategy)
@@ -72,7 +74,7 @@ def _parse_strategy_config(raw_strategy) -> AggregatorStrategy:
 
     if strategy_type == "Count":
         return CountStrategy()
-    
+
     if strategy_type == "ScatterAggregator":
         return ScatterAggregatorStrategy()
 
@@ -96,13 +98,19 @@ def init_config() -> AggregatorConfig:
 
     return AggregatorConfig(
         mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
-        input_queue=os.getenv("INPUT_QUEUE", file_config.get("input_queue", "")), # <--- ADD THIS LINE
+        input_queue=os.getenv(
+            "INPUT_QUEUE", file_config.get("input_queue", "")
+        ),  # <--- ADD THIS LINE
         shard_id=os.getenv("SHARD_ID", file_config.get("shard_id", "")),
-        base_routing_key=os.getenv("BASE_ROUTING_KEY", file_config.get("base_routing_key", "")),
+        base_routing_key=os.getenv(
+            "BASE_ROUTING_KEY", file_config.get("base_routing_key", "")
+        ),
         output_queue=os.getenv("OUTPUT_QUEUE", file_config.get("output_queue", "")),
         log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
         eof_fanout=os.getenv("EOF_FANOUT", file_config.get("eof_fanout", "")),
-        expected_eofs=int(os.getenv("EXPECTED_EOFS", file_config.get("expected_eofs", "1"))),
+        expected_eofs=int(
+            os.getenv("EXPECTED_EOFS", file_config.get("expected_eofs", "1"))
+        ),
         strategy=_parse_strategy_config(raw_strategy),
         input_exchange=input_exchange if input_exchange else None,
     )
@@ -169,7 +177,11 @@ class AggregatorService:
 
     def _on_input(self, message, ack, _nack):
         decoded = deserialize(message)
-        logging.info("Received message of type %s for client %s", decoded["type"], decoded["client"])
+        logging.info(
+            "Received message of type %s for client %s",
+            decoded["type"],
+            decoded["client"],
+        )
         client = decoded["client"]
         if decoded["type"] == "eof":
             logging.info("Received EOF from upstream for client %s", client)

@@ -31,7 +31,6 @@ def _make_transactions_msg(rows, client_id=None):
 
 
 class TestProjectRow(unittest.TestCase):
-
     def test_keeps_only_specified_fields(self):
         tx = TransactionRow(
             timestamp="2022/09/02 06:00",
@@ -71,14 +70,15 @@ class TestProjectRow(unittest.TestCase):
 
 
 class TestProcessMessage(unittest.TestCase):
-
     def test_filters_rows_by_strategy(self):
         rows = [
             TransactionRow(payment_currency="USD", amount_paid=10.0),
             TransactionRow(payment_currency="EUR", amount_paid=20.0),
             TransactionRow(payment_currency="USD", amount_paid=30.0),
         ]
-        result = process_message(_make_transactions_msg(rows), CurrencyStrategy(_OUT_QUEUE, "USD"), None)
+        result = process_message(
+            _make_transactions_msg(rows), CurrencyStrategy(_OUT_QUEUE, "USD"), None
+        )
         self.assertIsNotNone(result)
         self.assertIn(_OUT_QUEUE, result)
 
@@ -111,9 +111,24 @@ class TestProcessMessage(unittest.TestCase):
 
     def test_q1_pipeline_filter_then_project(self):
         rows = [
-            TransactionRow(payment_currency="USD", amount_paid=10.0, from_account="A", to_account="B"),
-            TransactionRow(payment_currency="USD", amount_paid=80.0, from_account="C", to_account="D"),
-            TransactionRow(payment_currency="USD", amount_paid=5.0, from_account="E", to_account="F"),
+            TransactionRow(
+                payment_currency="USD",
+                amount_paid=10.0,
+                from_account="A",
+                to_account="B",
+            ),
+            TransactionRow(
+                payment_currency="USD",
+                amount_paid=80.0,
+                from_account="C",
+                to_account="D",
+            ),
+            TransactionRow(
+                payment_currency="USD",
+                amount_paid=5.0,
+                from_account="E",
+                to_account="F",
+            ),
         ]
         result = process_message(
             _make_transactions_msg(rows),
@@ -130,12 +145,16 @@ class TestProcessMessage(unittest.TestCase):
 
     def test_empty_filtered_batch_returns_none_or_empty(self):
         rows = [TransactionRow(payment_currency="EUR")]
-        result = process_message(_make_transactions_msg(rows), CurrencyStrategy(_OUT_QUEUE, "USD"), None)
+        result = process_message(
+            _make_transactions_msg(rows), CurrencyStrategy(_OUT_QUEUE, "USD"), None
+        )
         self.assertFalse(result)
 
     def test_non_transaction_message_returns_none(self):
         eof = build_eof_message(client=str(uuid.uuid4()), msg_id=str(uuid.uuid4()))
-        result = process_message(serialize(eof), CurrencyStrategy(_OUT_QUEUE, "USD"), None)
+        result = process_message(
+            serialize(eof), CurrencyStrategy(_OUT_QUEUE, "USD"), None
+        )
         self.assertIsNone(result)
 
     def test_output_preserves_client_id(self):
@@ -150,13 +169,14 @@ class TestProcessMessage(unittest.TestCase):
 
     def test_output_message_is_raw_transactions_type(self):
         rows = [TransactionRow(payment_currency="USD", amount_paid=10.0)]
-        result = process_message(_make_transactions_msg(rows), CurrencyStrategy(_OUT_QUEUE, "USD"), None)
+        result = process_message(
+            _make_transactions_msg(rows), CurrencyStrategy(_OUT_QUEUE, "USD"), None
+        )
         decoded = deserialize(result[_OUT_QUEUE])
         self.assertEqual(decoded["type"], "raw_transactions")
 
 
 class TestForwardEof(unittest.TestCase):
-
     def _make_service_with_outputs(self, output_queues):
         config = FilterConfig(
             mom_host="ignored",
@@ -167,7 +187,9 @@ class TestForwardEof(unittest.TestCase):
             projection_fields=None,
         )
         service = FilterService(config)
-        service._output_middleware = {q: MagicMock(name=f"mw:{q}") for q in output_queues}
+        service._output_middleware = {
+            q: MagicMock(name=f"mw:{q}") for q in output_queues
+        }
         return service
 
     def test_forwards_eof_to_every_output_queue(self):

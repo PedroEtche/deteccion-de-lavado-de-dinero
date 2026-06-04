@@ -1,9 +1,8 @@
 import zlib
 from abc import ABC, abstractmethod
-from common.communication.internal import (
-    TransactionRow
-) 
+from common.communication.internal import TransactionRow
 from typing import Any, Dict, List
+
 
 class JoinerStrategy(ABC):
     """Abstract strategy for filtering batches of messages.
@@ -52,13 +51,14 @@ class AccountsStrategy(JoinerStrategy):
                 self.data[bank_id]["Account"] = row["Account"]
                 self.data[bank_id]["Amount Paid"] = row["Amount Paid"]
 
-        else: # msg_type == "raw_accounts"
+        else:  # msg_type == "raw_accounts"
             for row in rows:
                 bank_id = row["Bank ID"]
                 if bank_id not in self.data:
                     self.data[bank_id] = {}
                 self.data[bank_id]["Bank ID"] = bank_id
                 self.data[bank_id]["Bank Name"] = row["Bank Name"]
+
 
 class SelfMergeStrategy(JoinerStrategy):
     """Detects A→B→C chains shard-locally.
@@ -119,7 +119,9 @@ class SelfMergeStrategy(JoinerStrategy):
 
         return joined_txs
 
-    def _owns_intermediary(self, intermediary_bank: Any, intermediary_account: Any) -> bool:
+    def _owns_intermediary(
+        self, intermediary_bank: Any, intermediary_account: Any
+    ) -> bool:
         """True iff B = (intermediary_bank, intermediary_account) hashes to this shard.
 
         Must use the same hash as `src.group.strategies._get_shard_route` so a
@@ -133,7 +135,10 @@ class SelfMergeStrategy(JoinerStrategy):
     def _create_merged_record(self, tx_1: dict, tx_2: dict):
         # tx_1 = Z→B, tx_2 = B→Y. B is the intermediary.
         # Drop self-cycles (tx_1.from == tx_2.to).
-        if tx_1["from_bank"] == tx_2["to_bank"] and tx_1["from_account"] == tx_2["to_account"]:
+        if (
+            tx_1["from_bank"] == tx_2["to_bank"]
+            and tx_1["from_account"] == tx_2["to_account"]
+        ):
             return None
 
         if not self._owns_intermediary(tx_1["to_bank"], tx_1["to_account"]):

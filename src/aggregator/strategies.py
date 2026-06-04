@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Set
 
+
 class AggregatorStrategy(ABC):
     """Abstract strategy for aggregating batches of messages."""
 
@@ -9,7 +10,9 @@ class AggregatorStrategy(ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    def aggregate_batch(self, batch: List[Any], client: Optional[str] = None) -> List[Any]:
+    def aggregate_batch(
+        self, batch: List[Any], client: Optional[str] = None
+    ) -> List[Any]:
         raise NotImplementedError()
 
     @abstractmethod
@@ -27,7 +30,9 @@ class NoStrategy(AggregatorStrategy):
     def __str__(self) -> str:
         return "NoStrategy"
 
-    def aggregate_batch(self, batch: List[Any], client: Optional[str] = None) -> List[Any]:
+    def aggregate_batch(
+        self, batch: List[Any], client: Optional[str] = None
+    ) -> List[Any]:
         return batch
 
     def get_result_for_client(self, client: str) -> List[Any]:
@@ -44,7 +49,9 @@ class BankMaxAmountStrategy(AggregatorStrategy):
     def __str__(self) -> str:
         return "BankMaxAmountStrategy"
 
-    def aggregate_batch(self, batch: List[Any], client: Optional[str] = None) -> List[Any]:
+    def aggregate_batch(
+        self, batch: List[Any], client: Optional[str] = None
+    ) -> List[Any]:
         if client is None:
             raise ValueError("client is required for BankMaxAmountStrategy")
 
@@ -77,7 +84,9 @@ class AccountPairCountStategy(AggregatorStrategy):
     def __str__(self) -> str:
         return "AccountPairCountStategy"
 
-    def aggregate_batch(self, batch: List[Any], client: Optional[str] = None) -> List[Any]:
+    def aggregate_batch(
+        self, batch: List[Any], client: Optional[str] = None
+    ) -> List[Any]:
         if client is None:
             raise ValueError("client is required for AccountPairCountStategy")
 
@@ -108,7 +117,8 @@ class AccountPairCountStategy(AggregatorStrategy):
                 }
             )
         return results
-        
+
+
 class CountStrategy(AggregatorStrategy):
     """Counts rows per client; emits [{"count": N}] on flush."""
 
@@ -118,7 +128,9 @@ class CountStrategy(AggregatorStrategy):
     def __str__(self) -> str:
         return "CountStrategy"
 
-    def aggregate_batch(self, batch: List[Any], client: Optional[str] = None) -> List[Any]:
+    def aggregate_batch(
+        self, batch: List[Any], client: Optional[str] = None
+    ) -> List[Any]:
         if client is None:
             raise ValueError("client is required for CountStrategy")
         self._counts[client] = self._counts.get(client, 0) + len(batch)
@@ -139,7 +151,9 @@ class PaymentFormatAverageStrategy(AggregatorStrategy):
     def __str__(self) -> str:
         return "PaymentFormatAverageStrategy"
 
-    def aggregate_batch(self, batch: List[Any], client: Optional[str] = None) -> List[Any]:
+    def aggregate_batch(
+        self, batch: List[Any], client: Optional[str] = None
+    ) -> List[Any]:
         if client is None:
             raise ValueError("client is required for PaymentFormatAverageStrategy")
 
@@ -157,7 +171,7 @@ class PaymentFormatAverageStrategy(AggregatorStrategy):
             stats[key]["total"] += partial_amount
 
         return []
-    
+
     def get_result_for_client(self, client: str) -> List[Any]:
         stats = self.stats_by_client.get(client, {})
 
@@ -166,16 +180,18 @@ class PaymentFormatAverageStrategy(AggregatorStrategy):
             count = stat["count"]
             average = stat["total"] / count if count > 0 else 0.0
 
-            results.append({
-                "payment_format": fmt,
-                "average_amount": average,
-            })
+            results.append(
+                {
+                    "payment_format": fmt,
+                    "average_amount": average,
+                }
+            )
 
         return results
 
     def clear_client_state(self, client: str) -> None:
         self.stats_by_client.pop(client, None)
-    
+
 
 class AccountStrategy(AggregatorStrategy):
     def __init__(self):
@@ -195,22 +211,20 @@ class AccountStrategy(AggregatorStrategy):
             client_accounts.add(account_tuple)
 
         return client_accounts
-    
+
     def get_result_for_client(self, client: str) -> List[Dict[str, str]]:
         if client not in self.accounts_by_client:
             return []
 
         final_accounts = []
         for bank, account in self.accounts_by_client.get(client, set()):
-            final_accounts.append({
-                "bank": bank,
-                "account": account
-            })
-            
+            final_accounts.append({"bank": bank, "account": account})
+
         return final_accounts
 
     def clear_client_state(self, client: str) -> None:
         self.accounts_by_client.pop(client, None)
+
 
 class ScatterAggregatorStrategy(AggregatorStrategy):
     def __init__(self):
@@ -219,12 +233,14 @@ class ScatterAggregatorStrategy(AggregatorStrategy):
     def __str__(self) -> str:
         return "ScatterAggregatorStrategy"
 
-    def aggregate_batch(self, batch: List[Any], client: Optional[str] = None) -> List[Any]:
+    def aggregate_batch(
+        self, batch: List[Any], client: Optional[str] = None
+    ) -> List[Any]:
         if client is None:
             raise ValueError("client is required for ScatterAggregatorStrategy")
 
         client_state = self.state_by_client.setdefault(client, {})
-        
+
         for tx in batch:
             origin = (tx["from_bank"], tx["from_account"])
             dest = (tx["to_bank"], tx["to_account"])
@@ -237,12 +253,12 @@ class ScatterAggregatorStrategy(AggregatorStrategy):
 
     def get_result_for_client(self, client: str) -> List[Any]:
         client_state = self.state_by_client.get(client, {})
-        
+
         filtered_results = []
         for origin, data in client_state.items():
             if len(data["dests"]) > 5:
                 filtered_results.extend(data["txs"])
-                
+
         return filtered_results
 
     def clear_client_state(self, client: str) -> None:

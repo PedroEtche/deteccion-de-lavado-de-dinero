@@ -11,7 +11,10 @@ from typing import Any, Dict, IO, List, Optional, Set, Tuple
 
 import yaml
 
-from src.common.middleware import (MessageMiddlewareQueueRabbitMQ, MessageMiddlewareExchangeRabbitMQ)
+from src.common.middleware import (
+    MessageMiddlewareQueueRabbitMQ,
+    MessageMiddlewareExchangeRabbitMQ,
+)
 from src.common.communication.internal import (
     TransactionRow,
     build_batch_message,
@@ -101,9 +104,11 @@ def _parse_strategy_config(
 
     if strategy_type == "payment_format":
         return PaymentFormatStrategy(default_output, params.get("formats", []))
-    
+
     if strategy_type == "scatter_filter":
-        return ScatterFilterStrategy(params.get("output_queues", float(params["threshold"])))
+        return ScatterFilterStrategy(
+            params.get("output_queues", float(params["threshold"]))
+        )
 
     if strategy_type == "origin_neq_destination":
         return OriginNotEqualDestinationStrategy(default_output)
@@ -117,7 +122,9 @@ def _parse_strategy_config(
             shard_config = None
 
             if raw_shard is not None:
-                shard_config = ShardConfig(by=raw_shard["by"], shards=int(raw_shard["shards"]))
+                shard_config = ShardConfig(
+                    by=raw_shard["by"], shards=int(raw_shard["shards"])
+                )
 
             routes.append(
                 DateRangeRoute(
@@ -129,14 +136,20 @@ def _parse_strategy_config(
                         raw_match["to"],
                         DATETIME_FORMAT,
                     ),
-                    queue=raw_route["output"], shard=shard_config))
+                    queue=raw_route["output"],
+                    shard=shard_config,
+                )
+            )
         return DateStrategy(routes=routes)
 
     if strategy_type == "historical_average":
         thresh = params.get("threshold", 0.01)
-        return HistoricalAverageFilterStrategy(output_queue=default_output, threshold_multiplier=thresh)
+        return HistoricalAverageFilterStrategy(
+            output_queue=default_output, threshold_multiplier=thresh
+        )
 
     return NoStrategy(default_output)
+
 
 def _parse_projection_config(raw_projection: Dict[str, Any]) -> Optional[List[str]]:
     fields = raw_projection.get("fields")
@@ -173,8 +186,12 @@ def init_config() -> FilterConfig:
 
     if raw_inputs:
         input_queue = raw_inputs[0]["name"]
-    strategy_params = raw_strategy.get("params", {}) if isinstance(raw_strategy, dict) else {}
-    control_queue = os.getenv("CONTROL_QUEUE", strategy_params.get("control_queue", None))
+    strategy_params = (
+        raw_strategy.get("params", {}) if isinstance(raw_strategy, dict) else {}
+    )
+    control_queue = os.getenv(
+        "CONTROL_QUEUE", strategy_params.get("control_queue", None)
+    )
 
     output_queues = _parse_output_queues(raw_outputs)
     # Compatibilidad con el formato "viejo" (Q1/Q5): output_queue singular en
@@ -187,14 +204,20 @@ def init_config() -> FilterConfig:
 
     return FilterConfig(
         mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
-        input_queue=os.getenv("INPUT_QUEUE", input_queue or file_config.get("input_queue", "")),
+        input_queue=os.getenv(
+            "INPUT_QUEUE", input_queue or file_config.get("input_queue", "")
+        ),
         output_queues=output_queues,
         log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
         strategy=_parse_strategy_config(raw_strategy, output_queues),
         projection_fields=_parse_projection_config(raw_projection),
-        output_message_type=os.getenv("OUTPUT_MESSAGE_TYPE", file_config.get("output_message_type", "raw_transactions")),
+        output_message_type=os.getenv(
+            "OUTPUT_MESSAGE_TYPE",
+            file_config.get("output_message_type", "raw_transactions"),
+        ),
         control_queue=control_queue,
     )
+
 
 def log_config(config: FilterConfig) -> None:
     logging.info(
@@ -228,22 +251,23 @@ def process_message(
 
     for queue_name, rows in routed_batches.items():
         if projection_fields:
-            rows = [ _project_row(row, projection_fields) for row in rows ]
+            rows = [_project_row(row, projection_fields) for row in rows]
 
         if not rows:
             continue
 
         new_msg = build_batch_message(
-                message_type=output_message_type,
-                client=decoded["client"],
-                msg_id=str(uuid.uuid4()),
-                batch=rows,
+            message_type=output_message_type,
+            client=decoded["client"],
+            msg_id=str(uuid.uuid4()),
+            batch=rows,
         )
 
         logging.info("Filtered batch for queue %s", queue_name)
         result[queue_name] = serialize(new_msg)
 
     return result
+
 
 class FilterService:
     def __init__(self, config: FilterConfig) -> None:
@@ -267,15 +291,25 @@ class FilterService:
     def start(self) -> None:
         logging.info("Starting filter service")
         self._running = True
-        self._input_middleware = MessageMiddlewareQueueRabbitMQ(self.mom_host, self.input_queue)
+        self._input_middleware = MessageMiddlewareQueueRabbitMQ(
+            self.mom_host, self.input_queue
+        )
         for queue_data in self.output_queues:
             if queue_data[TYPE] == "exchange":
-                self._output_middleware[queue_data[NAME]] = MessageMiddlewareExchangeRabbitMQ(self.mom_host, queue_data[NAME])
+                self._output_middleware[queue_data[NAME]] = (
+                    MessageMiddlewareExchangeRabbitMQ(self.mom_host, queue_data[NAME])
+                )
             else:
-                self._output_middleware[queue_data[NAME]] = MessageMiddlewareQueueRabbitMQ(self.mom_host, queue_data[NAME])
+                self._output_middleware[queue_data[NAME]] = (
+                    MessageMiddlewareQueueRabbitMQ(self.mom_host, queue_data[NAME])
+                )
 
-        if self.control_queue and isinstance(self.strategy, HistoricalAverageFilterStrategy):
-            self._control_middleware = MessageMiddlewareQueueRabbitMQ(self.mom_host, self.control_queue)
+        if self.control_queue and isinstance(
+            self.strategy, HistoricalAverageFilterStrategy
+        ):
+            self._control_middleware = MessageMiddlewareQueueRabbitMQ(
+                self.mom_host, self.control_queue
+            )
             control_thread = threading.Thread(
                 target=self._consume_control,
                 daemon=True,
@@ -299,10 +333,14 @@ class FilterService:
             decoded = deserialize(message)
             client = decoded["client"]
             msg_type = decoded.get("type")
-            if msg_type in ("joined_data", "batch") and isinstance(self.strategy, HistoricalAverageFilterStrategy):
+            if msg_type in ("joined_data", "batch") and isinstance(
+                self.strategy, HistoricalAverageFilterStrategy
+            ):
                 batch = decoded["payload"]["batch"]
                 self.strategy.update_averages(client, batch)
-                logging.info("Averages received for client %s, scheduling buffer flush", client)
+                logging.info(
+                    "Averages received for client %s, scheduling buffer flush", client
+                )
                 # Schedule flush on the main pika event loop so output middlewares
                 # are only used from a single thread.
                 if self._input_middleware is not None:
@@ -323,7 +361,10 @@ class FilterService:
                 if self._averages_ready(client):
                     self._forward_eof(client)
                 else:
-                    logging.info("Data EOF received but no averages yet for client %s, buffering", client)
+                    logging.info(
+                        "Data EOF received but no averages yet for client %s, buffering",
+                        client,
+                    )
                     self._pending_eofs.add(client)
                 ack()
                 return
@@ -335,7 +376,9 @@ class FilterService:
                     return
                 self.strategy._current_client = client
 
-            result = process_message(message, self.strategy, self.projection_fields, self.output_message_type)
+            result = process_message(
+                message, self.strategy, self.projection_fields, self.output_message_type
+            )
             if result is not None:
                 for queue, out_msg in result.items():
                     self._output_middleware[queue].send(out_msg)
@@ -373,12 +416,19 @@ class FilterService:
                 if len(buffered_msg) < length:
                     break
                 count += 1
-                result = process_message(buffered_msg, self.strategy, self.projection_fields, self.output_message_type)
+                result = process_message(
+                    buffered_msg,
+                    self.strategy,
+                    self.projection_fields,
+                    self.output_message_type,
+                )
                 if result is not None:
                     for queue, out_msg in result.items():
                         self._output_middleware[queue].send(out_msg)
             f.close()
-        logging.info("Flushed %d buffered messages from disk for client %s", count, client)
+        logging.info(
+            "Flushed %d buffered messages from disk for client %s", count, client
+        )
         if client in self._pending_eofs:
             self._pending_eofs.discard(client)
             self._forward_eof(client)

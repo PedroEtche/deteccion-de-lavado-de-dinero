@@ -29,7 +29,6 @@ def _start_echo_server(handler):
 
 
 class TestTCPSocketRoundTrip(unittest.TestCase):
-
     def test_send_and_receive_short_message(self):
         received = []
 
@@ -148,7 +147,6 @@ class _FakeSocket:
 
 
 class TestTCPSocketShortReads(unittest.TestCase):
-
     def test_recv_handles_byte_by_byte_chunks(self):
         payload = b"mensaje fragmentado"
         header = len(payload).to_bytes(4, "big")
@@ -183,7 +181,6 @@ class TestTCPSocketShortReads(unittest.TestCase):
 
 
 class TestTCPSocketHeaderFormat(unittest.TestCase):
-
     def test_send_writes_length_prefix_big_endian(self):
         fake = _FakeSocket(b"")
         sock = TCPSocket(fake)

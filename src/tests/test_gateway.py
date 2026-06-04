@@ -5,7 +5,6 @@ from src.gateway.main import _dict_to_account_row, _dict_to_transaction_row
 
 
 class TestDictToTransactionRow(unittest.TestCase):
-
     def test_full_row_maps_all_fields(self):
         row = {
             "Timestamp": "2022/09/02 06:00",
@@ -67,7 +66,6 @@ class TestDictToTransactionRow(unittest.TestCase):
 
 
 class TestDictToAccountRow(unittest.TestCase):
-
     def test_full_row_maps_all_fields(self):
         row = {
             "Bank Name": "China Bank #2820",

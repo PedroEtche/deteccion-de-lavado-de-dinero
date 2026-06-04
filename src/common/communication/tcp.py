@@ -1,29 +1,25 @@
 import socket
 
-_HEADER_SIZE = 4
 _BYTE_ORDER = "big"
+_HEADER_SIZE = 4
 
 
 class TCPSocket:
     def __init__(self, sock):
         self._sock = sock
 
-    def send_bytes(self, payload):
+    def send_bytes(self, payload: bytes):
         header = len(payload).to_bytes(_HEADER_SIZE, byteorder=_BYTE_ORDER)
         self._sock.sendall(header + payload)
 
-    def recv_bytes(self):
+    def recv_bytes(self) -> bytes:
         header = self._recv_exact(_HEADER_SIZE)
-        length = int.from_bytes(header, byteorder=_BYTE_ORDER)
-        return self._recv_exact(length)
+        msg_size = int.from_bytes(header, byteorder=_BYTE_ORDER)
+        return self._recv_exact(msg_size)
 
     def close(self):
         self._sock.close()
 
-    # Used for sending a signal to the other end of communication ending
-    # wr means dont expect more messages
-    # rd means i wont be reading anymore
-    # rdwr means the comunnication is finished
     def shutdown(self, instruction):
         if instruction == "wr":
             self._sock.shutdown(socket.SHUT_WR)
@@ -32,7 +28,7 @@ class TCPSocket:
         else:
             self._sock.shutdown(socket.SHUT_RDWR)
 
-    def _recv_exact(self, n):
+    def _recv_exact(self, n: int) -> bytes:
         buf = bytearray()
         while len(buf) < n:
             chunk = self._sock.recv(n - len(buf))

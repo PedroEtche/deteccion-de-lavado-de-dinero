@@ -88,7 +88,6 @@ def _patch_middleware():
 
 
 class EofCoordinatorTest(unittest.TestCase):
-
     def setUp(self):
         _FakeExchange.reset()
         self.patcher = _patch_middleware()

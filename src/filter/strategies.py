@@ -9,6 +9,7 @@ import logging
 
 _TIMESTAMP_FMT = "%Y/%m/%d %H:%M"
 
+
 class FilterStrategy(ABC):
     """Abstract strategy for filtering batches of messages.
 
@@ -27,6 +28,7 @@ class FilterStrategy(ABC):
 
 class NoStrategy(FilterStrategy):
     """A strategy that returns the input batch unchanged."""
+
     def __init__(self, output_queue: str) -> None:
         self.output_queue = output_queue
 
@@ -45,9 +47,10 @@ class CurrencyStrategy(FilterStrategy):
     def __str__(self) -> str:
         return f"CurrencyStrategy(target_currency={self.target_currency}, output_queue={self.output_queue})"
 
-
     def filter_batch(self, batch: List[Any]) -> Dict[str, List[Any]]:
-        filtered = [ row for row in batch if row.payment_currency == self.target_currency ]
+        filtered = [
+            row for row in batch if row.payment_currency == self.target_currency
+        ]
 
         if not filtered:
             return {}
@@ -66,7 +69,8 @@ class FieldLessThanStrategy(FilterStrategy):
 
     def filter_batch(self, batch: List[Any]) -> Dict[str, List[Any]]:
         filtered = [
-            row for row in batch
+            row
+            for row in batch
             if getattr(row, self.field_name, None) is not None
             and getattr(row, self.field_name) < self.threshold
         ]
@@ -99,15 +103,16 @@ class FieldGreaterThanStrategy(FilterStrategy):
         for row in batch:
             value = row.get(self.field_name)
             if value > 1:
-                logging.info(f"Evaluating row with {self.field_name}={value} against threshold {self.threshold}")
+                logging.info(
+                    f"Evaluating row with {self.field_name}={value} against threshold {self.threshold}"
+                )
             if value is not None and value > self.threshold:
                 filtered.append(row)
 
         if not filtered:
             return {}
 
-        return { self.output_queue: filtered }
-
+        return {self.output_queue: filtered}
 
 
 @dataclass(frozen=True)
@@ -131,7 +136,7 @@ class DateRangeRoute:
             return self.queue
 
         shard_value = getattr(row, self.shard.by)
-        hash = hashlib.md5( str(shard_value).encode()).hexdigest()
+        hash = hashlib.md5(str(shard_value).encode()).hexdigest()
         shard_id = int(hash, 16) % self.shard.shards
 
         return f"{self.queue}_shard_{shard_id}"
@@ -186,6 +191,7 @@ class HistoricalAverageFilterStrategy(FilterStrategy):
       service sets `strategy._current_client` to the incoming client id so
       the strategy can pick the right averages.
     """
+
     def __init__(self, output_queue: str, threshold_multiplier: float = 0.01) -> None:
         self.output_queue = output_queue
         self.threshold_multiplier = float(threshold_multiplier)
@@ -234,6 +240,7 @@ class HistoricalAverageFilterStrategy(FilterStrategy):
 
         return {self.output_queue: filtered}
 
+
 class OriginNotEqualDestinationStrategy(FilterStrategy):
     def __init__(self, output_queue: str) -> None:
         self.output_queue = output_queue
@@ -243,13 +250,16 @@ class OriginNotEqualDestinationStrategy(FilterStrategy):
 
     def filter_batch(self, batch: List[Any]) -> Dict[str, List[Any]]:
         filtered = [
-            tx for tx in batch
+            tx
+            for tx in batch
             if tx.from_bank != tx.to_bank or tx.from_account != tx.to_account
         ]
         return {self.output_queue: filtered}
-    
+
+
 class ScatterFilterStrategy(FilterStrategy):
     """Filters scatter accounts and unrolls their transactions back into a flat list."""
+
     def __init__(self, output_queue: str, threshold: int = 5) -> None:
         self.output_queue = output_queue
         self.threshold = threshold

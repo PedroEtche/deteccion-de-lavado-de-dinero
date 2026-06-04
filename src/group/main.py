@@ -43,6 +43,7 @@ class GroupConfig:
     expected_eofs: int
     strategy: GroupStrategy
 
+
 def _parse_strategy_config(raw_strategy: Any) -> GroupStrategy:
     strategy_type = _read_strategy_type(raw_strategy)
     params = _read_strategy_params(raw_strategy)
@@ -51,17 +52,21 @@ def _parse_strategy_config(raw_strategy: Any) -> GroupStrategy:
         return BankMaxAmountStrategy(params["base_routing_key"])
 
     if strategy_type == "PaymentFormatAverage":
-        return PaymentFormatAverageStrategy(params["base_routing_key"], params["shard_amount"])
+        return PaymentFormatAverageStrategy(
+            params["base_routing_key"], params["shard_amount"]
+        )
 
     if strategy_type == "AccountPairCount":
-        return AccountPairCountStategy(params["base_routing_key"], params["shard_amount"])
+        return AccountPairCountStategy(
+            params["base_routing_key"], params["shard_amount"]
+        )
 
     if strategy_type == "MergeRouting":
         return MergeRoutingStrategy(params["base_routing_key"], params["shard_amount"])
 
     if strategy_type == "Account":
         return AccountStrategy(params["base_routing_key"], params["shard_amount"])
-    
+
     if strategy_type == "ScatterGroup":
         return ScatterGroupStrategy(params["base_routing_key"], params["shard_amount"])
 
@@ -80,6 +85,7 @@ def _read_strategy_params(raw_strategy: Any) -> Dict[str, Any]:
     params = raw_strategy.get("params", {})
     return params if isinstance(params, dict) else {}
 
+
 def _load_file_config() -> Dict[str, Any]:
     try:
         with open(CONFIG_PATH, "r", encoding="utf-8") as handle:
@@ -96,10 +102,14 @@ def init_config() -> GroupConfig:
     return GroupConfig(
         mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
         input_queue=os.getenv("INPUT_QUEUE", file_config.get("input_queue", "")),
-        output_exchange=os.getenv("OUTPUT_EXCHANGE", file_config.get("output_exchange", "")),
+        output_exchange=os.getenv(
+            "OUTPUT_EXCHANGE", file_config.get("output_exchange", "")
+        ),
         log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
         eof_fanout=os.getenv("EOF_FANOUT", file_config.get("eof_fanout", "")),
-        expected_eofs=int(os.getenv("EXPECTED_EOFS", file_config.get("expected_eofs", "1"))),
+        expected_eofs=int(
+            os.getenv("EXPECTED_EOFS", file_config.get("expected_eofs", "1"))
+        ),
         strategy=_parse_strategy_config(raw_strategy),
     )
 

@@ -111,83 +111,95 @@ class Gateway:
         )
 
     def _dispatch_result(self, message, ack, _nack):
-            try:
-                decoded = deserialize(message)
-            except Exception:
-                logging.exception("Error decoding result message; discarding")
-                ack()
-                return
-
-            client_id = decoded.get("client")
-
-            with self._registry_lock:
-                entry = self._client_registry.get(client_id)
-
-            if entry is None:
-                logging.warning("No client registered for id %s; discarding result", client_id)
-                ack()
-                return
-
-            try:
-                entry["tcp"].send_bytes(message)
-            except Exception:
-                logging.exception("Error forwarding result to client %s", client_id)
-                entry["done"].set()
-                ack()
-                return
-
+        try:
+            decoded = deserialize(message)
+        except Exception:
+            logging.exception("Error decoding result message; discarding")
             ack()
+            return
 
-            if decoded.get("type") == "eof":
-                logging.info("Received EOF on result queue for client %s", client_id)
-                entry["done"].set()
+        client_id = decoded.get("client")
 
-    def handle_client_request(self, client_socket, msg_handler):
+        with self._registry_lock:
+            entry = self._client_registry.get(client_id)
+
+        if entry is None:
+            logging.warning(
+                "No client registered for id %s; discarding result", client_id
+            )
+            ack()
+            return
+
+        try:
+            entry["tcp"].send_bytes(message)
+        except Exception:
+            logging.exception("Error forwarding result to client %s", client_id)
+            entry["done"].set()
+            ack()
+            return
+
+        ack()
+
+        if decoded.get("type") == "eof":
+            logging.info("Received EOF on result queue for client %s", client_id)
+            entry["done"].set()
+
+    def handle_client_request(self, client_socket):
         tcp = TCPSocket(client_socket)
         client_id = str(uuid.uuid4())
         done = threading.Event()
 
         with self._registry_lock:
-                self._client_registry[client_id] = {
-                    "tcp": tcp,
-                    "done": done,
-                }
+            self._client_registry[client_id] = {
+                "tcp": tcp,
+                "done": done,
+            }
 
         logging.info("Registered client %s", client_id)
 
         try:
             while True:
                 try:
-                    raw_bytes = client_socket.recv_bytes()
+                    raw_bytes = tcp.recv_bytes()
                 except ConnectionError:
                     logging.info("The client has disconnected")
                     break
-                
+
                 message = deserialize(raw_bytes)
+                logging.info("Receive message: %s", message)
                 msg_type = message.get("type")
 
                 if msg_type == "raw_transactions":
                     txs = message.get("payload", {}).get("batch", [])
-                    serialized_message = serialize(build_raw_transactions_message(
-                        client=client_id,
-                        msg_id=str(uuid.uuid4()),
-                        batch=txs,
-                    ))
+                    serialized_message = serialize(
+                        build_raw_transactions_message(
+                            client=client_id,
+                            msg_id=str(uuid.uuid4()),
+                            batch=txs,
+                        )
+                    )
 
                     with self._send_lock:
+                        # logging.debug("Sending message: %s", txs)
                         self.transactions_mw.send(serialized_message)
 
                 elif msg_type == "raw_accounts":
                     accounts = message.get("payload", {}).get("batch", [])
-                    serialized_message = serialize(build_raw_accounts_message(
-                        client=client_id,
-                        msg_id=str(uuid.uuid4()),
-                        batch=accounts,
-                    ))
+                    serialized_message = serialize(
+                        build_raw_accounts_message(
+                            client=client_id,
+                            msg_id=str(uuid.uuid4()),
+                            batch=accounts,
+                        )
+                    )
                     with self._send_lock:
+                        # logging.debug("Sending message: %s", accounts)
                         self.accounts_mw.send(serialized_message)
 
-            logging.info("Inbound EOF received for client %s; forwarding EOF downstream", client_id)
+            logging.info(
+                "Inbound EOF received for client %s; forwarding EOF downstream",
+                client_id,
+            )
             eof_message = serialize(
                 build_eof_message(client=client_id, msg_id=str(uuid.uuid4()))
             )
@@ -197,8 +209,10 @@ class Gateway:
                 self.accounts_mw.send(eof_message)
 
             done.wait()
-            logging.info("Pipeline complete for client %s; closing client socket", client_id)
-                
+            logging.info(
+                "Pipeline complete for client %s; closing client socket", client_id
+            )
+
         except socket.error:
             logging.error("The connection with the server was lost")
         except Exception as e:
@@ -206,10 +220,25 @@ class Gateway:
         finally:
             with self._registry_lock:
                 self._client_registry.pop(client_id, None)
-            client_socket.close()
+            tcp.close()
+
+    def _close_resources(self):
+        if self.server_socket:
+            try:
+                self.server_socket.close()
+            except OSError:
+                pass
+        for mw in (self.transactions_mw, self.accounts_mw, self.result_mw):
+            if mw:
+                try:
+                    mw.close()
+                except Exception:
+                    pass
+        for t in self._client_threads:
+            t.join(timeout=5)
 
     def handle_client_response(self):
-            self.result_mw.start_consuming(self._dispatch_result)
+        self.result_mw.start_consuming(self._dispatch_result)
 
     @staticmethod
     def handle_sigterm(server_socket, client_list, sigterm_received, signum, frame):
@@ -217,7 +246,7 @@ class Gateway:
         try:
             server_socket.shutdown(socket.SHUT_RDWR)
         except OSError:
-            pass # Ignore if socket is already closed
+            pass  # Ignore if socket is already closed
 
         for [_, client_socket] in client_list:
             try:
@@ -232,7 +261,9 @@ class Gateway:
 
         self._setup_middleware()
 
-        self._result_thread = threading.Thread(target=self._handle_client_response, deaemon=True)
+        self._result_thread = threading.Thread(
+            target=self.handle_client_response, daemon=True
+        )
         self._result_thread.start()
 
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -257,7 +288,7 @@ class Gateway:
 
                 client_thread = threading.Thread(
                     target=self.handle_client_request,
-                    args=(client_socket_socket, message_handler.MessageHandler()),
+                    args=(client_socket_socket,),
                     daemon=True,
                 )
                 client_thread.start()
@@ -266,14 +297,13 @@ class Gateway:
             logging.error(f"Unexpected error in accept loop: {e}")
         finally:
             self._close_resources()
-            
+
         return 0
+
 
 def main():
     config = init_config()
-    logging.basicConfig(
-        level=getattr(logging, config.log_level.upper(), logging.INFO)
-    )
+    logging.basicConfig(level=getattr(logging, config.log_level.upper(), logging.INFO))
     log_config(config)
 
     gateway = Gateway(config)
@@ -286,6 +316,7 @@ def main():
     signal.signal(signal.SIGINT, handle_sigterm)
 
     return gateway.run()
+
 
 if __name__ == "__main__":
     raise SystemExit(main())

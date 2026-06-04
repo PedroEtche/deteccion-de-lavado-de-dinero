@@ -10,6 +10,7 @@ Exit codes:
     1  at least one mismatch or missing file
     2  bad arguments
 """
+
 import argparse
 import csv
 import glob
@@ -45,7 +46,10 @@ def compare_csvs(got_path, expected_path):
         return False, f"error reading {expected_path}: {exc}"
 
     if got_headers != exp_headers:
-        return False, f"header mismatch\n  got:      {got_headers}\n  expected: {exp_headers}"
+        return (
+            False,
+            f"header mismatch\n  got:      {got_headers}\n  expected: {exp_headers}",
+        )
 
     if len(got_rows) != len(exp_rows):
         return False, (
@@ -74,7 +78,9 @@ def _first_diff(got, expected):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Compare client CSV results against expected output")
+    parser = argparse.ArgumentParser(
+        description="Compare client CSV results against expected output"
+    )
     parser.add_argument("query", help="Query name, e.g. q1")
     parser.add_argument(
         "--expected",

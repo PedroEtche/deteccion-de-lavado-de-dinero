@@ -17,12 +17,14 @@ from src.join.strategies import (
 
 
 def _data_msg(client, batch):
-    return serialize({
-        "type": "batch",
-        "client": client,
-        "msg_id": str(uuid.uuid4()),
-        "payload": {"batch_size": len(batch), "batch": batch},
-    })
+    return serialize(
+        {
+            "type": "batch",
+            "client": client,
+            "msg_id": str(uuid.uuid4()),
+            "payload": {"batch_size": len(batch), "batch": batch},
+        }
+    )
 
 
 def _eof_msg(client):
@@ -30,12 +32,14 @@ def _eof_msg(client):
 
 
 def _accounts_msg(client, batch):
-    return serialize({
-        "type": "raw_accounts",
-        "client": client,
-        "msg_id": str(uuid.uuid4()),
-        "payload": {"batch_size": len(batch), "batch": batch},
-    })
+    return serialize(
+        {
+            "type": "raw_accounts",
+            "client": client,
+            "msg_id": str(uuid.uuid4()),
+            "payload": {"batch_size": len(batch), "batch": batch},
+        }
+    )
 
 
 def _make_account(bank_id, bank_name):
@@ -59,10 +63,17 @@ class _FakeCoord:
     def lock(self):
         yield
 
-    def broadcast(self, c): self.broadcasts.append(c)
-    def start(self): self.started = True
-    def stop(self, timeout=None): self.stopped = True
-    def close(self): self.closed = True
+    def broadcast(self, c):
+        self.broadcasts.append(c)
+
+    def start(self):
+        self.started = True
+
+    def stop(self, timeout=None):
+        self.stopped = True
+
+    def close(self):
+        self.closed = True
 
 
 def _make_service(strategy, accounts_input_queue=None):
@@ -76,8 +87,10 @@ def _make_service(strategy, accounts_input_queue=None):
         strategy=strategy,
         accounts_input_queue=accounts_input_queue,
     )
-    with patch("src.join.main.middleware.MessageMiddlewareQueueRabbitMQ") as mw, \
-         patch("src.join.main.EofCoordinator") as coord_cls:
+    with (
+        patch("src.join.main.middleware.MessageMiddlewareQueueRabbitMQ") as mw,
+        patch("src.join.main.EofCoordinator") as coord_cls,
+    ):
         mw.side_effect = lambda host, name: MagicMock(name=f"q:{name}")
         coord = _FakeCoord()
         coord_cls.return_value = coord
@@ -86,7 +99,6 @@ def _make_service(strategy, accounts_input_queue=None):
 
 
 class JoinServiceTest(unittest.TestCase):
-
     def test_data_message_joined_under_lock(self):
         service, coord = _make_service(CountStrategy())
         service._on_input(
@@ -126,7 +138,9 @@ class JoinServiceTest(unittest.TestCase):
         self.assertTrue(coord.stopped)
 
     def test_accounts_message_feeds_strategy(self):
-        service, _ = _make_service(BankMaxAmountStrategy(), accounts_input_queue="accounts_q")
+        service, _ = _make_service(
+            BankMaxAmountStrategy(), accounts_input_queue="accounts_q"
+        )
         service._on_accounts(
             _accounts_msg("c1", [_make_account("1", "Bank One")]),
             MagicMock(),
@@ -135,21 +149,25 @@ class JoinServiceTest(unittest.TestCase):
         self.assertEqual(service.strategy.bank_names_by_client["c1"]["1"], "Bank One")
 
     def test_accounts_eof_does_not_flush(self):
-        service, coord = _make_service(BankMaxAmountStrategy(), accounts_input_queue="accounts_q")
+        service, coord = _make_service(
+            BankMaxAmountStrategy(), accounts_input_queue="accounts_q"
+        )
         service._on_accounts(_eof_msg("c1"), MagicMock(), MagicMock())
         self.assertEqual(coord.broadcasts, [])
         service.output_queue.send.assert_not_called()
 
 
 class TestBankMaxAmountStrategyForQ2(unittest.TestCase):
-
     def test_join_keeps_max_per_bank(self):
         strategy = BankMaxAmountStrategy()
-        strategy.join_batch([
-            _max_tx("1", "A", 10.0),
-            _max_tx("1", "B", 30.0),
-            _max_tx("2", "C", 5.0),
-        ], client="c1")
+        strategy.join_batch(
+            [
+                _max_tx("1", "A", 10.0),
+                _max_tx("1", "B", 30.0),
+                _max_tx("2", "C", 5.0),
+            ],
+            client="c1",
+        )
 
         results = strategy.get_joined_for_client("c1")
         by_bank = {r["bank_name"]: r for r in results}
@@ -160,14 +178,20 @@ class TestBankMaxAmountStrategyForQ2(unittest.TestCase):
 
     def test_join_enriches_with_bank_name_from_accounts(self):
         strategy = BankMaxAmountStrategy()
-        strategy.add_accounts([
-            _make_account("1", "Bank One"),
-            _make_account("2", "Bank Two"),
-        ], client="c1")
-        strategy.join_batch([
-            _max_tx("1", "A", 30.0),
-            _max_tx("2", "C", 5.0),
-        ], client="c1")
+        strategy.add_accounts(
+            [
+                _make_account("1", "Bank One"),
+                _make_account("2", "Bank Two"),
+            ],
+            client="c1",
+        )
+        strategy.join_batch(
+            [
+                _max_tx("1", "A", 30.0),
+                _max_tx("2", "C", 5.0),
+            ],
+            client="c1",
+        )
 
         results = strategy.get_joined_for_client("c1")
         by_bank = {r["bank_name"]: r for r in results}
@@ -191,10 +215,13 @@ class TestBankMaxAmountStrategyForQ2(unittest.TestCase):
     def test_missing_bank_in_accounts_falls_back_to_bank_id(self):
         strategy = BankMaxAmountStrategy()
         strategy.add_accounts([_make_account("1", "Bank One")], client="c1")
-        strategy.join_batch([
-            _max_tx("1", "A", 10.0),
-            _max_tx("unknown", "X", 99.0),
-        ], client="c1")
+        strategy.join_batch(
+            [
+                _max_tx("1", "A", 10.0),
+                _max_tx("unknown", "X", 99.0),
+            ],
+            client="c1",
+        )
 
         results = strategy.get_joined_for_client("c1")
         bank_names = {r["bank_name"] for r in results}
@@ -231,15 +258,21 @@ class TestBankMaxAmountStrategyForQ2(unittest.TestCase):
 
     def test_account_row_with_none_fields_is_ignored(self):
         strategy = BankMaxAmountStrategy()
-        strategy.add_accounts([
-            AccountRow(bank_id=None, bank_name="Nameless"),
-            AccountRow(bank_id="2", bank_name=None),
-            AccountRow(bank_id="3", bank_name="Bank Three"),
-        ], client="c1")
-        strategy.join_batch([
-            _max_tx("2", "X", 5.0),
-            _max_tx("3", "Y", 7.0),
-        ], client="c1")
+        strategy.add_accounts(
+            [
+                AccountRow(bank_id=None, bank_name="Nameless"),
+                AccountRow(bank_id="2", bank_name=None),
+                AccountRow(bank_id="3", bank_name="Bank Three"),
+            ],
+            client="c1",
+        )
+        strategy.join_batch(
+            [
+                _max_tx("2", "X", 5.0),
+                _max_tx("3", "Y", 7.0),
+            ],
+            client="c1",
+        )
 
         results = strategy.get_joined_for_client("c1")
         bank_names = {r["bank_name"] for r in results}
@@ -247,7 +280,6 @@ class TestBankMaxAmountStrategyForQ2(unittest.TestCase):
 
 
 class TestNoStrategyAndCountStrategyAddAccountsAreNoOp(unittest.TestCase):
-
     def test_no_strategy_add_accounts_is_noop(self):
         NoStrategy().add_accounts([_make_account("1", "Bank One")], client="c1")
 

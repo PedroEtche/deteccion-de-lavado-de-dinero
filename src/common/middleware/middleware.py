@@ -18,7 +18,6 @@ class MessageMiddlewareDeleteError(Exception):
 
 
 class MessageMiddleware(ABC):
-
     # Comienza a escuchar a la cola/exchange e invoca a on_message_callback tras
     # cada mensaje de datos o de control con el cuerpo del mensaje.
     # on_message_callback tiene como parámetros:

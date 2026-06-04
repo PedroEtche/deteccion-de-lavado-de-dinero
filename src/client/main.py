@@ -16,6 +16,12 @@ from src.common.communication import (
 
 _CONNECT_RETRY_DELAY = 1.0
 _CONNECT_MAX_RETRIES = 30
+SERVER_HOST = os.environ["SERVER_HOST"]
+SERVER_PORT = int(os.environ["SERVER_PORT"])
+ACCOUNTS_PATH = os.environ["ACCOUNTS_PATH"]
+TRANSACTIONS_PATH = os.environ["TRANSACTIONS_PATH"]
+BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "500"))
+OUTPUT_PATH = os.environ["OUTPUT_PATH"]
 
 
 def _connect_with_retry(host, port):
@@ -42,66 +48,6 @@ def persist_rows(output_file, batch):
         csv_writer = csv.writer(csvfile, delimiter=",", quotechar='"')
         for row in batch:
             csv_writer.writerow(row)
-
-
-# def _receive_results(sock):
-#     logging.info("Started thread to receive results from server")
-#     result_count = 0
-#     while True:
-#         try:
-#             msg = sock.recv_bytes()
-#         except ConnectionError:
-#             logging.info("Server closed connection (received %d result message(s))", result_count)
-#             break
-#         result_count += 1
-#         logging.info("Result %d: %s", result_count, msg.decode("utf-8", errors="replace"))
-
-# def run_client(host, port, accounts_path, transactions_path, batch_size, output_path):
-#     sock = _connect_with_retry(host, port)
-#
-#     results_thread = threading.Thread(target=_receive_results, args=(sock,))
-#     results_thread.start()
-#     try:
-#         send_csv(sock, accounts_path, batch_size, STREAM_ACCOUNTS)
-#         send_csv(sock, transactions_path, batch_size, STREAM_TRANSACTIONS)
-#         send_eof(sock)
-#         logging.info("Datasets sent; waiting for results")
-#     finally:
-#         sock.close()
-
-# def main():
-#     logging.basicConfig(level=logging.INFO)
-#
-#     server_host = os.environ["SERVER_HOST"]
-#     server_port = int(os.environ["SERVER_PORT"])
-#     accounts_path = os.environ["ACCOUNTS_DATASET_PATH"]
-#     transactions_path = os.environ["TRANSACTIONS_DATASET_PATH"]
-#     batch_size = int(os.environ.get("BATCH_SIZE", "500"))
-#     output_path = os.environ["OUTPUT_PATH"]
-#
-#     logging.info(
-#         "Client starting: server_host=%s server_port=%s accounts=%s transactions=%s batch_size=%s output_path=%s",
-#         server_host,
-#         server_port,
-#         accounts_path,
-#         transactions_path,
-#         batch_size,
-#         output_path,
-#     )
-#
-#     run_client(server_host, server_port, accounts_path, transactions_path, batch_size, output_path)
-#     logging.info("Client done")
-#
-#
-# if __name__ == "__main__":
-#     main()
-
-SERVER_HOST = os.environ["SERVER_HOST"]
-SERVER_PORT = int(os.environ["SERVER_PORT"])
-ACCOUNTS_PATH = os.environ["ACCOUNTS_DATASET_PATH"]
-TRANSACTIONS_PATH = os.environ["TRANSACTIONS_DATASET_PATH"]
-BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "500"))
-OUTPUT_PATH = os.environ["OUTPUT_PATH"]
 
 
 class Client:
@@ -162,7 +108,15 @@ class Client:
         logging.info("Receiving results")
         query_result_counter = 0
         while query_result_counter < 5:
-            msg = sock.recv_bytes()
+            try:
+                msg = sock.recv_bytes()
+            except ConnectionError:
+                logging.info(
+                    "Server closed connection (received %d result message(s))",
+                    query_result_counter,
+                )
+                break
+
             decoded = deserialize(msg)
             query_type = decoded["type"]
 

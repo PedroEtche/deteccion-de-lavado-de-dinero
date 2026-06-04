@@ -74,10 +74,13 @@ def _load_file_config() -> Dict[str, Any]:
 def init_config() -> JoinConfig:
     file_config = _load_file_config()
     raw_strategy = os.getenv("STRATEGY", file_config.get("strategy", "NoStrategy"))
-    accounts_input_queue = os.getenv(
-        "ACCOUNTS_INPUT_QUEUE",
-        file_config.get("accounts_input_queue", ""),
-    ) or None
+    accounts_input_queue = (
+        os.getenv(
+            "ACCOUNTS_INPUT_QUEUE",
+            file_config.get("accounts_input_queue", ""),
+        )
+        or None
+    )
 
     return JoinConfig(
         mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
@@ -85,7 +88,9 @@ def init_config() -> JoinConfig:
         output_queue=os.getenv("OUTPUT_QUEUE", file_config.get("output_queue", "")),
         log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
         eof_fanout=os.getenv("EOF_FANOUT", file_config.get("eof_fanout", "")),
-        expected_eofs=int(os.getenv("EXPECTED_EOFS", file_config.get("expected_eofs", "1"))),
+        expected_eofs=int(
+            os.getenv("EXPECTED_EOFS", file_config.get("expected_eofs", "1"))
+        ),
         strategy=_parse_strategy_config(raw_strategy),
         accounts_input_queue=accounts_input_queue,
     )
@@ -159,7 +164,11 @@ class JoinService:
         self.coord.stop(timeout=10)
 
     def close(self) -> None:
-        for closeable in (self.input_queue, self.output_queue, self._accounts_input_queue):
+        for closeable in (
+            self.input_queue,
+            self.output_queue,
+            self._accounts_input_queue,
+        ):
             if closeable is None:
                 continue
             try:
@@ -205,7 +214,7 @@ class JoinService:
     def _flush_client(self, client: str) -> None:
         """Bajo `coord.lock()`. Emite el resultado joineado + EOF downstream."""
         logging.info("Flushing joined result for client %s", client)
-        
+
         if client in self._flushed_clients:
             logging.info("Ignoring duplicate flush wave for client %s", client)
             return
@@ -225,6 +234,7 @@ class JoinService:
         self.output_queue.send(
             serialize(build_eof_message(client=client, msg_id=str(uuid.uuid4())))
         )
+
 
 def main() -> int:
     config = init_config()

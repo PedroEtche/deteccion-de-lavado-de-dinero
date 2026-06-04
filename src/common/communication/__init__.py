@@ -8,6 +8,7 @@ from .protocol import (
 )
 from .internal import (
     serialize,
+    deserialize,
     build_batch_message,
     build_eof_message,
     TransactionRow,

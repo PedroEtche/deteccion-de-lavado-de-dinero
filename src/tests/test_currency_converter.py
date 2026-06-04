@@ -7,21 +7,29 @@ from common.communication.internal import (
     deserialize,
     serialize,
 )
-from src.currency_converter.main import CurrencyConverter, CurrencyConverterConfig, CurrencyConverterService
+from src.currency_converter.main import (
+    CurrencyConverter,
+    CurrencyConverterConfig,
+    CurrencyConverterService,
+)
 
 
 def _fake_fetcher(rates_by_date):
     """Returns a rate fetcher that serves from a fixed dict keyed by date string."""
+
     def fetcher(date_str):
         return rates_by_date[date_str]
+
     return fetcher
 
 
 def _tx(**kwargs):
     defaults = dict(
         timestamp="2022/09/03 10:00",
-        from_bank="B1", from_account="A1",
-        to_bank="B2", to_account="A2",
+        from_bank="B1",
+        from_account="A1",
+        to_bank="B2",
+        to_account="A2",
         amount_paid=100.0,
         payment_currency="US Dollar",
         payment_format="Wire",
@@ -31,7 +39,6 @@ def _tx(**kwargs):
 
 
 class TestCurrencyConverter(unittest.TestCase):
-
     def setUp(self):
         self.rates = {"2022-09-03": {"EUR": 0.9, "GBP": 0.8, "JPY": 140.0}}
         self.converter = CurrencyConverter(rate_fetcher=_fake_fetcher(self.rates))
@@ -68,7 +75,12 @@ class TestCurrencyConverter(unittest.TestCase):
         self.assertAlmostEqual(result[0].amount_paid, 80.0 / 0.8, places=6)
 
     def test_other_fields_are_preserved_after_conversion(self):
-        row = _tx(payment_currency="Euro", amount_paid=50.0, from_bank="MyBank", from_account="ACC99")
+        row = _tx(
+            payment_currency="Euro",
+            amount_paid=50.0,
+            from_bank="MyBank",
+            from_account="ACC99",
+        )
         result = self.converter.convert_batch([row])
         self.assertEqual(result[0].from_bank, "MyBank")
         self.assertEqual(result[0].from_account, "ACC99")
@@ -113,17 +125,24 @@ class TestCurrencyConverter(unittest.TestCase):
 
     def test_rates_are_cached_per_date(self):
         call_count = [0]
+
         def counting_fetcher(date_str):
             call_count[0] += 1
             return {"EUR": 0.9}
 
         converter = CurrencyConverter(rate_fetcher=counting_fetcher)
         batch = [
-            _tx(payment_currency="Euro", amount_paid=10.0, timestamp="2022/09/03 08:00"),
-            _tx(payment_currency="Euro", amount_paid=20.0, timestamp="2022/09/03 14:00"),
+            _tx(
+                payment_currency="Euro", amount_paid=10.0, timestamp="2022/09/03 08:00"
+            ),
+            _tx(
+                payment_currency="Euro", amount_paid=20.0, timestamp="2022/09/03 14:00"
+            ),
         ]
         converter.convert_batch(batch)
-        self.assertEqual(call_count[0], 1, "API should be called once for the same date")
+        self.assertEqual(
+            call_count[0], 1, "API should be called once for the same date"
+        )
 
     def test_different_dates_fetch_separately(self):
         rates = {
@@ -132,8 +151,12 @@ class TestCurrencyConverter(unittest.TestCase):
         }
         converter = CurrencyConverter(rate_fetcher=_fake_fetcher(rates))
         batch = [
-            _tx(payment_currency="Euro", amount_paid=100.0, timestamp="2022/09/03 08:00"),
-            _tx(payment_currency="Euro", amount_paid=100.0, timestamp="2022/09/04 08:00"),
+            _tx(
+                payment_currency="Euro", amount_paid=100.0, timestamp="2022/09/03 08:00"
+            ),
+            _tx(
+                payment_currency="Euro", amount_paid=100.0, timestamp="2022/09/04 08:00"
+            ),
         ]
         result = converter.convert_batch(batch)
         self.assertAlmostEqual(result[0].amount_paid, 100.0 / 0.9, places=6)
@@ -141,7 +164,6 @@ class TestCurrencyConverter(unittest.TestCase):
 
 
 class TestCurrencyConverterService(unittest.TestCase):
-
     def _make_service(self):
         config = CurrencyConverterConfig(
             mom_host="ignored",
@@ -152,19 +174,23 @@ class TestCurrencyConverterService(unittest.TestCase):
         rates = {"2022-09-03": {"EUR": 0.9}}
         converter = CurrencyConverter(rate_fetcher=_fake_fetcher(rates))
 
-        with patch("src.currency_converter.main.MessageMiddlewareQueueRabbitMQ") as mw_cls:
+        with patch(
+            "src.currency_converter.main.MessageMiddlewareQueueRabbitMQ"
+        ) as mw_cls:
             mw_cls.side_effect = lambda host, name: MagicMock(name=f"queue:{name}")
             service = CurrencyConverterService(config, converter=converter)
 
         return service
 
     def _raw_tx_msg(self, client, batch):
-        return serialize({
-            "type": "raw_transactions",
-            "client": client,
-            "msg_id": str(uuid.uuid4()),
-            "payload": {"batch_size": len(batch), "batch": batch},
-        })
+        return serialize(
+            {
+                "type": "raw_transactions",
+                "client": client,
+                "msg_id": str(uuid.uuid4()),
+                "payload": {"batch_size": len(batch), "batch": batch},
+            }
+        )
 
     def _eof_msg(self, client):
         return serialize({"type": "eof", "client": client, "msg_id": str(uuid.uuid4())})
@@ -185,7 +211,9 @@ class TestCurrencyConverterService(unittest.TestCase):
         sent = deserialize(service._output.send.call_args[0][0])
         self.assertEqual(sent["type"], "raw_transactions")
         self.assertEqual(sent["payload"]["batch_size"], 1)
-        self.assertAlmostEqual(sent["payload"]["batch"][0].amount_paid, 100.0 / 0.9, places=6)
+        self.assertAlmostEqual(
+            sent["payload"]["batch"][0].amount_paid, 100.0 / 0.9, places=6
+        )
 
     def test_all_dropped_batch_sends_nothing(self):
         service = self._make_service()

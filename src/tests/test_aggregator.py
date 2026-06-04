@@ -9,12 +9,14 @@ from common.communication.internal import deserialize, serialize
 
 
 def _make_data_msg(client, batch):
-    return serialize({
-        "type": "batch",
-        "client": client,
-        "msg_id": str(uuid.uuid4()),
-        "payload": {"batch_size": len(batch), "batch": batch},
-    })
+    return serialize(
+        {
+            "type": "batch",
+            "client": client,
+            "msg_id": str(uuid.uuid4()),
+            "payload": {"batch_size": len(batch), "batch": batch},
+        }
+    )
 
 
 def _make_eof_msg(client):
@@ -57,8 +59,10 @@ def _make_service(strategy):
         strategy=strategy,
     )
 
-    with patch("src.aggregator.main.middleware.MessageMiddlewareQueueRabbitMQ") as mw, \
-         patch("src.aggregator.main.EofCoordinator") as coord_cls:
+    with (
+        patch("src.aggregator.main.middleware.MessageMiddlewareQueueRabbitMQ") as mw,
+        patch("src.aggregator.main.EofCoordinator") as coord_cls,
+    ):
         mw.side_effect = lambda host, name: MagicMock(name=f"queue:{name}")
         fake_coord = _FakeCoord()
         coord_cls.return_value = fake_coord
@@ -68,16 +72,26 @@ def _make_service(strategy):
 
 
 class AggregatorServiceTest(unittest.TestCase):
-
     def test_data_message_aggregates_under_lock(self):
         service, coord = _make_service(BankMaxAmountStrategy())
         ack = MagicMock()
 
         service._on_input(
-            _make_data_msg("c1", [
-                {"from_bank": "BankA", "from_account": "acc1", "amount_paid": 100.0},
-                {"from_bank": "BankA", "from_account": "acc2", "amount_paid": 200.0},
-            ]),
+            _make_data_msg(
+                "c1",
+                [
+                    {
+                        "from_bank": "BankA",
+                        "from_account": "acc1",
+                        "amount_paid": 100.0,
+                    },
+                    {
+                        "from_bank": "BankA",
+                        "from_account": "acc2",
+                        "amount_paid": 200.0,
+                    },
+                ],
+            ),
             ack,
             MagicMock(),
         )
@@ -139,7 +153,6 @@ class AggregatorServiceTest(unittest.TestCase):
 
 
 class CountStrategyTest(unittest.TestCase):
-
     def test_accumulates_count_across_batches(self):
         strategy = CountStrategy()
         strategy.aggregate_batch([1, 2, 3], client="c1")

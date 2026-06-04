@@ -13,12 +13,14 @@ from src.group.strategies import BankMaxAmountStrategy
 
 
 def _data_msg(client, batch):
-    return serialize({
-        "type": "raw_transactions",
-        "client": client,
-        "msg_id": str(uuid.uuid4()),
-        "payload": {"batch_size": len(batch), "batch": batch},
-    })
+    return serialize(
+        {
+            "type": "raw_transactions",
+            "client": client,
+            "msg_id": str(uuid.uuid4()),
+            "payload": {"batch_size": len(batch), "batch": batch},
+        }
+    )
 
 
 def _eof_msg(client):
@@ -34,10 +36,17 @@ class _FakeCoord:
     def lock(self):
         yield
 
-    def broadcast(self, client_id): self.broadcasts.append(client_id)
-    def start(self): self.started = True
-    def stop(self, timeout=None): self.stopped = True
-    def close(self): self.closed = True
+    def broadcast(self, client_id):
+        self.broadcasts.append(client_id)
+
+    def start(self):
+        self.started = True
+
+    def stop(self, timeout=None):
+        self.stopped = True
+
+    def close(self):
+        self.closed = True
 
 
 def _make_service(strategy):
@@ -51,9 +60,11 @@ def _make_service(strategy):
         strategy=strategy,
     )
 
-    with patch("src.group.main.middleware.MessageMiddlewareQueueRabbitMQ") as q_mw, \
-         patch("src.group.main.middleware.MessageMiddlewareExchangeRabbitMQ") as ex_mw, \
-         patch("src.group.main.EofCoordinator") as coord_cls:
+    with (
+        patch("src.group.main.middleware.MessageMiddlewareQueueRabbitMQ") as q_mw,
+        patch("src.group.main.middleware.MessageMiddlewareExchangeRabbitMQ") as ex_mw,
+        patch("src.group.main.EofCoordinator") as coord_cls,
+    ):
         q_mw.return_value = MagicMock(name="input_queue")
         ex_mw.return_value = MagicMock(name="output_exchange")
         coord = _FakeCoord()
@@ -63,16 +74,20 @@ def _make_service(strategy):
 
 
 class GroupServiceTest(unittest.TestCase):
-
     def test_data_routes_grouped_batches(self):
         service, _ = _make_service(BankMaxAmountStrategy("agg_q2"))
 
         service._on_input(
-            _data_msg("c1", [
-                TransactionRow(from_bank="B1", from_account="a1", amount_paid=50.0),
-                TransactionRow(from_bank="B1", from_account="a2", amount_paid=200.0),
-                TransactionRow(from_bank="B2", from_account="a3", amount_paid=30.0),
-            ]),
+            _data_msg(
+                "c1",
+                [
+                    TransactionRow(from_bank="B1", from_account="a1", amount_paid=50.0),
+                    TransactionRow(
+                        from_bank="B1", from_account="a2", amount_paid=200.0
+                    ),
+                    TransactionRow(from_bank="B2", from_account="a3", amount_paid=30.0),
+                ],
+            ),
             MagicMock(),
             MagicMock(),
         )

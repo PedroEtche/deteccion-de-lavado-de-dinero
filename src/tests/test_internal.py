@@ -28,7 +28,7 @@ class TestMessageBuilding:
     def test_build_eof_message(self, client_id, msg_id):
         """Test building EOF message"""
         message = build_eof_message(client=client_id, msg_id=msg_id)
-        
+
         assert message["type"] == "eof"
         assert message["client"] == client_id
         assert message["msg_id"] == msg_id
@@ -62,13 +62,13 @@ class TestMessageBuilding:
                 payment_format="TRANSFER",
             ),
         ]
-        
+
         message = build_raw_transactions_message(
             client=client_id,
             msg_id=msg_id,
             batch=transactions,
         )
-        
+
         assert message["type"] == "raw_transactions"
         assert message["client"] == client_id
         assert message["msg_id"] == msg_id
@@ -94,19 +94,20 @@ class TestMessageBuilding:
                 entity_name="Corporation #41345",
             ),
         ]
-        
+
         message = build_raw_accounts_message(
             client=client_id,
             msg_id=msg_id,
             batch=accounts,
         )
-        
+
         assert message["type"] == "raw_accounts"
         assert message["client"] == client_id
         assert message["msg_id"] == msg_id
         assert message["payload"]["batch_size"] == 2
         assert len(message["payload"]["batch"]) == 2
         assert message["payload"]["batch"] == accounts
+
 
 class TestMessageSerialization:
     """Test serialization and deserialization of messages"""
@@ -135,16 +136,16 @@ class TestMessageSerialization:
                 payment_format="WIRE",
             )
         ]
-        
+
         original = build_raw_transactions_message(
             client=client_id,
             msg_id=msg_id,
             batch=transactions,
         )
-        
+
         serialized = serialize(original)
         deserialized = deserialize(serialized)
-        
+
         assert deserialized == original
 
     def test_serialize_deserialize_raw_accounts(self, client_id, msg_id):
@@ -158,16 +159,16 @@ class TestMessageSerialization:
                 entity_name="Corporation #41344",
             ),
         ]
-        
+
         original = build_raw_accounts_message(
             client=client_id,
             msg_id=msg_id,
             batch=accounts,
         )
-        
+
         serialized = serialize(original)
         deserialized = deserialize(serialized)
-        
+
         assert deserialized == original
 
 
@@ -195,14 +196,17 @@ class TestValidation:
 
 class TestDeserialization:
     """Test deserialization edge cases and error handling"""
+
     def test_deserialize_invalid_schema(self):
-        invalid_schema = json.dumps({
-            "type": "raw_transactions",
-            "client": str(uuid.uuid4()),
-            "msg_id": str(uuid.uuid4()),
-            # missing payload for raw_transactions
-        }).encode("utf-8")
-        
+        invalid_schema = json.dumps(
+            {
+                "type": "raw_transactions",
+                "client": str(uuid.uuid4()),
+                "msg_id": str(uuid.uuid4()),
+                # missing payload for raw_transactions
+            }
+        ).encode("utf-8")
+
         with pytest.raises(MessageValidationError, match="missing 'payload'"):
             deserialize(invalid_schema)
 
@@ -225,7 +229,7 @@ class TestEdgeCases:
             msg_id=msg_id,
             batch=[],
         )
-        
+
         assert message["payload"]["batch_size"] == 0
         assert message["payload"]["batch"] == []
 

@@ -3,6 +3,7 @@
 canonica: sin campos no-deterministicos (client uuid, msg_id) y con el batch
 ordenado por contenido. Dos corridas con los mismos inputs producen output
 byte-igual."""
+
 import json
 import re
 import sys
@@ -16,7 +17,10 @@ def normalize_message(msg):
     batch = payload.get("batch")
     if isinstance(batch, list):
         sorted_batch = sorted(batch, key=lambda x: json.dumps(x, sort_keys=True))
-        out["payload"] = {"batch_size": payload.get("batch_size"), "batch": sorted_batch}
+        out["payload"] = {
+            "batch_size": payload.get("batch_size"),
+            "batch": sorted_batch,
+        }
     else:
         out["payload"] = payload
     return out
@@ -41,7 +45,10 @@ def main():
         try:
             obj, _ = decoder.raw_decode(text, start)
         except json.JSONDecodeError as exc:
-            print(f"Warning: skipping unparseable result at offset {start}: {exc}", file=sys.stderr)
+            print(
+                f"Warning: skipping unparseable result at offset {start}: {exc}",
+                file=sys.stderr,
+            )
             continue
         messages.append(obj)
 

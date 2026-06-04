@@ -87,7 +87,9 @@ class CurrencyConverter:
     Bitcoin transactions are silently dropped (Frankfurter does not support them).
     """
 
-    def __init__(self, rate_fetcher: Optional[Callable[[str], Dict[str, float]]] = None) -> None:
+    def __init__(
+        self, rate_fetcher: Optional[Callable[[str], Dict[str, float]]] = None
+    ) -> None:
         self._rate_cache: Dict[str, Dict[str, float]] = {}
         self._rate_fetcher = rate_fetcher or _fetch_rates_from_api
 
@@ -138,9 +140,17 @@ class CurrencyConverter:
 
 
 class CurrencyConverterService:
-    def __init__(self, config: CurrencyConverterConfig, converter: Optional[CurrencyConverter] = None) -> None:
-        self._input = MessageMiddlewareQueueRabbitMQ(config.mom_host, config.input_queue)
-        self._output = MessageMiddlewareQueueRabbitMQ(config.mom_host, config.output_queue)
+    def __init__(
+        self,
+        config: CurrencyConverterConfig,
+        converter: Optional[CurrencyConverter] = None,
+    ) -> None:
+        self._input = MessageMiddlewareQueueRabbitMQ(
+            config.mom_host, config.input_queue
+        )
+        self._output = MessageMiddlewareQueueRabbitMQ(
+            config.mom_host, config.output_queue
+        )
         self._converter = converter or CurrencyConverter()
         self._running = False
 
@@ -167,7 +177,9 @@ class CurrencyConverterService:
 
         if decoded["type"] == "eof":
             logging.info("Forwarding EOF for client %s", client)
-            self._output.send(serialize(build_eof_message(client=client, msg_id=str(uuid.uuid4()))))
+            self._output.send(
+                serialize(build_eof_message(client=client, msg_id=str(uuid.uuid4())))
+            )
             ack()
             return
 
@@ -191,7 +203,9 @@ def main() -> int:
     logging.basicConfig(level=getattr(logging, config.log_level.upper(), logging.INFO))
     logging.info(
         "Currency converter startup: mom_host=%s input=%s output=%s",
-        config.mom_host, config.input_queue, config.output_queue,
+        config.mom_host,
+        config.input_queue,
+        config.output_queue,
     )
     service = CurrencyConverterService(config)
 

@@ -216,12 +216,12 @@ class Gateway:
                     logging.info("The client has disconnected")
                     break
                 
-                message = communication.internal.deserialize(raw_bytes)
+                message = deserialize(raw_bytes)
                 msg_type = message.get("type")
 
                 if msg_type == "raw_transactions":
                     txs = [_dict_to_transaction_row(row) for row in message.get("batch", [])]
-                    serialized_message = communication.internal.serialize(build_raw_transactions_message(
+                    serialized_message = serialize(build_raw_transactions_message(
                         client=client_id,
                         msg_id=str(uuid.uuid4()),
                         batch=txs,
@@ -232,7 +232,7 @@ class Gateway:
 
                 elif msg_type == "raw_accounts":
                     accounts = [_dict_to_account_row(row) for row in message.get("batch", [])]
-                    serialized_message = communication.internal.serialize(build_raw_accounts_message(
+                    serialized_message = serialize(build_raw_accounts_message(
                         client=client_id,
                         msg_id=str(uuid.uuid4()),
                         batch=accounts,

@@ -166,7 +166,6 @@ class Gateway:
                     break
 
                 message = deserialize(raw_bytes)
-                logging.info("Receive message: %s", message)
                 msg_type = message.get("type")
 
                 if msg_type == "raw_transactions":
@@ -180,7 +179,6 @@ class Gateway:
                     )
 
                     with self._send_lock:
-                        # logging.debug("Sending message: %s", txs)
                         self.transactions_mw.send(serialized_message)
 
                 elif msg_type == "raw_accounts":
@@ -193,7 +191,6 @@ class Gateway:
                         )
                     )
                     with self._send_lock:
-                        # logging.debug("Sending message: %s", accounts)
                         self.accounts_mw.send(serialized_message)
 
             logging.info(

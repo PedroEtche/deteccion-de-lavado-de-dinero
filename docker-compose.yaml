@@ -31,6 +31,38 @@ services:
     - INPUT_QUEUE=result_queue
     - SERVER_PORT=5678
 
+  filter_usd_0:
+    build:
+      context: .
+      dockerfile: src/filter/Dockerfile
+    container_name: filter_usd_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/filter/config/usd_config.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=transactions_queue
+    - OUTPUT_QUEUE=q1_queue
+
+  q1_filter_less_than_fifty_0:
+    build:
+      context: .
+      dockerfile: src/filter/Dockerfile
+    container_name: q1_filter_less_than_fifty_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/filter/config/q1_config.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=q1_queue
+    - OUTPUT_QUEUE=result_queue
+
   client_0:
     build:
       context: .

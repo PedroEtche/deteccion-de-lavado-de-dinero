@@ -1,0 +1,10 @@
+mom_host: rabbitmq
+
+input_queue: q1_queue
+output_queue: result_queue
+
+strategy:
+  - type: amount
+  - value: Amount Received
+  - condition: <
+  - threshold: 50

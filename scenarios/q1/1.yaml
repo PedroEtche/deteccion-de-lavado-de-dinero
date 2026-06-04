@@ -56,7 +56,7 @@ services:
       rabbitmq:
         condition: service_healthy
     volumes:
-    - ./src/filter/config/q1_amount_less_than_50_config.yaml:/app/config.yaml:ro
+    - ./src/filter/config/q1_config.yaml:/app/config.yaml:ro
     environment:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
@@ -71,12 +71,14 @@ services:
     depends_on:
     - gateway
     volumes:
-    - ./data/small_trans.csv:/data/dataset.csv:ro
+    - ./data/small_trans.csv:/data/small_trans.csv
+    - ./data/small_accounts.csv:/data/small_accounts.csv
     - ./results/clients/client_0:/results/clients/client_0
     environment:
     - PYTHONUNBUFFERED=1
     - SERVER_HOST=gateway
     - SERVER_PORT=5678
     - OUTPUT_PATH=/results/clients/client_0/
-    - DATASET_PATH=/data/dataset.csv
+    - ACCOUNTS_PATH=/data/small_accounts.csv
+    - TRANSACTIONS_PATH=/data/small_trans.csv
     - BATCH_SIZE=500

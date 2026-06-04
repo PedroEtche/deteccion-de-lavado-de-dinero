@@ -55,20 +55,21 @@ class CurrencyStrategy(FilterStrategy):
 
 
 class AmountComparisonStrategy(FilterStrategy):
-    def __init__(self, target: str, operator: str, threshold: float) -> None:
+    def __init__(self, operator: str, threshold: float) -> None:
         if operator not in _AMOUNT_OPS:
             raise ValueError(
                 f"Unknown operator {operator!r}. Valid: {list(_AMOUNT_OPS)}"
             )
         self._op = _AMOUNT_OPS[operator]
         self.threshold = float(threshold)
-        self.target = target
 
     def __str__(self) -> str:
-        return f"AmountComparisonStrategy(amount_paid {self.target} {self._op} {self.threshold})"
+        return f"AmountComparisonStrategy(amount_paid {self._op} {self.threshold})"
 
     def filter_batch(self, batch: List[Any]) -> List[Any]:
-        return [row for row in batch if self._op(row.target, self.threshold)]
+        return [
+            row for row in batch if self._op(float(row.amount_received), self.threshold)
+        ]
 
 
 # class FieldLessThanStrategy(FilterStrategy):

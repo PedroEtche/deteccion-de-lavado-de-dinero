@@ -1,3 +1,4 @@
+import dataclasses
 import logging
 import csv
 import os
@@ -47,7 +48,7 @@ def persist_rows(output_file, batch):
     with open(output_file, "a") as csvfile:
         csv_writer = csv.writer(csvfile, delimiter=",", quotechar='"')
         for row in batch:
-            csv_writer.writerow(row)
+            csv_writer.writerow(dataclasses.asdict(row).values())
 
 
 class Client:
@@ -120,7 +121,7 @@ class Client:
             decoded = deserialize(msg)
             query_type = decoded["type"]
 
-            if query_type == "q1_result":
+            if query_type == "raw_transactions":
                 output_file = output_path + "q1.csv"
                 batch = decoded["payload"]["batch"]
                 persist_rows(output_file, batch)

@@ -62,9 +62,7 @@ def _build_strategy(strategy_data: List[Dict[str, Any]]) -> FilterStrategy:
     _BUILDERS = {
         "none": lambda p: NoStrategy(),
         "currency": lambda p: CurrencyStrategy(p["value"]),
-        "amount": lambda p: AmountComparisonStrategy(
-            p["value"], p["condition"], p["threshold"]
-        ),
+        "amount": lambda p: AmountComparisonStrategy(p["condition"], p["threshold"]),
     }
 
     builder = _BUILDERS.get(strategy_type)
@@ -98,9 +96,6 @@ class FilterService:
     def __init__(self, config: FilterConfig) -> None:
         self.config = config
         self.strategy = config.strategy
-        # self.mom_host = config.mom_host
-        # self.input_queue = config.input_queue
-        # self.output_exchange = config.output_queue
         self._running = False
 
     def start(self) -> None:
@@ -114,36 +109,6 @@ class FilterService:
         )
 
         self.input_queue.start_consuming(self._on_data_message)
-        # self._input_middleware = MessageMiddlewareQueueRabbitMQ(
-        #     self.mom_host, self.input_queue
-        # )
-        # for queue_data in self.output_queues:
-        #     if queue_data[TYPE] == "exchange":
-        #         self._output_middleware[queue_data[NAME]] = (
-        #             MessageMiddlewareExchangeRabbitMQ(self.mom_host, queue_data[NAME])
-        #         )
-        #     else:
-        #         self._output_middleware[queue_data[NAME]] = (
-        #             MessageMiddlewareQueueRabbitMQ(self.mom_host, queue_data[NAME])
-        #         )
-        #
-        # if self.control_queue and isinstance(
-        #     self.strategy, HistoricalAverageFilterStrategy
-        # ):
-        #     self._control_middleware = MessageMiddlewareQueueRabbitMQ(
-        #         self.mom_host, self.control_queue
-        #     )
-        #     control_thread = threading.Thread(
-        #         target=self._consume_control,
-        #         daemon=True,
-        #         name="filter-control-consumer",
-        #     )
-        #     control_thread.start()
-        #
-        # try:
-        #     self._input_middleware.start_consuming(self._on_data_message)
-        # finally:
-        #     self._close_middlewares()
 
     def _on_data_message(self, message: bytes, ack, nack) -> None:
         try:
@@ -162,7 +127,7 @@ class FilterService:
 
             batch = decoded["payload"]["batch"]
             filtered_batch = self.strategy.filter_batch(batch)
-            logging.debug(
+            logging.info(
                 "Filtered batch: %d in -> %d out", len(batch), len(filtered_batch)
             )
             out_msg = serialize(
@@ -177,41 +142,6 @@ class FilterService:
         except Exception:
             logging.exception("error processing data message")
             nack()
-
-        # try:
-        #     decoded = deserialize(message)
-        #     client = decoded["client"]
-        #
-        #     if decoded["type"] == "eof":
-        #         if self._averages_ready(client):
-        #             self._forward_eof(client)
-        #         else:
-        #             logging.info(
-        #                 "Data EOF received but no averages yet for client %s, buffering",
-        #                 client,
-        #             )
-        #             self._pending_eofs.add(client)
-        #         ack()
-        #         return
-        #
-        #     if isinstance(self.strategy, HistoricalAverageFilterStrategy):
-        #         if not self._averages_ready(client):
-        #             self._write_to_disk(client, message)
-        #             ack()
-        #             return
-        #         self.strategy._current_client = client
-        #
-        #     result = process_message(
-        #         message, self.strategy, self.projection_fields, self.output_message_type
-        #     )
-        #     if result is not None:
-        #         for queue, out_msg in result.items():
-        #             self._output_middleware[queue].send(out_msg)
-        #     ack()
-        # except Exception:
-        #     logging.exception("error processing data message")
-        #     nack()
-        #
 
     def _forward_eof(self, client: str) -> None:
         pass

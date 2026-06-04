@@ -8,11 +8,6 @@ from dataclasses import dataclass
 
 import yaml
 
-from src.common.communication import (
-    STREAM_ACCOUNTS,
-    STREAM_TRANSACTIONS,
-    receive_streams,
-)
 from src.common.communication.tcp import TCPSocket
 from src.common.middleware import MessageMiddlewareQueueRabbitMQ
 from src.common.communication.internal import (
@@ -80,54 +75,6 @@ def log_config(config: GatewayConfig):
         config.accounts_queue,
         config.result_queue,
     )
-
-
-_CSV_TO_TX_FIELDS = (
-    ("Timestamp", "timestamp"),
-    ("From Bank", "from_bank"),
-    ("Account", "from_account"),
-    ("To Bank", "to_bank"),
-    ("Account.1", "to_account"),
-    ("Amount Received", "amount_received"),
-    ("Receiving Currency", "receiving_currency"),
-    ("Amount Paid", "amount_paid"),
-    ("Payment Currency", "payment_currency"),
-    ("Payment Format", "payment_format"),
-)
-
-_TX_FLOAT_FIELDS = {"amount_received", "amount_paid"}
-
-
-def _dict_to_transaction_row(row):
-    kwargs = {}
-    for csv_field, tx_field in _CSV_TO_TX_FIELDS:
-        value = row.get(csv_field)
-        if value is None or value == "":
-            continue
-        if tx_field in _TX_FLOAT_FIELDS:
-            kwargs[tx_field] = float(value)
-        else:
-            kwargs[tx_field] = value
-    return TransactionRow(**kwargs)
-
-
-_CSV_TO_ACCOUNT_FIELDS = (
-    ("Bank Name", "bank_name"),
-    ("Bank ID", "bank_id"),
-    ("Account Number", "account_number"),
-    ("Entity ID", "entity_id"),
-    ("Entity Name", "entity_name"),
-)
-
-
-def _dict_to_account_row(row):
-    kwargs = {}
-    for csv_field, ac_field in _CSV_TO_ACCOUNT_FIELDS:
-        value = row.get(csv_field)
-        if value is None or value == "":
-            continue
-        kwargs[ac_field] = value
-    return AccountRow(**kwargs)
 
 
 class Gateway:
@@ -220,7 +167,7 @@ class Gateway:
                 msg_type = message.get("type")
 
                 if msg_type == "raw_transactions":
-                    txs = [_dict_to_transaction_row(row) for row in message.get("batch", [])]
+                    txs = message.get("payload", {}).get("batch", [])
                     serialized_message = serialize(build_raw_transactions_message(
                         client=client_id,
                         msg_id=str(uuid.uuid4()),
@@ -228,17 +175,17 @@ class Gateway:
                     ))
 
                     with self._send_lock:
-                        self.transactions_queue.send(serialized_message)
+                        self.transactions_mw.send(serialized_message)
 
                 elif msg_type == "raw_accounts":
-                    accounts = [_dict_to_account_row(row) for row in message.get("batch", [])]
+                    accounts = message.get("payload", {}).get("batch", [])
                     serialized_message = serialize(build_raw_accounts_message(
                         client=client_id,
                         msg_id=str(uuid.uuid4()),
                         batch=accounts,
                     ))
                     with self._send_lock:
-                        self.accounts_queue.send(serialized_message)
+                        self.accounts_mw.send(serialized_message)
 
             logging.info("Inbound EOF received for client %s; forwarding EOF downstream", client_id)
             eof_message = serialize(

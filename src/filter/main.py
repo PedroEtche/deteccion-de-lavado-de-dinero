@@ -60,7 +60,7 @@ def _build_strategy(strategy_data: List[Dict[str, Any]]) -> FilterStrategy:
     strategy_type = params.get("type", "none")
 
     _BUILDERS = {
-        "none": lambda p: NoStrategy(),
+        "none": lambda _: NoStrategy(),
         "currency": lambda p: CurrencyStrategy(p["value"]),
         "amount": lambda p: AmountComparisonStrategy(p["condition"], p["threshold"]),
     }

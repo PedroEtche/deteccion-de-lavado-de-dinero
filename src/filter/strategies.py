@@ -2,6 +2,9 @@ from typing import Any, Callable, List, Dict
 from abc import ABC, abstractmethod
 import operator as op
 
+from src.common.communication.internal import (
+    TransactionRow,
+)
 
 _AMOUNT_OPS: Dict[str, Callable[[float, float], bool]] = {
     "<": op.lt,
@@ -58,7 +61,7 @@ class AmountComparisonStrategy(FilterStrategy):
     def __init__(self, operator: str, threshold: float) -> None:
         if operator not in _AMOUNT_OPS:
             raise ValueError(
-                f"Unknown operator {operator!r}. Valid: {list(_AMOUNT_OPS)}"
+                f"Unknown operator.  List of valid ones: {list(_AMOUNT_OPS)}"
             )
         self._op = _AMOUNT_OPS[operator]
         self.threshold = float(threshold)
@@ -67,8 +70,17 @@ class AmountComparisonStrategy(FilterStrategy):
         return f"AmountComparisonStrategy(amount_paid {self._op} {self.threshold})"
 
     def filter_batch(self, batch: List[Any]) -> List[Any]:
+        # From Bank,Account,To Bank,Account.1,Amount Paid
         return [
-            row for row in batch if self._op(float(row.amount_received), self.threshold)
+            TransactionRow(
+                from_bank=row.from_bank,
+                from_account=row.from_account,
+                to_bank=row.to_bank,
+                to_account=row.to_account,
+                amount_paid=row.amount_paid,
+            )
+            for row in batch
+            if self._op(float(row.amount_received), self.threshold)
         ]
 
 

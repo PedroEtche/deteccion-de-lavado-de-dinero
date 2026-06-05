@@ -131,6 +131,13 @@ class TransactionRow(Payload):
     payment_currency: str | None = None
     payment_format: str | None = None
 
+    def __post_init__(self):
+        """Used for casting str values to float. The objective is cloning pandas results"""
+        if self.amount_received is not None:
+            self.amount_received = float(self.amount_received)
+        if self.amount_paid is not None:
+            self.amount_paid = float(self.amount_paid)
+
     @property
     def date(self) -> datetime | None:
         if self.timestamp is None:

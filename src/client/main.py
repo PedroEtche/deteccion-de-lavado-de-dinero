@@ -48,7 +48,9 @@ def persist_rows(output_file, batch):
     with open(output_file, "a") as csvfile:
         csv_writer = csv.writer(csvfile, delimiter=",", quotechar='"')
         for row in batch:
-            csv_writer.writerow(dataclasses.asdict(row).values())
+            csv_writer.writerow(
+                v for v in dataclasses.asdict(row).values() if v is not None
+            )
 
 
 class Client:

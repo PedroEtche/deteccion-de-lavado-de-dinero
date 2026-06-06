@@ -4,6 +4,7 @@ import signal
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, IO, List, Optional, Set, Tuple
+import uuid
 
 import yaml
 
@@ -19,6 +20,8 @@ from src.common.communication.internal import (
     deserialize,
     serialize,
 )
+
+from src.common.eof import EofCoordinator
 
 from .strategies import (
     AmountComparisonStrategy,
@@ -41,6 +44,7 @@ class FilterConfig:
     output_queue: str
     log_level: str
     strategy: FilterStrategy
+    expected_eofs: int
 
 
 def _load_file_config() -> Dict[str, Any]:
@@ -79,16 +83,18 @@ def init_config() -> FilterConfig:
         output_queue=data.get("output", ""),
         log_level=os.environ.get("LOG_LEVEL", "INFO"),
         strategy=_build_strategy(data.get("strategy", [])),
+        expected_eofs=int(os.getenv("EOF_EXPECTED", "1")),
     )
 
 
 def log_config(config: FilterConfig) -> None:
     logging.info(
-        "Filter startup with: mom_host=%s | input_queue=%s | output_queue=%s | strategy=%s",
+        "Filter startup with: mom_host=%s | input_queue=%s | output_queue=%s | strategy=%s | expected_eofs=%d",
         config.mom_host,
         config.input_queue,
         config.output_queue,
         str(config.strategy),
+        config.expected_eofs
     )
 
 
@@ -108,15 +114,22 @@ class FilterService:
             self.config.mom_host, self.config.output_queue
         )
 
+        self.eof_coordinator = EofCoordinator(
+            expected_eofs=self.config.expected_eofs,
+            on_flush=self._forward_eof,
+        )
+
         self.input_queue.start_consuming(self._on_data_message)
 
     def _on_data_message(self, message: bytes, ack, nack) -> None:
         try:
             decoded = deserialize(message)
             msg_type = decoded.get("type")
+            client = decoded.get("client")
 
             if msg_type == "eof":
-                logging.info("Received EOF, forwarding downstream")
+                logging.info("Received EOF for client %s", client)
+                self.eof_coordinator.handle_eof(client)
                 ack()
                 return
 
@@ -144,7 +157,10 @@ class FilterService:
             nack()
 
     def _forward_eof(self, client: str) -> None:
-        pass
+        logging.info("Forwarding EOF for client %s", client)
+    
+        eof_msg = serialize(build_eof_message(client=client, msg_id=str(uuid.uuid4())))
+        self.output_queue.send(eof_msg)
 
     def stop(self) -> None:
         logging.info("Stopping filter service")

@@ -27,9 +27,10 @@ services:
     environment:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
-    - TRANSACTIONS_QUEUE=transactions_queue
+    - TRANSACTIONS_QUEUE=transactions_exchange
     - INPUT_QUEUE=result_queue
     - SERVER_PORT=5678
+    - NUM_TX_WORKERS=3
 
   filter_usd_0:
     build:
@@ -42,10 +43,39 @@ services:
     volumes:
     - ./src/filter/config/usd_config.yaml:/app/config.yaml:ro
     environment:
-    - PYTHONUNBUFFERED=1
-    - MOM_HOST=rabbitmq
-    - INPUT_QUEUE=transactions_queue
-    - OUTPUT_QUEUE=q1_queue
+    - EOF_EXPECTED=1
+    - WORKER_ID=1
+    - NUM_DOWNSTREAM_WORKERS=1
+
+  filter_usd_1:
+    build:
+      context: .
+      dockerfile: src/filter/Dockerfile
+    container_name: filter_usd_1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/filter/config/usd_config.yaml:/app/config.yaml:ro
+    environment:
+    - EOF_EXPECTED=1
+    - WORKER_ID=2
+    - NUM_DOWNSTREAM_WORKERS=1
+
+  filter_usd_2:
+    build:
+      context: .
+      dockerfile: src/filter/Dockerfile
+    container_name: filter_usd_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/filter/config/usd_config.yaml:/app/config.yaml:ro
+    environment:
+    - EOF_EXPECTED=1
+    - WORKER_ID=3
+    - NUM_DOWNSTREAM_WORKERS=1
 
   q1_filter_less_than_fifty_0:
     build:
@@ -58,10 +88,9 @@ services:
     volumes:
     - ./src/filter/config/q1_config.yaml:/app/config.yaml:ro
     environment:
-    - PYTHONUNBUFFERED=1
-    - MOM_HOST=rabbitmq
-    - INPUT_QUEUE=q1_queue
-    - OUTPUT_QUEUE=result_queue
+    - EOF_EXPECTED=3
+    - WORKER_ID=1
+    - NUM_DOWNSTREAM_WORKERS=1
 
   client_0:
     build:

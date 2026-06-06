@@ -2,26 +2,12 @@ import logging
 import os
 import signal
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Dict, IO, List, Optional, Set, Tuple
-import uuid
+from typing import Any, Dict, List
 
 import yaml
 
-from src.common.middleware import (
-    MessageMiddlewareQueueRabbitMQ,
-    MessageMiddlewareExchangeRabbitMQ,
-)
-from src.common.communication.internal import (
-    TransactionRow,
-    build_batch_message,
-    build_raw_transactions_message,
-    build_eof_message,
-    deserialize,
-    serialize,
-)
-
-from src.common.eof import EofCoordinator
+from src.common.worker import BaseWorker
+from src.common.communication.internal import build_raw_transactions_message
 
 from .strategies import (
     AmountComparisonStrategy,
@@ -30,22 +16,19 @@ from .strategies import (
     NoStrategy,
 )
 
-
 CONFIG_PATH = "./config.yaml"
-DATETIME_FORMAT = "%Y/%m/%d %H:%M"
-TYPE = 0
-NAME = 1
-
 
 @dataclass
 class FilterConfig:
     mom_host: str
-    input_queue: str
-    output_queue: str
+    input_exchange: str
+    output_exchange: str
     log_level: str
     strategy: FilterStrategy
     expected_eofs: int
-
+    worker_id: int
+    num_downstream_workers: int
+    routing_strategy: str
 
 def _load_file_config() -> Dict[str, Any]:
     try:
@@ -54,7 +37,6 @@ def _load_file_config() -> Dict[str, Any]:
             return data if isinstance(data, dict) else {}
     except FileNotFoundError:
         return {}
-
 
 def _build_strategy(strategy_data: List[Dict[str, Any]]) -> FilterStrategy:
     params: Dict[str, Any] = {}
@@ -74,103 +56,51 @@ def _build_strategy(strategy_data: List[Dict[str, Any]]) -> FilterStrategy:
         raise ValueError(f"Unknown strategy type: {strategy_type!r}")
     return builder(params)
 
-
 def init_config() -> FilterConfig:
     data = _load_file_config()
     return FilterConfig(
         mom_host=data.get("mom_host", "rabbitmq"),
-        input_queue=data.get("input", ""),
-        output_queue=data.get("output", ""),
+        input_exchange=data.get("input", ""),
+        output_exchange=data.get("output", ""),
         log_level=os.environ.get("LOG_LEVEL", "INFO"),
         strategy=_build_strategy(data.get("strategy", [])),
         expected_eofs=int(os.getenv("EOF_EXPECTED", "1")),
+        worker_id=int(os.getenv("WORKER_ID", "1")),
+        num_downstream_workers=int(os.getenv("NUM_DOWNSTREAM_WORKERS", "1")),
+        routing_strategy=os.getenv("ROUTING_STRATEGY", "round_robin").lower()
     )
-
 
 def log_config(config: FilterConfig) -> None:
     logging.info(
-        "Filter startup with: mom_host=%s | input_queue=%s | output_queue=%s | strategy=%s | expected_eofs=%d",
+        "Filter startup with: mom_host=%s | input_exchange=%s | output_exchange=%s | expected_eofs=%d | strategy=%s",
         config.mom_host,
-        config.input_queue,
-        config.output_queue,
-        str(config.strategy),
-        config.expected_eofs
+        config.input_exchange,
+        config.output_exchange,
+        config.expected_eofs,
+        str(config.strategy)
     )
 
-
-class FilterService:
-    def __init__(self, config: FilterConfig) -> None:
-        self.config = config
+class FilterWorker(BaseWorker):
+    def __init__(self, config: FilterConfig):
+        super().__init__(config)
         self.strategy = config.strategy
-        self._running = False
 
-    def start(self) -> None:
-        logging.info("Starting filter service")
-        self._running = True
-        self.input_queue = MessageMiddlewareQueueRabbitMQ(
-            self.config.mom_host, self.config.input_queue
-        )
-        self.output_queue = MessageMiddlewareQueueRabbitMQ(
-            self.config.mom_host, self.config.output_queue
-        )
-
-        self.eof_coordinator = EofCoordinator(
-            expected_eofs=self.config.expected_eofs,
-            on_flush=self._forward_eof,
-        )
-
-        self.input_queue.start_consuming(self._on_data_message)
-
-    def _on_data_message(self, message: bytes, ack, nack) -> None:
-        try:
-            decoded = deserialize(message)
-            msg_type = decoded.get("type")
-            client = decoded.get("client")
-
-            if msg_type == "eof":
-                logging.info("Received EOF for client %s", client)
-                self.eof_coordinator.handle_eof(client)
-                ack()
-                return
-
-            if msg_type != "raw_transactions":
-                logging.debug("Ignoring message of type %s", msg_type)
-                ack()
-                return
-
-            batch = decoded["payload"]["batch"]
-            filtered_batch = self.strategy.filter_batch(batch)
-            logging.info(
-                "Filtered batch: %d in -> %d out", len(batch), len(filtered_batch)
+    def process_data(self, client_id: str, msg_id: str, payload: dict) -> None:
+        batch = payload.get("batch", [])
+        
+        filtered_batch = self.strategy.filter_batch(batch)
+        logging.info("Filtered batch: %d in -> %d out", len(batch), len(filtered_batch))
+        
+        if filtered_batch:
+            out_msg = build_raw_transactions_message(
+                client=client_id,
+                msg_id=msg_id,
+                batch=filtered_batch,
             )
-            out_msg = serialize(
-                build_raw_transactions_message(
-                    client=decoded["client"],
-                    msg_id=decoded["msg_id"],
-                    batch=filtered_batch,
-                )
-            )
-            self.output_queue.send(out_msg)
-            ack()
-        except Exception:
-            logging.exception("error processing data message")
-            nack()
+            self.send_downstream(client_id, out_msg)
 
-    def _forward_eof(self, client: str) -> None:
-        logging.info("Forwarding EOF for client %s", client)
-    
-        eof_msg = serialize(build_eof_message(client=client, msg_id=str(uuid.uuid4())))
-        self.output_queue.send(eof_msg)
-
-    def stop(self) -> None:
-        logging.info("Stopping filter service")
-        self._running = False
-        # if self._input_middleware is not None:
-        #     try:
-        #         self._input_middleware.stop_consuming()
-        #     except Exception:
-        #         logging.exception("error stopping consumer")
-
+    def flush_state(self, client_id: str) -> None:
+        pass
 
 def main() -> int:
     config = init_config()
@@ -178,17 +108,17 @@ def main() -> int:
     log_config(config)
     logging.getLogger("pika").setLevel(logging.WARNING)
 
-    service = FilterService(config)
+    worker = FilterWorker(config)
 
     def handle_sigterm(signum, frame):
         logging.info("Received SIGTERM signal")
-        service.stop()
+        worker.stop()
 
     signal.signal(signal.SIGTERM, handle_sigterm)
     signal.signal(signal.SIGINT, handle_sigterm)
-    service.start()
+    
+    worker.start()
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

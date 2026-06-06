@@ -9,7 +9,7 @@ from dataclasses import dataclass
 import yaml
 
 from src.common.communication.tcp import TCPSocket
-from src.common.middleware import MessageMiddlewareQueueRabbitMQ
+from src.common.middleware import MessageMiddlewareQueueRabbitMQ, MessageMiddlewareExchangeRabbitMQ
 from src.common.communication.internal import (
     AccountRow,
     TransactionRow,
@@ -85,9 +85,14 @@ class Gateway:
         self.transactions_queue_name = gateway_config.transactions_queue
         self.accounts_queue_name = gateway_config.accounts_queue
         self.result_queue_name = gateway_config.result_queue
+        self.current_tx_worker = 1
 
         self.transactions_mw = None
+        self.num_tx_workers = 3
+    
         self.accounts_mw = None
+        self.num_account_workers = 1
+
         self.result_mw = None
 
         self.server_socket = None
@@ -100,7 +105,7 @@ class Gateway:
         self._result_thread = None
 
     def _setup_middleware(self):
-        self.transactions_mw = MessageMiddlewareQueueRabbitMQ(
+        self.transactions_mw = MessageMiddlewareExchangeRabbitMQ(
             self.mom_host, self.transactions_queue_name
         )
         self.accounts_mw = MessageMiddlewareQueueRabbitMQ(
@@ -144,6 +149,22 @@ class Gateway:
             logging.info("Received EOF on result queue for client %s", client_id)
             entry["done"].set()
 
+    def send_transactions_data(self, serialized_message: bytes):
+        """Sends data via Round-Robin to a specific worker."""
+        routing_key = f"transactions_{self.current_tx_worker}"
+        
+        with self._send_lock:
+            self.transactions_mw.send(serialized_message, routing_key=routing_key)
+        
+        self.current_tx_worker = (self.current_tx_worker % self.num_tx_workers) + 1
+
+    def send_transactions_eof(self, serialized_message: bytes):
+        """Broadcasts EOF to all workers listening to the exchange."""
+        routing_key = "eof_broadcast"
+        
+        with self._send_lock:
+            self.transactions_mw.send(serialized_message, routing_key=routing_key)
+
     def handle_client_request(self, client_socket):
         tcp = TCPSocket(client_socket)
         client_id = str(uuid.uuid4())
@@ -178,8 +199,7 @@ class Gateway:
                         )
                     )
 
-                    with self._send_lock:
-                        self.transactions_mw.send(serialized_message)
+                    self.send_transactions_data(serialized_message)
 
                 elif msg_type == "raw_accounts":
                     accounts = message.get("payload", {}).get("batch", [])
@@ -200,9 +220,9 @@ class Gateway:
             eof_message = serialize(
                 build_eof_message(client=client_id, msg_id=str(uuid.uuid4()))
             )
-
+            
+            self.send_transactions_eof(eof_message)
             with self._send_lock:
-                self.transactions_mw.send(eof_message)
                 self.accounts_mw.send(eof_message)
 
             done.wait()

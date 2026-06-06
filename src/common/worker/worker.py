@@ -1,0 +1,106 @@
+import logging
+from abc import ABC, abstractmethod
+import uuid
+
+from src.common.middleware import MessageMiddlewareExchangeRabbitMQ
+from src.common.communication.internal import (
+    build_eof_message,
+    deserialize,
+    serialize,
+)
+from src.common.eof import EofCoordinator
+
+class BaseWorker(ABC):
+    """
+    Handles all RabbitMQ infrastructure, round-robin routing, and EOF coordination.
+    Subclasses only need to implement `process_data` and `flush_state`.
+    """
+    def __init__(self, config):
+        self.config = config
+        self.current_downstream_worker = 1
+        self._running = False
+        self.strategy = config.strategy    
+
+    def start(self) -> None:
+        logging.info(f"Starting {self.__class__.__name__}...")
+        self._running = True
+        
+        self.eof_coordinator = EofCoordinator(
+            expected_eofs=self.config.expected_eofs,
+            on_flush=self._internal_on_flush,
+        )
+        
+        routing_keys = [
+            f"worker_{self.config.worker_id}",
+            "eof_broadcast"
+        ]
+        self.input_exchange = MessageMiddlewareExchangeRabbitMQ(
+            self.config.mom_host, self.config.input_exchange, routing_keys
+        )
+
+        self.output_exchange = MessageMiddlewareExchangeRabbitMQ(self.config.mom_host, self.config.output_exchange)
+
+        self.input_exchange.start_consuming(self._on_message)
+
+    def _on_message(self, message: bytes, ack, nack) -> None:
+        """The core network loop. Infrastructure only."""
+        try:
+            decoded = deserialize(message)
+            msg_type = decoded.get("type")
+            client_id = decoded.get("client")
+
+            if msg_type == "eof":
+                logging.info("Received EOF from upstream for client %s", client_id)
+                self.eof_coordinator.handle_eof(client_id)
+            else:
+                logging.info("Received message of type %s for client %s", msg_type, client_id)
+                self.process_data(client_id, decoded["msg_id"], decoded["payload"])
+            ack()
+        except Exception:
+            logging.exception("Error processing message")
+            nack()
+
+    def send_downstream(self, client_id: str, message: dict, shard_key: str = None) -> None:
+        """Serializes and routes a fully built message to the next stage."""
+        if not message:
+            return
+        logging.info("Routing message downstream for client %s with routing strategy %s", client_id, self.config.routing_strategy)
+        out_msg = serialize(message)
+
+        if self.config.routing_strategy == "round_robin":
+            routing_key = f"worker_{self.current_downstream_worker}"
+            self.current_downstream_worker = (self.current_downstream_worker % self.config.num_downstream_workers) + 1
+            
+        elif self.config.routing_strategy == "sharded":
+            routing_key = shard_key
+            
+        else:
+            raise ValueError(f"Unknown routing strategy: {self.config.routing_strategy}")
+
+        self.output_exchange.send(out_msg, routing_key=routing_key)
+
+    def _internal_on_flush(self, client_id: str) -> None:
+        """Triggered by EofCoordinator. Flushes subclass state, then broadcasts EOF."""
+        self.flush_state(client_id)
+
+        logging.info("Broadcasting EOF downstream for client %s", client_id)
+        
+        eof_msg = serialize(build_eof_message(client=client_id, msg_id=str(uuid.uuid4())))
+        self.output_exchange.send(eof_msg, routing_key="eof_broadcast")
+
+    def stop(self) -> None:
+        self._running = False
+        
+        self.input_exchange.stop_consuming()
+        self.input_exchange.close()
+        self.output_exchange.close()
+    
+    @abstractmethod
+    def process_data(self, client_id: str, msg_id: str, payload: dict) -> None:
+        """Process incoming data."""
+        pass
+
+    @abstractmethod
+    def flush_state(self, client_id: str) -> None:
+        """Send any final aggregated state before the EOF is forwarded."""
+        pass

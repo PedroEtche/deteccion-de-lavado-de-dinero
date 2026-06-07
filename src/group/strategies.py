@@ -166,9 +166,8 @@ class AccountStrategy(GroupStrategy):
 class MergeRoutingStrategy(GroupStrategy):
     """Routes transactions by BOTH origin and destination for Distributed Joins."""
 
-    def __init__(self, base_route: str, shard_amount: int):
-        self.base_route = base_route
-        self.shard_amount = shard_amount
+    def __init__(self):
+        pass
 
     def __str__(self) -> str:
         return "MergeRoutingStrategy"
@@ -194,9 +193,8 @@ class MergeRoutingStrategy(GroupStrategy):
 
 
 class ScatterGroupStrategy(GroupStrategy):
-    def __init__(self, base_route: str, shard_amount: int):
-        self.base_route = base_route
-        self.shard_amount = shard_amount
+    def __init__(self):
+        pass
 
     def __str__(self) -> str:
         return "ScatterGroupStrategy"

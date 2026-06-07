@@ -37,8 +37,13 @@ class GroupConfig:
     routing_strategy: str
     strategy: GroupStrategy
 
+def _extract_strategy_type(raw_strategy: Any) -> str:
+    if isinstance(raw_strategy, dict):
+        return str(raw_strategy.get("type", "NoStrategy"))
+    return str(raw_strategy or "NoStrategy")
+
 def _parse_strategy_config(raw_strategy: Any) -> GroupStrategy:
-    strategy_type = _read_strategy_type(raw_strategy)
+    strategy_type = _extract_strategy_type(raw_strategy)
 
     if strategy_type == "bank_max_amount":
         return BankMaxAmountStrategy()
@@ -55,11 +60,6 @@ def _parse_strategy_config(raw_strategy: Any) -> GroupStrategy:
 
     return NoStrategy()
 
-def _read_strategy_type(raw_strategy: Any) -> str:
-    if isinstance(raw_strategy, dict):
-        return str(raw_strategy.get("type", "NoStrategy"))
-    return str(raw_strategy or "NoStrategy")
-
 def _load_file_config() -> Dict[str, Any]:
     try:
         with open(CONFIG_PATH, "r", encoding="utf-8") as handle:
@@ -69,19 +69,19 @@ def _load_file_config() -> Dict[str, Any]:
         return {}
 
 def init_config() -> GroupConfig:
-    file_config = _load_file_config()
-    raw_strategy = file_config.get("strategy", "NoStrategy")
+    data = _load_file_config()
+    raw_strategy = data.get("strategy", "NoStrategy")
 
     return GroupConfig(
-        mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
-        input_exchange=os.getenv("INPUT_EXCHANGE", file_config.get("input_exchange", "")),
-        output_exchange=os.getenv("OUTPUT_EXCHANGE", file_config.get("output_exchange", "")),
-        log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
-        expected_eofs=int(os.getenv("EXPECTED_EOFS", file_config.get("expected_eofs", "1"))),
+       mom_host=data.get("mom_host", "rabbitmq"),
+        input_exchange=data.get("input", ""),
+        output_exchange=data.get("output", ""),
+        log_level=os.environ.get("LOG_LEVEL", "INFO"),
+        strategy=_parse_strategy_config(raw_strategy),
+        expected_eofs=int(os.getenv("EOF_EXPECTED", "1")),
         worker_id=int(os.getenv("WORKER_ID", "1")),
         num_downstream_workers=int(os.getenv("NUM_DOWNSTREAM_WORKERS", "1")),
-        routing_strategy=os.getenv("ROUTING_STRATEGY", "sharded").lower(), 
-        strategy=_parse_strategy_config(raw_strategy),
+        routing_strategy=os.getenv("ROUTING_STRATEGY", "round_robin").lower()
     )
 
 def log_config(config: GroupConfig) -> None:

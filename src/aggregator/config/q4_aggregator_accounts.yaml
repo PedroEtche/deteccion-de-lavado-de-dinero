@@ -1,14 +1,8 @@
 mom_host: rabbitmq
 
-input_exchange: groupby_account_route
+input: groupby_account_route_0 
 
-input_queue: groupby_account_route_0 
-
-output_queue: q4_join_queue
-
-base_routing_key: groupby_account_route
-
-log_level: DEBUG
+output: q4_join_queue
 
 strategy:
   type: Account

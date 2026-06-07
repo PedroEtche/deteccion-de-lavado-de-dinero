@@ -67,19 +67,19 @@ def _load_file_config() -> Dict[str, Any]:
         return {}
 
 def init_config() -> AggregatorConfig:
-    file_config = _load_file_config()
-    raw_strategy = os.getenv("STRATEGY", file_config.get("strategy", "NoStrategy"))
+    data = _load_file_config()
+    raw_strategy = data.get("strategy", "NoStrategy")
 
     return AggregatorConfig(
-        mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
-        input_exchange=os.getenv("INPUT_EXCHANGE", file_config.get("input_exchange", "")),
-        output_exchange=os.getenv("OUTPUT_EXCHANGE", file_config.get("output_exchange", "")),
-        log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
-        expected_eofs=int(os.getenv("EXPECTED_EOFS")),
-        worker_id=int(os.getenv("WORKER_ID")),
-        num_downstream_workers=int(os.getenv("NUM_DOWNSTREAM_WORKERS", "1")),
-        routing_strategy=os.getenv("ROUTING_STRATEGY", "round_robin").lower(),
+       mom_host=data.get("mom_host", "rabbitmq"),
+        input_exchange=data.get("input", ""),
+        output_exchange=data.get("output", ""),
+        log_level=os.environ.get("LOG_LEVEL", "INFO"),
         strategy=_parse_strategy_config(raw_strategy),
+        expected_eofs=int(os.getenv("EOF_EXPECTED", "1")),
+        worker_id=int(os.getenv("WORKER_ID", "1")),
+        num_downstream_workers=int(os.getenv("NUM_DOWNSTREAM_WORKERS", "1")),
+        routing_strategy=os.getenv("ROUTING_STRATEGY", "round_robin").lower()
     )
 
 def log_config(config: AggregatorConfig) -> None:

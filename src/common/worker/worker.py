@@ -76,7 +76,6 @@ class BaseWorker(ABC):
             hash_val = zlib.crc32(shard_key.encode("utf-8"))
             target_worker = (hash_val % self.config.num_downstream_workers) + 1
             
-            # 3. Format the route standardly
             routing_key = f"worker_{target_worker}"
             
         else:

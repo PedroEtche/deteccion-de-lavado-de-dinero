@@ -40,17 +40,17 @@ class GroupConfig:
 def _parse_strategy_config(raw_strategy: Any) -> GroupStrategy:
     strategy_type = _read_strategy_type(raw_strategy)
 
-    if strategy_type == "BankMaxAmount":
+    if strategy_type == "bank_max_amount":
         return BankMaxAmountStrategy()
-    if strategy_type == "PaymentFormatAverage":
+    if strategy_type == "payment_format_average":
         return PaymentFormatAverageStrategy()
-    if strategy_type == "AccountPairCount":
+    if strategy_type == "account_pair_count":
         return AccountPairCountStategy()
-    if strategy_type == "MergeRouting":
+    if strategy_type == "merge_routing":
         return MergeRoutingStrategy()
-    if strategy_type == "Account":
+    if strategy_type == "account":
         return AccountStrategy()
-    if strategy_type == "ScatterGroup":
+    if strategy_type == "scatter_group":
         return ScatterGroupStrategy()
 
     return NoStrategy()
@@ -79,7 +79,7 @@ def init_config() -> GroupConfig:
         log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
         expected_eofs=int(os.getenv("EXPECTED_EOFS", file_config.get("expected_eofs", "1"))),
         worker_id=int(os.getenv("WORKER_ID", "1")),
-        num_downstream_workers=int(os.getenv("SHARD_AMOUNT", "1")),
+        num_downstream_workers=int(os.getenv("NUM_DOWNSTREAM_WORKERS", "1")),
         routing_strategy=os.getenv("ROUTING_STRATEGY", "sharded").lower(), 
         strategy=_parse_strategy_config(raw_strategy),
     )

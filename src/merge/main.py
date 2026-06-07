@@ -59,19 +59,17 @@ def init_config() -> MergeConfig:
     file_config = _load_file_config()
     raw_strategy = file_config.get("strategy", {})
     raw_params = raw_strategy.get("params", {}) if isinstance(raw_strategy, dict) else {}
-    worker_id = int(os.getenv("WORKER_ID"))
-    num_downstream_workers = int(os.getenv("NUM_DOWNSTREAM_WORKERS"))
 
     return MergeConfig(
         mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
         input_exchange=os.getenv("INPUT_EXCHANGE", file_config.get("input_exchange", "")),
         output_exchange=os.getenv("OUTPUT_EXCHANGE", file_config.get("output_exchange", "")),
         log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
-        expected_eofs=int(os.getenv("EXPECTED_EOFS", file_config.get("expected_eofs", "1"))),
-        worker_id=worker_id,
-        num_downstream_workers=num_downstream_workers,
+        expected_eofs=int(os.getenv("EXPECTED_EOFS")),
+        worker_id=int(os.getenv("WORKER_ID")),
+        num_downstream_workers=int(os.getenv("NUM_DOWNSTREAM_WORKERS")),
         routing_strategy=os.getenv("ROUTING_STRATEGY", "round_robin").lower(),
-        strategy=_parse_strategy_config(raw_strategy, worker_id, num_downstream_workers),
+        strategy=_parse_strategy_config(raw_strategy),
     )
 
 def log_config(config: MergeConfig) -> None:

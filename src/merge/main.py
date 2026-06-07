@@ -109,8 +109,7 @@ class MergeWorker(BaseWorker):
     def flush_state(self, client_id: str) -> None:
         logging.info("All EOFs received. Flushing joiner state for client %s", client_id)
         
-        if hasattr(self.strategy, "clear_client_state"):
-            self.strategy.clear_client_state(client_id)
+        self.strategy.clear_client_state(client_id)
 
         # aca ver que no este faltando flushear algo    
 

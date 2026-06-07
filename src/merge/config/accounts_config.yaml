@@ -1,11 +1,8 @@
 mom_host: rabbitmq
 
-input_queue: transactions_queue
+input_queue: merge_max_by_account_exchange
 
-output_queue: gateway_queue
+output_queue: gateway_results_exchange
 
 strategy:
   type: accounts
-  params:
-    left: From Bank
-    right: Bank ID

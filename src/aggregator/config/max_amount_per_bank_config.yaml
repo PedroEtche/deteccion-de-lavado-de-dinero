@@ -2,7 +2,7 @@ mom_host: rabbitmq
 
 input: grouped_max_by_bank_exchange
 
-output: results_queue
+output: merge_max_by_account_exchange
 
 strategy:
   type: BankMaxAmount

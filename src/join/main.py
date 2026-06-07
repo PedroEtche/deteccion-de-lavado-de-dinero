@@ -8,7 +8,6 @@ from typing import Any, Dict, List
 import yaml
 
 from src.common.communication.internal import (
-    build_q1_result,
     serialize,
 )
 from src.common.worker import BaseWorker
@@ -92,24 +91,18 @@ class JoinWorker(BaseWorker):
     def __init__(self, config: JoinConfig):
         super().__init__(config)
         self.strategy = config.strategy
+        # The strategy emits ready batches mid-stream through this callback.
+        self.strategy.register_join_callback(self.send_downstream)
 
     def process_data(self, client_id: str, msg_id: str, payload: dict) -> None:
         batch = payload.get("batch", [])
-
-        joined_batch = self.strategy.join_batch(batch, client_id)
-
-        logging.info("Join batch: %d in -> %d out", len(batch), len(joined_batch))
-
-        if joined_batch:
-            out_msg = build_q1_result(
-                batch=joined_batch,
-                eof=False,
-                client=client_id,
-            )
-            self.send_downstream(client_id, out_msg)
+        logging.info("Join batch: %d rows in for client %s", len(batch), client_id)
+        self.strategy.join_batch(batch, client_id)
 
     def flush_state(self, client_id: str) -> None:
-        pass
+        final_msg = self.strategy.flush(client_id)
+        if final_msg:
+            self.send_downstream(client_id, final_msg)
 
     def _internal_on_flush(self, client_id: str) -> None:
         self.flush_state(client_id)

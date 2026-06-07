@@ -1,35 +1,53 @@
+import uuid
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 
 from src.common.communication.internal import (
-    build_eof_message,
+    build_batch_message,
     build_q1_result,
 )
 
 
 class JoinStrategy(ABC):
-    """Abstract strategy for grouping batches of messages."""
+    """Abstract strategy that owns all join state.
 
-    @abstractmethod
-    def __init__(self):
-        pass
+    The Join worker delegates incoming data via :meth:`join_batch`. Stateful
+    strategies accumulate state per client; when a batch is ready to be emitted
+    mid-stream they invoke the registered join callback. When the Join signals
+    it is safe to flush (all EOFs received) it calls :meth:`flush`, and the
+    strategy returns everything it had buffered for that client.
+    """
 
-    @abstractmethod
+    def __init__(self) -> None:
+        # callback(client, message_dict) registered by the worker.
+        self._on_ready: Optional[Callable[[str, dict], None]] = None
+
+    def register_join_callback(self, callback: Callable[[str, dict], None]) -> None:
+        self._on_ready = callback
+
+    def _emit(self, client: str, message: Optional[dict]) -> None:
+        """Send a ready message downstream through the registered callback."""
+        if self._on_ready is not None and message:
+            self._on_ready(client, message)
+
     def __str__(self) -> str:
+        return self.__class__.__name__
+
+    @abstractmethod
+    def join_batch(self, batch: List[Any], client: str) -> None:
+        """Accumulate state for ``client``; emit ready batches via the callback."""
         raise NotImplementedError()
 
     @abstractmethod
-    def join_batch(self, batch: List[Any], client: Optional[str] = None) -> List[Any]:
-        raise NotImplementedError()
-
-    @abstractmethod
-    def get_joined_for_client(self, client: str) -> List[Any]:
+    def flush(self, client: str) -> Optional[dict]:
+        """Return a fully built message with everything buffered for ``client``
+        (or ``None`` if there is nothing), clearing that client's state."""
         raise NotImplementedError()
 
     # Default no-op. Strategies que necesiten enriquecer con datos de accounts
     # (ej. BankMaxAmountStrategy para Q2) hacen override.
-    def add_accounts(self, batch: List[Any], client: Optional[str] = None) -> None:
+    def add_accounts(self, batch: List[Any], client: str) -> None:
         pass
 
     def build_eof_message(self, client, msg_id=None):
@@ -37,155 +55,147 @@ class JoinStrategy(ABC):
 
 
 class NoStrategy(JoinStrategy):
-    """A strategy that returns the input batch unchanged."""
+    """Streaming pass-through: emits each batch as it arrives, buffers nothing."""
 
-    def __init__(self):
-        pass
+    def join_batch(self, batch: List[Any], client: str) -> None:
+        if batch:
+            self._emit(client, build_q1_result(batch=batch, eof=False, client=client))
 
-    def __str__(self) -> str:
-        return "NoStrategy"
-
-    def join_batch(self, batch: List[Any], client: Optional[str] = None) -> List[Any]:
-        return batch
-
-    def get_joined_for_client(self, client: str) -> List[Any]:
-        return []
-
-    def build_eof_message(self, client, msg_id=None):
-        return {}
-
-
-class Q1Strategy(JoinStrategy):
-    def __init__(self):
-        pass
-
-    def __str__(self) -> str:
-        return "Q1Strategy"
-
-    def join_batch(self, batch: List[Any], client: Optional[str] = None) -> List[Any]:
-        return batch
-
-    def get_joined_for_client(self, client: str) -> List[Any]:
-        return []
+    def flush(self, client: str) -> Optional[dict]:
+        return None
 
     def build_eof_message(self, client, msg_id=None):
         return build_q1_result(batch=[], eof=True, client=client)
 
 
-class UnionStrategy(JoinStrategy):
-    def __init__(self):
-        self.batch_by_client: Dict[str, List[Any]] = {}
+class Q1Strategy(JoinStrategy):
+    """Streaming pass-through for Q1 transactions."""
 
-    def __str__(self) -> str:
-        return "UnionStrategy"
+    def join_batch(self, batch: List[Any], client: str) -> None:
+        if batch:
+            self._emit(client, build_q1_result(batch=batch, eof=False, client=client))
 
-    def join_batch(self, batch: List[Any], client: Optional[str] = None) -> List[Any]:
-        if client is None:
-            raise ValueError("client is required for UnionStrategy")
+    def flush(self, client: str) -> Optional[dict]:
+        return None
 
-        current_batch = self.batch_by_client.setdefault(client, [])
-        current_batch.extend(batch)
-        return current_batch
-
-    def get_joined_for_client(self, client: str) -> List[Any]:
-        return list(self.batch_by_client.pop(client, []))
+    def build_eof_message(self, client, msg_id=None):
+        return build_q1_result(batch=[], eof=True, client=client)
 
 
-class CountStrategy(JoinStrategy):
-    def __init__(self):
-        self.count_by_client = {}
-
-    def __str__(self) -> str:
-        return "CountStrategy"
-
-    def join_batch(self, batch: List[Any], client: Optional[str] = None) -> List[Any]:
-        if client is None:
-            raise ValueError("client is required for CountStrategy")
-        self.count_by_client[client] = self.count_by_client.get(client, 0) + len(batch)
-        return [self.count_by_client[client]]
-
-    def get_joined_for_client(self, client: str) -> int:
-        return [self.count_by_client.get(client, 0)]
-
-
-class BankMaxAmountStrategy(JoinStrategy):
-    def __init__(self):
-        self.max_per_bank_by_client: Dict[str, Dict[str, Dict[str, Any]]] = {}
-        # bank_id -> bank_name, por cliente. Poblado desde el accounts_queue.
-        self.bank_names_by_client: Dict[str, Dict[Any, str]] = {}
-
-    def __str__(self) -> str:
-        return "BankMaxAmountStrategy"
-
-    def add_accounts(self, batch: List[Any], client: Optional[str] = None) -> None:
-        if client is None:
-            raise ValueError(
-                "client is required for BankMaxAmountStrategy.add_accounts"
-            )
-        bank_names = self.bank_names_by_client.setdefault(client, {})
-        for account in batch:
-            bank_id = getattr(account, "bank_id", None)
-            bank_name = getattr(account, "bank_name", None)
-            if bank_id is not None and bank_name is not None:
-                bank_names[bank_id] = bank_name
-
-    def join_batch(self, batch: List[Any], client: Optional[str] = None) -> List[Any]:
-        if client is None:
-            raise ValueError("client is required for BankMaxAmountStrategy")
-        max_per_bank = self.max_per_bank_by_client.setdefault(client, {})
-        for tx in batch:
-            bank = tx["from_bank"]
-            amount = tx["amount_paid"] or 0.0
-            current = max_per_bank.get(bank)
-
-            if current is None or amount > current["amount_paid"]:
-                max_per_bank[bank] = {
-                    "from_bank": tx["from_bank"],
-                    "from_account": tx["from_account"],
-                    "amount_paid": amount,
-                }
-
-        return self._enriched(client, pop=False)
-
-    def get_joined_for_client(self, client: str) -> List[Any]:
-        return self._enriched(client, pop=True)
-
-    def _enriched(self, client: str, pop: bool) -> List[Any]:
-        if pop:
-            entries = self.max_per_bank_by_client.pop(client, {})
-            bank_names = self.bank_names_by_client.pop(client, {})
-        else:
-            entries = self.max_per_bank_by_client.get(client, {})
-            bank_names = self.bank_names_by_client.get(client, {})
-
-        results = []
-        for entry in entries.values():
-            results.append(
-                {
-                    "bank_name": bank_names.get(entry["from_bank"], entry["from_bank"]),
-                    "from_account": entry["from_account"],
-                    "amount_paid": entry["amount_paid"],
-                }
-            )
-        return results
-
-
-class AccountStrategy(JoinStrategy):
-    def __init__(self):
-        self.accounts_by_client: Dict[str, List[Dict[str, str]]] = {}
-
-    def __str__(self) -> str:
-        return "AccountStrategy"
-
-    def join_batch(self, batch: List[Any], client: Optional[str] = None) -> List[Any]:
-        if client is None:
-            raise ValueError("client is required for AccountStrategy.join_batch")
-
-        client_accounts = self.accounts_by_client.setdefault(client, [])
-        for record in batch:
-            client_accounts.append(record)
-
-        return []
-
-    def get_joined_for_client(self, client: str) -> List[Any]:
-        return self.accounts_by_client.pop(client, [])
+# class UnionStrategy(JoinStrategy):
+#     """Buffers every row per client and emits the union on flush."""
+#
+#     def __init__(self) -> None:
+#         super().__init__()
+#         self.batch_by_client: Dict[str, List[Any]] = {}
+#
+#     def join_batch(self, batch: List[Any], client: str) -> None:
+#         self.batch_by_client.setdefault(client, []).extend(batch)
+#
+#     def flush(self, client: str) -> Optional[dict]:
+#         rows = self.batch_by_client.pop(client, [])
+#         if not rows:
+#             return None
+#         return build_batch_message(
+#             "batch", batch=rows, client=client, msg_id=str(uuid.uuid4())
+#         )
+#
+#     def build_eof_message(self, client, msg_id=None):
+#         return build_q1_result(batch=[], eof=True, client=client)
+#
+#
+# class CountStrategy(JoinStrategy):
+#     """Counts rows per client and emits the total on flush."""
+#
+#     def __init__(self) -> None:
+#         super().__init__()
+#         self.count_by_client: Dict[str, int] = {}
+#
+#     def join_batch(self, batch: List[Any], client: str) -> None:
+#         self.count_by_client[client] = self.count_by_client.get(client, 0) + len(batch)
+#
+#     def flush(self, client: str) -> Optional[dict]:
+#         count = self.count_by_client.pop(client, 0)
+#         return build_batch_message(
+#             "batch", batch=[count], client=client, msg_id=str(uuid.uuid4())
+#         )
+#
+#     def build_eof_message(self, client, msg_id=None):
+#         return build_q1_result(batch=[], eof=True, client=client)
+#
+#
+# class BankMaxAmountStrategy(JoinStrategy):
+#     """Tracks the max transaction per bank per client, enriching with bank
+#     names received via :meth:`add_accounts`; emits the enriched result on flush."""
+#
+#     def __init__(self) -> None:
+#         super().__init__()
+#         self.max_per_bank_by_client: Dict[str, Dict[str, Dict[str, Any]]] = {}
+#         # bank_id -> bank_name, por cliente. Poblado desde el accounts_queue.
+#         self.bank_names_by_client: Dict[str, Dict[Any, str]] = {}
+#
+#     def add_accounts(self, batch: List[Any], client: str) -> None:
+#         bank_names = self.bank_names_by_client.setdefault(client, {})
+#         for account in batch:
+#             bank_id = getattr(account, "bank_id", None)
+#             bank_name = getattr(account, "bank_name", None)
+#             if bank_id is not None and bank_name is not None:
+#                 bank_names[bank_id] = bank_name
+#
+#     def join_batch(self, batch: List[Any], client: str) -> None:
+#         max_per_bank = self.max_per_bank_by_client.setdefault(client, {})
+#         for tx in batch:
+#             bank = tx["from_bank"]
+#             amount = tx["amount_paid"] or 0.0
+#             current = max_per_bank.get(bank)
+#
+#             if current is None or amount > current["amount_paid"]:
+#                 max_per_bank[bank] = {
+#                     "from_bank": tx["from_bank"],
+#                     "from_account": tx["from_account"],
+#                     "amount_paid": amount,
+#                 }
+#
+#     def flush(self, client: str) -> Optional[dict]:
+#         entries = self.max_per_bank_by_client.pop(client, {})
+#         bank_names = self.bank_names_by_client.pop(client, {})
+#         if not entries:
+#             return None
+#
+#         results = []
+#         for entry in entries.values():
+#             results.append(
+#                 {
+#                     "bank_name": bank_names.get(entry["from_bank"], entry["from_bank"]),
+#                     "from_account": entry["from_account"],
+#                     "amount_paid": entry["amount_paid"],
+#                 }
+#             )
+#         return build_batch_message(
+#             "batch", batch=results, client=client, msg_id=str(uuid.uuid4())
+#         )
+#
+#     def build_eof_message(self, client, msg_id=None):
+#         return build_q1_result(batch=[], eof=True, client=client)
+#
+#
+# class AccountStrategy(JoinStrategy):
+#     """Buffers raw account records per client; emits them on flush."""
+#
+#     def __init__(self) -> None:
+#         super().__init__()
+#         self.accounts_by_client: Dict[str, List[Dict[str, str]]] = {}
+#
+#     def join_batch(self, batch: List[Any], client: str) -> None:
+#         self.accounts_by_client.setdefault(client, []).extend(batch)
+#
+#     def flush(self, client: str) -> Optional[dict]:
+#         accounts = self.accounts_by_client.pop(client, [])
+#         if not accounts:
+#             return None
+#         return build_batch_message(
+#             "batch", batch=accounts, client=client, msg_id=str(uuid.uuid4())
+#         )
+#
+#     def build_eof_message(self, client, msg_id=None):
+#         return build_q1_result(batch=[], eof=True, client=client)

@@ -1,6 +1,7 @@
 import logging
 from abc import ABC, abstractmethod
 import uuid
+import zlib
 
 from src.common.middleware import MessageMiddlewareExchangeRabbitMQ
 from src.common.communication.internal import (
@@ -72,7 +73,11 @@ class BaseWorker(ABC):
             self.current_downstream_worker = (self.current_downstream_worker % self.config.num_downstream_workers) + 1
             
         elif self.config.routing_strategy == "sharded":
-            routing_key = shard_key
+            hash_val = zlib.crc32(shard_key.encode("utf-8"))
+            target_worker = (hash_val % self.config.num_downstream_workers) + 1
+            
+            # 3. Format the route standardly
+            routing_key = f"worker_{target_worker}"
             
         else:
             raise ValueError(f"Unknown routing strategy: {self.config.routing_strategy}")

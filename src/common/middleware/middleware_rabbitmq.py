@@ -141,7 +141,7 @@ class MessageMiddlewareExchangeRabbitMQ(MessageMiddlewareExchange):
 
     def send(self, message, routing_key=None):
         try:
-            if routing_key:
+            if routing_key is not None:
                 self.channel.basic_publish(
                     exchange=self.exchange_name, routing_key=routing_key, body=message
                 )

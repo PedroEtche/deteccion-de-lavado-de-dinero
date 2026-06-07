@@ -28,7 +28,7 @@ class GatewayConfig:
     host: str
     port: int
     mom_host: str
-    transactions_queue: str
+    transactions_exchange: str
     accounts_queue: str
     result_queue: str
     log_level: str
@@ -49,9 +49,9 @@ def init_config():
         host=os.getenv("SERVER_HOST", file_config.get("host", "0.0.0.0")),
         port=int(os.getenv("SERVER_PORT", file_config.get("port", 5678))),
         mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
-        transactions_queue=os.getenv(
-            "TRANSACTIONS_QUEUE",
-            file_config.get("transactions_queue", "transactions_queue"),
+        transactions_exchange=os.getenv(
+            "TRANSACTIONS_EXCHANGE",
+            file_config.get("TRANSACTIONS_EXCHANGE", "transactions_exchange"),
         ),
         accounts_queue=os.getenv(
             "ACCOUNTS_QUEUE",
@@ -67,11 +67,11 @@ def init_config():
 
 def log_config(config: GatewayConfig):
     logging.info(
-        "Gateway startup with: host=%s | port=%s | mom_host=%s | transactions_queue=%s | accounts_queue=%s | result_queue=%s",
+        "Gateway startup with: host=%s | port=%s | mom_host=%s | transactions_exchange=%s | accounts_queue=%s | result_queue=%s",
         config.host,
         config.port,
         config.mom_host,
-        config.transactions_queue,
+        config.transactions_exchange,
         config.accounts_queue,
         config.result_queue,
     )
@@ -82,7 +82,7 @@ class Gateway:
         self.server_host = gateway_config.host
         self.server_port = gateway_config.port
         self.mom_host = gateway_config.mom_host
-        self.transactions_queue_name = gateway_config.transactions_queue
+        self.transactions_exchange_name = gateway_config.transactions_exchange
         self.accounts_queue_name = gateway_config.accounts_queue
         self.result_queue_name = gateway_config.result_queue
         self.current_tx_worker = 1
@@ -106,9 +106,7 @@ class Gateway:
 
     def _setup_middleware(self):
         self.transactions_mw = MessageMiddlewareExchangeRabbitMQ(
-            self.mom_host, 
-            self.transactions_queue_name, 
-            exchange_type="fanout"
+            self.mom_host, self.transactions_exchange_name
         )
         self.accounts_mw = MessageMiddlewareQueueRabbitMQ(
             self.mom_host, self.accounts_queue_name
@@ -153,13 +151,19 @@ class Gateway:
 
     def send_transactions_data(self, serialized_message: bytes):
         """Sends data via Round-Robin to a specific worker."""
+        routing_key = f"worker_{self.current_tx_worker}"
+        
         with self._send_lock:
-            self.transactions_mw.send(serialized_message)
+            self.transactions_mw.send(serialized_message, routing_key=routing_key)
+        
+        self.current_tx_worker = (self.current_tx_worker % self.num_tx_workers) + 1
 
     def send_transactions_eof(self, serialized_message: bytes):
         """Broadcasts EOF to all workers listening to the exchange."""
+        routing_key = "eof_broadcast"
+        
         with self._send_lock:
-            self.transactions_mw.send(serialized_message, routing_key="")
+            self.transactions_mw.send(serialized_message, routing_key=routing_key)
 
     def handle_client_request(self, client_socket):
         tcp = TCPSocket(client_socket)

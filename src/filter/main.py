@@ -29,6 +29,7 @@ class FilterConfig:
     worker_id: int
     num_downstream_workers: int
     routing_strategy: str
+    worker_name: str
 
 def _load_file_config() -> Dict[str, Any]:
     try:
@@ -67,7 +68,8 @@ def init_config() -> FilterConfig:
         expected_eofs=int(os.getenv("EOF_EXPECTED", "1")),
         worker_id=int(os.getenv("WORKER_ID", "1")),
         num_downstream_workers=int(os.getenv("NUM_DOWNSTREAM_WORKERS", "1")),
-        routing_strategy=os.getenv("ROUTING_STRATEGY", "round_robin").lower()
+        routing_strategy=os.getenv("ROUTING_STRATEGY", "round_robin").lower(),
+        worker_name=os.getenv("WORKER_NAME", "filter"),
     )
 
 def log_config(config: FilterConfig) -> None:

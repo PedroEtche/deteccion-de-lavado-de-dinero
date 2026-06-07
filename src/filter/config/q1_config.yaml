@@ -1,6 +1,6 @@
 mom_host: rabbitmq
 
-input: q1_queue
+input: usd_filtered_exchange
 output: q1_filter_queue
 
 strategy:

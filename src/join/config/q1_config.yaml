@@ -1,7 +1,7 @@
 mom_host: rabbitmq
 
 input: q1_filter_queue
-output: result_queue
+output: gateway_results_exchange
 
 strategy:
   - type: q1

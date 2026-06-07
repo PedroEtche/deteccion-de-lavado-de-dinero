@@ -30,7 +30,7 @@ class GatewayConfig:
     mom_host: str
     transactions_exchange: str
     accounts_queue: str
-    result_queue: str
+    result_exchange: str
     log_level: str
 
 
@@ -57,9 +57,9 @@ def init_config():
             "ACCOUNTS_QUEUE",
             file_config.get("accounts_queue", "accounts_queue"),
         ),
-        result_queue=os.getenv(
-            "RESULT_QUEUE",
-            file_config.get("result_queue", "result_queue"),
+        result_exchange=os.getenv(
+            "RESULT_EXCHANGE",
+            file_config.get("result_exchange", "result_exchange"),
         ),
         log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
     )
@@ -67,13 +67,13 @@ def init_config():
 
 def log_config(config: GatewayConfig):
     logging.info(
-        "Gateway startup with: host=%s | port=%s | mom_host=%s | transactions_exchange=%s | accounts_queue=%s | result_queue=%s",
+        "Gateway startup with: host=%s | port=%s | mom_host=%s | transactions_exchange=%s | accounts_queue=%s | result_exchange=%s",
         config.host,
         config.port,
         config.mom_host,
         config.transactions_exchange,
         config.accounts_queue,
-        config.result_queue,
+        config.result_exchange,
     )
 
 
@@ -84,7 +84,7 @@ class Gateway:
         self.mom_host = gateway_config.mom_host
         self.transactions_exchange_name = gateway_config.transactions_exchange
         self.accounts_queue_name = gateway_config.accounts_queue
-        self.result_queue_name = gateway_config.result_queue
+        self.result_exchange_name = gateway_config.result_exchange
         self.current_tx_worker = 1
 
         self.transactions_mw = None
@@ -111,11 +111,15 @@ class Gateway:
         self.accounts_mw = MessageMiddlewareQueueRabbitMQ(
             self.mom_host, self.accounts_queue_name
         )
-        self.result_mw = MessageMiddlewareQueueRabbitMQ(
-            self.mom_host, self.result_queue_name
+        self.result_mw = MessageMiddlewareExchangeRabbitMQ(
+            host=self.mom_host, 
+            exchange_name=self.result_exchange_name, 
+            routing_keys=["worker_1", "eof_broadcast"],
+            queue_name="gateway_result_queue",
         )
 
     def _dispatch_result(self, message, ack, _nack):
+        logging.info("Received message from result queue: %s", message)
         try:
             decoded = deserialize(message)
         except Exception:
@@ -144,7 +148,7 @@ class Gateway:
             return
 
         ack()
-
+        
         if decoded.get("type") == "eof":
             logging.info("Received EOF on result queue for client %s", client_id)
             entry["done"].set()

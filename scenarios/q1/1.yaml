@@ -27,8 +27,9 @@ services:
     environment:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
-    - TRANSACTIONS_QUEUE=transactions_queue
-    - INPUT_QUEUE=result_queue
+    - TRANSACTIONS_EXCHANGE=transactions_exchange
+    - ACCOUNTS_QUEUE=accounts_queue
+    - RESULT_EXCHANGE=gateway_results_exchange
     - SERVER_PORT=5678
 
   filter_usd_0:
@@ -42,10 +43,9 @@ services:
     volumes:
     - ./src/filter/config/usd_config.yaml:/app/config.yaml:ro
     environment:
-    - PYTHONUNBUFFERED=1
-    - MOM_HOST=rabbitmq
-    - INPUT_QUEUE=transactions_queue
-    - OUTPUT_QUEUE=q1_queue
+    - EOF_EXPECTED=1
+    - WORKER_ID=1
+    - NUM_DOWNSTREAM_WORKERS=1
 
   q1_filter_less_than_fifty_0:
     build:
@@ -58,10 +58,9 @@ services:
     volumes:
     - ./src/filter/config/q1_config.yaml:/app/config.yaml:ro
     environment:
-    - PYTHONUNBUFFERED=1
-    - MOM_HOST=rabbitmq
-    - INPUT_QUEUE=q1_queue
-    - OUTPUT_QUEUE=q1_filter_queue
+    - EOF_EXPECTED=1
+    - WORKER_ID=1
+    - NUM_DOWNSTREAM_WORKERS=1
 
   q1_join_0:
     build:
@@ -74,10 +73,9 @@ services:
     volumes:
     - ./src/join/config/q1_config.yaml:/app/config.yaml:ro
     environment:
-    - PYTHONUNBUFFERED=1
-    - MOM_HOST=rabbitmq
-    - INPUT_QUEUE=q1_filter_queue
-    - OUTPUT_QUEUE=result_queue
+    - EOF_EXPECTED=1
+    - WORKER_ID=1
+    - NUM_DOWNSTREAM_WORKERS=1
 
   client_0:
     build:

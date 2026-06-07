@@ -104,16 +104,6 @@ class JoinWorker(BaseWorker):
         if final_msg:
             self.send_downstream(client_id, final_msg)
 
-    def _internal_on_flush(self, client_id: str) -> None:
-        self.flush_state(client_id)
-
-        logging.info("Forwarding EOF for client %s", client_id)
-        eof_msg = self.strategy.build_eof_message(
-            client=client_id, msg_id=str(uuid.uuid4())
-        )
-        if eof_msg:
-            self.output_exchange.send(serialize(eof_msg), routing_key="eof_broadcast")
-
 
 def main() -> int:
     config = init_config()

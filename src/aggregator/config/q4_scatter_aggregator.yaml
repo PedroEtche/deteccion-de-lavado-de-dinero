@@ -1,14 +1,8 @@
 mom_host: rabbitmq
 
-input_exchange: q4_scatter_route_exchange
+input: q4_scatter_route_0
 
-input_queue: q4_scatter_route_0
-
-output_queue: q4_scatter_filter_queue
-
-base_routing_key: q4_scatter_route
-
-log_level: DEBUG
+output: q4_scatter_filter_queue
 
 strategy:
   type: ScatterAggregator

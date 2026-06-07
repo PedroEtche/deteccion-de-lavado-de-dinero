@@ -7,17 +7,11 @@ from typing import Any, Dict
 
 import yaml
 
-from src.common import middleware
-from src.common.eof import EofCoordinator
-from src.common.communication.internal import (
-    build_batch_message,
-    deserialize,
-    serialize,
-    build_eof_message,
-)
+from src.common.worker import BaseWorker
+from src.common.communication.internal import build_batch_message
 
 from .strategies import (
-    JoinerStrategy,
+    MergeStrategy,
     NoStrategy,
     AccountsStrategy,
     SelfMergeStrategy,
@@ -25,19 +19,17 @@ from .strategies import (
 
 CONFIG_PATH = "./config.yaml"
 
-
 @dataclass
-class JoinerConfig:
+class MergeConfig:
     mom_host: str
     input_exchange: str
-    shard_id: str
-    base_routing_key: str
-    output_queue: str
+    output_exchange: str
     log_level: str
-    eof_fanout: str
     expected_eofs: int
-    strategy: JoinerStrategy
-
+    worker_id: int
+    num_downstream_workers: int
+    routing_strategy: str
+    strategy: MergeStrategy
 
 def _load_file_config() -> Dict[str, Any]:
     try:
@@ -47,148 +39,80 @@ def _load_file_config() -> Dict[str, Any]:
     except FileNotFoundError:
         return {}
 
-
-def _parse_strategy_config(
-    raw_strategy: Dict[str, Any], shard_id: int, shard_amount: int
-) -> JoinerStrategy:
-    strategy_type = (
-        raw_strategy.get("type", "noop")
-        if isinstance(raw_strategy, dict)
-        else str(raw_strategy)
-    )
+def _parse_strategy_config(raw_strategy: Any) -> MergeStrategy:
+    strategy_type = _read_strategy_type(raw_strategy)
 
     if strategy_type == "accounts":
         return AccountsStrategy()
 
     if strategy_type == "self_merge":
-        return SelfMergeStrategy(shard_amount=shard_amount, shard_id=shard_id)
+        return SelfMergeStrategy()
 
     return NoStrategy()
 
+def _read_strategy_type(raw_strategy: Any) -> str:
+    if isinstance(raw_strategy, dict):
+        return str(raw_strategy.get("type", "NoStrategy"))
+    return str(raw_strategy or "NoStrategy")
 
-def init_config() -> JoinerConfig:
-    file_config = _load_file_config()
-    raw_strategy = file_config.get("strategy", {})
-    raw_params = (
-        raw_strategy.get("params", {}) if isinstance(raw_strategy, dict) else {}
+def init_config() -> MergeConfig:
+    data = _load_file_config()
+    raw_strategy = data.get("strategy", "NoStrategy")
+
+    return MergeConfig(
+       mom_host=data.get("mom_host", "rabbitmq"),
+        input_exchange=data.get("input", ""),
+        output_exchange=data.get("output", ""),
+        log_level=os.environ.get("LOG_LEVEL", "INFO"),
+        strategy=_parse_strategy_config(raw_strategy),
+        expected_eofs=int(os.getenv("EOF_EXPECTED", "1")),
+        worker_id=int(os.getenv("WORKER_ID", "1")),
+        num_downstream_workers=int(os.getenv("NUM_DOWNSTREAM_WORKERS", "1")),
+        routing_strategy=os.getenv("ROUTING_STRATEGY", "round_robin").lower()
     )
 
-    shard_id = int(os.getenv("SHARD_ID", file_config.get("shard_id", "0")) or 0)
-    shard_amount = int(
-        os.getenv(
-            "SHARD_AMOUNT",
-            raw_params.get("shard_amount", file_config.get("shard_amount", 1)),
-        )
-    )
-
-    return JoinerConfig(
-        mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
-        input_exchange=os.getenv(
-            "INPUT_EXCHANGE", file_config.get("input_exchange", "")
-        ),
-        shard_id=str(shard_id),
-        base_routing_key=os.getenv(
-            "BASE_ROUTING_KEY", file_config.get("base_routing_key", "")
-        ),
-        output_queue=os.getenv("OUTPUT_QUEUE", file_config.get("output_queue", "")),
-        log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
-        eof_fanout=os.getenv("EOF_FANOUT", file_config.get("eof_fanout", "")),
-        expected_eofs=int(
-            os.getenv("EXPECTED_EOFS", file_config.get("expected_eofs", "1"))
-        ),
-        strategy=_parse_strategy_config(raw_strategy, shard_id, shard_amount),
-    )
-
-
-def log_config(config: JoinerConfig) -> None:
+def log_config(config: MergeConfig) -> None:
     logging.info(
-        "Joiner startup with: mom_host=%s | input_exchange=%s | shard_id=%s | output_queue=%s | "
-        "eof_fanout=%s | expected_eofs=%d | strategy=%s",
+        "Merge startup with: mom_host=%s | input_exchange=%s | output_exchange=%s | "
+        "worker_id=%d | expected_eofs=%d | strategy=%s",
         config.mom_host,
         config.input_exchange,
-        config.shard_id,
-        config.output_queue,
-        config.eof_fanout,
+        config.output_exchange,
+        config.worker_id,
         config.expected_eofs,
         config.strategy,
     )
 
+class MergeWorker(BaseWorker):
+    """
+    Stateful Merge. Uses a strategy to accumulate data in memory.
+    Flushes state only when expected_eofs is reached.
+    """
+    def __init__(self, config: MergeConfig):
+        super().__init__(config)
 
-class JoinerService:
-    """Stateful joiner. Cuenta `expected_eofs` antes de flushear por cliente."""
+    def process_data(self, client_id: str, msg_id: str, payload: dict) -> None:
+        batch = payload.get("batch", [])
+        
+        joined_batch = self.strategy.joiner_batch(batch, client_id)
 
-    def __init__(self, config: JoinerConfig) -> None:
-        self.mom_host = config.mom_host
-        self.strategy = config.strategy
+        # revisar para poner un callback aca
+        if joined_batch:
+            batch_msg = build_batch_message(
+                message_type="grouped_data",
+                client=client_id,
+                msg_id=str(uuid.uuid4()),
+                batch=joined_batch,
+            )
+            self.send_downstream(client_id, batch_msg)
 
-        route = f"{config.base_routing_key}_{config.shard_id}"
-        self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            self.mom_host, config.input_exchange, routing_keys=[route]
-        )
-        self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(
-            self.mom_host, config.output_queue
-        )
-        self.coord = EofCoordinator(
-            mom_host=config.mom_host,
-            fanout_name=config.eof_fanout,
-            expected_eofs=config.expected_eofs,
-            on_flush=self._flush_client,
-        )
-
-    def start(self) -> None:
-        logging.info("Starting Joiner service")
-        self.coord.start()
-        self.input_exchange.start_consuming(self._on_input)
-
-    def stop(self) -> None:
-        logging.info("Stopping Joiner service")
-        try:
-            self.input_exchange.stop_consuming()
-        except Exception:
-            logging.exception("error stopping input consumer")
-        self.coord.stop(timeout=10)
-
-    def close(self) -> None:
-        for closeable in (self.input_exchange, self.output_queue):
-            try:
-                closeable.close()
-            except Exception:
-                logging.exception("error closing middleware")
-        self.coord.close()
-
-    def _on_input(self, message, ack, _nack):
-        decoded = deserialize(message)
-        client = decoded["client"]
-
-        if decoded["type"] == "eof":
-            logging.info("Received EOF from upstream for client %s", client)
-            self.coord.broadcast(client)
-        else:
-            with self.coord.lock():
-                logging.debug("Processing data message for client %s", client)
-                batch = self.strategy.joiner_batch(decoded["payload"]["batch"], client)
-
-                if batch:
-                    batch_msg = build_batch_message(
-                        message_type="grouped_data",
-                        client=client,
-                        msg_id=str(uuid.uuid4()),
-                        batch=batch,
-                    )
-                    self.output_queue.send(serialize(batch_msg))
-
-        ack()
-
-    def _flush_client(self, client: str) -> None:
-        """Se invoca bajo `coord.lock()` cuando llegaron `expected_eofs` EOFs."""
-        logging.info("Flushing joiner state for client %s", client)
-
+    def flush_state(self, client_id: str) -> None:
+        logging.info("All EOFs received. Flushing joiner state for client %s", client_id)
+        
         if hasattr(self.strategy, "clear_client_state"):
-            self.strategy.clear_client_state(client)
+            self.strategy.clear_client_state(client_id)
 
-        eof_msg = build_eof_message(client=client, msg_id=str(uuid.uuid4()))
-        self.output_queue.send(serialize(eof_msg))
-
+        # aca ver que no este faltando flushear algo    
 
 def main() -> int:
     config = init_config()
@@ -196,22 +120,18 @@ def main() -> int:
     log_config(config)
     logging.getLogger("pika").setLevel(logging.WARNING)
 
-    service = JoinerService(config)
+    worker = MergeWorker(config)
 
     def handle_sigterm(_signum, _frame):
         logging.info("Received SIGTERM signal")
-        service.stop()
+        worker.stop()
 
     signal.signal(signal.SIGTERM, handle_sigterm)
     signal.signal(signal.SIGINT, handle_sigterm)
 
-    try:
-        service.start()
-    finally:
-        service.close()
-
+    # Start blocks and consumes
+    worker.start()
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

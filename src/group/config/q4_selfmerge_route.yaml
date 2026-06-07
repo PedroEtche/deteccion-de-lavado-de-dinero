@@ -1,11 +1,8 @@
 mom_host: rabbitmq
 
-input_queue: q4_selfmerge_route_queue
+input: q1_queue
 
-output_exchange: selfmerge_route
+output: selfmerge_route
 
 strategy:
-  type: MergeRouting
-  params:
-    base_routing_key: selfmerge_route
-    shard_amount: 4
+  type: merge_routing

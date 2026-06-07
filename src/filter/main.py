@@ -30,6 +30,7 @@ class FilterConfig:
     worker_id: int
     num_downstream_workers: int
     routing_strategy: str
+    worker_name: str
 
 
 def _load_file_config() -> Dict[str, Any]:
@@ -72,6 +73,7 @@ def init_config() -> FilterConfig:
         worker_id=int(os.getenv("WORKER_ID", "1")),
         num_downstream_workers=int(os.getenv("NUM_DOWNSTREAM_WORKERS", "1")),
         routing_strategy=os.getenv("ROUTING_STRATEGY", "round_robin").lower(),
+        worker_name=os.getenv("WORKER_NAME", "filter"),
     )
 
 
@@ -130,4 +132,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -2,13 +2,6 @@ import zlib
 from abc import ABC, abstractmethod
 from typing import Any, List, Tuple
 
-
-def _get_shard_route(string_key: str, shard_amount: int, base_route: str) -> str:
-    hash_val = zlib.crc32(string_key.encode("utf-8"))
-    shard_id = hash_val % shard_amount
-    return f"{base_route}_{shard_id}"
-
-
 class GroupStrategy(ABC):
     """Abstract strategy for grouping batches of messages."""
 
@@ -27,22 +20,22 @@ class GroupStrategy(ABC):
 class NoStrategy(GroupStrategy):
     """A strategy that returns the input batch unchanged."""
 
-    def __init__(self, output_route: str):
-        self.output_route = output_route
+    def __init__(self):
+        pass
 
     def __str__(self) -> str:
         return "NoStrategy"
 
     def group_and_route(self, batch: List[Any]) -> List[Tuple[str, List[Any]]]:
-        return [(self.output_route, batch)]
+        pass
 
     def get_eof_routes(self) -> List[str]:
-        return [self.output_route]
+        pass
 
 
 class BankMaxAmountStrategy(GroupStrategy):
-    def __init__(self, output_route: str):
-        self.output_route = output_route
+    def __init__(self):
+        pass
 
     def __str__(self) -> str:
         return "BankMaxAmountStrategy"
@@ -61,27 +54,24 @@ class BankMaxAmountStrategy(GroupStrategy):
                     "amount_paid": amount,
                 }
 
-        return [(self.output_route, list(max_per_bank.values()))]
+            for bank, info in max_per_bank.items():
+                route = f"bank_{bank}"
+                if route not in max_per_bank:
+                    max_per_bank[route] = []
+                max_per_bank[route].append(info)
 
-    def get_eof_routes(self) -> List[str]:
-        return [self.output_route]
+        return [(route, b) for route, b in max_per_bank.items()]
 
 
 class PaymentFormatAverageStrategy(GroupStrategy):
     """Shards by payment_format so each aggregator owns all transactions for its
     formats. This guarantees each aggregator computes the correct full average."""
 
-    def __init__(self, base_route: str, shard_amount: int):
-        self.base_route = base_route
-        self.shard_amount = shard_amount
+    def __init__(self):
+        pass
 
     def __str__(self) -> str:
         return "PaymentFormatAverageStrategy"
-
-    def _get_shard_route(self, payment_format: str) -> str:
-        h = zlib.crc32(str(payment_format).encode("utf-8"))
-        shard_id = h % self.shard_amount
-        return f"{self.base_route}_{shard_id}"
 
     def group_and_route(self, batch: List[Any]) -> List[Tuple[str, List[Any]]]:
         # Aggregate by payment_format within the batch, then route by format.
@@ -102,7 +92,7 @@ class PaymentFormatAverageStrategy(GroupStrategy):
         routed_batches = {}
 
         for fmt, stats in grouped.items():
-            route = self._get_shard_route(str(fmt))
+            route = str(fmt)
             if route not in routed_batches:
                 routed_batches[route] = []
             routed_batches[route].append(
@@ -115,14 +105,10 @@ class PaymentFormatAverageStrategy(GroupStrategy):
 
         return [(route, b) for route, b in routed_batches.items()]
 
-    def get_eof_routes(self) -> List[str]:
-        return [f"{self.base_route}_{i}" for i in range(self.shard_amount)]
-
 
 class AccountPairCountStategy(GroupStrategy):
-    def __init__(self, base_route: str, shard_amount: int):
-        self.base_route = base_route
-        self.shard_amount = shard_amount
+    def __init__(self):
+        pass
 
     def __str__(self) -> str:
         return "AccountPairCountStategy"
@@ -137,12 +123,11 @@ class AccountPairCountStategy(GroupStrategy):
         routed_batches = {}
         for (from_bank, from_account, to_bank, to_account), size in counts.items():
             string_key = f"{from_bank}_{from_account}_{to_bank}_{to_account}"
-            route = _get_shard_route(string_key, self.shard_amount, self.base_route)
 
-            if route not in routed_batches:
-                routed_batches[route] = []
+            if string_key not in routed_batches:
+                routed_batches[string_key] = []
 
-            routed_batches[route].append(
+            routed_batches[string_key].append(
                 {
                     "from_bank": from_bank,
                     "from_account": from_account,
@@ -153,15 +138,11 @@ class AccountPairCountStategy(GroupStrategy):
             )
 
         return [(route, b) for route, b in routed_batches.items()]
-
-    def get_eof_routes(self) -> List[str]:
-        return [f"{self.base_route}_{i}" for i in range(self.shard_amount)]
-
+    
 
 class AccountStrategy(GroupStrategy):
-    def __init__(self, base_route: str, shard_amount: int):
-        self.base_route = base_route
-        self.shard_amount = shard_amount
+    def __init__(self):
+        pass
 
     def __str__(self) -> str:
         return "AccountStrategy"
@@ -175,24 +156,18 @@ class AccountStrategy(GroupStrategy):
         routed_batches = {}
         for bank, account in accounts:
             string_key = f"{bank}_{account}"
-            route = _get_shard_route(string_key, self.shard_amount, self.base_route)
 
-            if route not in routed_batches:
-                routed_batches[route] = []
+            if string_key not in routed_batches:
+                routed_batches[string_key] = []
 
-            routed_batches[route].append({"bank": bank, "account": account})
+            routed_batches[string_key].append({"bank": bank, "account": account})
         return [(route, b) for route, b in routed_batches.items()]
-
-    def get_eof_routes(self) -> List[str]:
-        return [f"{self.base_route}_{i}" for i in range(self.shard_amount)]
-
 
 class MergeRoutingStrategy(GroupStrategy):
     """Routes transactions by BOTH origin and destination for Distributed Joins."""
 
-    def __init__(self, base_route: str, shard_amount: int):
-        self.base_route = base_route
-        self.shard_amount = shard_amount
+    def __init__(self):
+        pass
 
     def __str__(self) -> str:
         return "MergeRoutingStrategy"
@@ -201,32 +176,25 @@ class MergeRoutingStrategy(GroupStrategy):
         routed_batches = {}
 
         for tx in batch:
-            string_key = f"{tx.from_bank}_{tx.from_account}"
-            route_from = _get_shard_route(
-                string_key, self.shard_amount, self.base_route
-            )
-            if route_from not in routed_batches:
-                routed_batches[route_from] = []
-            routed_batches[route_from].append(tx)
+            string_key_from = f"{tx.from_bank}_{tx.from_account}"
 
-            string_key = f"{tx.to_bank}_{tx.to_account}"
-            route_to = _get_shard_route(string_key, self.shard_amount, self.base_route)
+            if string_key_from not in routed_batches:
+                routed_batches[string_key_from] = []
+            routed_batches[string_key_from].append(tx)
 
-            if route_from != route_to:
-                if route_to not in routed_batches:
-                    routed_batches[route_to] = []
-                routed_batches[route_to].append(tx)
+            string_key_to = f"{tx.to_bank}_{tx.to_account}"
+
+            if string_key_from != string_key_to:
+                if string_key_to not in routed_batches:
+                    routed_batches[string_key_to] = []
+                routed_batches[string_key_to].append(tx)
 
         return [(route, b) for route, b in routed_batches.items()]
 
-    def get_eof_routes(self) -> List[str]:
-        return [f"{self.base_route}_{i}" for i in range(self.shard_amount)]
-
 
 class ScatterGroupStrategy(GroupStrategy):
-    def __init__(self, base_route: str, shard_amount: int):
-        self.base_route = base_route
-        self.shard_amount = shard_amount
+    def __init__(self):
+        pass
 
     def __str__(self) -> str:
         return "ScatterGroupStrategy"
@@ -236,14 +204,10 @@ class ScatterGroupStrategy(GroupStrategy):
 
         for tx in batch:
             string_key = f"{tx.from_bank}_{tx.from_account}"
-            route = _get_shard_route(string_key, self.shard_amount, self.base_route)
 
-            if route not in routed_batches:
-                routed_batches[route] = []
+            if string_key not in routed_batches:
+                routed_batches[string_key] = []
 
-            routed_batches[route].append(tx)
+            routed_batches[string_key].append(tx)
 
         return [(route, b) for route, b in routed_batches.items()]
-
-    def get_eof_routes(self) -> List[str]:
-        return [f"{self.base_route}_{i}" for i in range(self.shard_amount)]

@@ -1,7 +1,7 @@
 mom_host: rabbitmq
 
 input: q1_queue
-output: result_queue
+output: q1_filter_queue
 
 strategy:
   - type: amount

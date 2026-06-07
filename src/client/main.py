@@ -160,10 +160,6 @@ class Client:
                 logging.info("Unexpected Message: %s", decoded)
                 continue
 
-            if decoded["eof"]:
-                logging.info("Receive EOF from query number: %s", query_type[1])
-                query_result_counter += 1
-
         sock.shutdown("rd")
         sock.close()
 

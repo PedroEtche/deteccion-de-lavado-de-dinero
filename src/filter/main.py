@@ -18,6 +18,7 @@ from .strategies import (
 
 CONFIG_PATH = "./config.yaml"
 
+
 @dataclass
 class FilterConfig:
     mom_host: str
@@ -30,6 +31,7 @@ class FilterConfig:
     num_downstream_workers: int
     routing_strategy: str
 
+
 def _load_file_config() -> Dict[str, Any]:
     try:
         with open(CONFIG_PATH, "r", encoding="utf-8") as handle:
@@ -37,6 +39,7 @@ def _load_file_config() -> Dict[str, Any]:
             return data if isinstance(data, dict) else {}
     except FileNotFoundError:
         return {}
+
 
 def _build_strategy(strategy_data: List[Dict[str, Any]]) -> FilterStrategy:
     params: Dict[str, Any] = {}
@@ -56,6 +59,7 @@ def _build_strategy(strategy_data: List[Dict[str, Any]]) -> FilterStrategy:
         raise ValueError(f"Unknown strategy type: {strategy_type!r}")
     return builder(params)
 
+
 def init_config() -> FilterConfig:
     data = _load_file_config()
     return FilterConfig(
@@ -67,8 +71,9 @@ def init_config() -> FilterConfig:
         expected_eofs=int(os.getenv("EOF_EXPECTED", "1")),
         worker_id=int(os.getenv("WORKER_ID", "1")),
         num_downstream_workers=int(os.getenv("NUM_DOWNSTREAM_WORKERS", "1")),
-        routing_strategy=os.getenv("ROUTING_STRATEGY", "round_robin").lower()
+        routing_strategy=os.getenv("ROUTING_STRATEGY", "round_robin").lower(),
     )
+
 
 def log_config(config: FilterConfig) -> None:
     logging.info(
@@ -77,8 +82,9 @@ def log_config(config: FilterConfig) -> None:
         config.input_exchange,
         config.output_exchange,
         config.expected_eofs,
-        str(config.strategy)
+        str(config.strategy),
     )
+
 
 class FilterWorker(BaseWorker):
     def __init__(self, config: FilterConfig):
@@ -87,10 +93,10 @@ class FilterWorker(BaseWorker):
 
     def process_data(self, client_id: str, msg_id: str, payload: dict) -> None:
         batch = payload.get("batch", [])
-        
+
         filtered_batch = self.strategy.filter_batch(batch)
         logging.info("Filtered batch: %d in -> %d out", len(batch), len(filtered_batch))
-        
+
         if filtered_batch:
             out_msg = build_raw_transactions_message(
                 client=client_id,
@@ -101,6 +107,7 @@ class FilterWorker(BaseWorker):
 
     def flush_state(self, client_id: str) -> None:
         pass
+
 
 def main() -> int:
     config = init_config()
@@ -116,9 +123,11 @@ def main() -> int:
 
     signal.signal(signal.SIGTERM, handle_sigterm)
     signal.signal(signal.SIGINT, handle_sigterm)
-    
+
     worker.start()
     return 0
 
+
 if __name__ == "__main__":
     raise SystemExit(main())
+

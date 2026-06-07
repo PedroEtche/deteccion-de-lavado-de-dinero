@@ -106,7 +106,9 @@ class Gateway:
 
     def _setup_middleware(self):
         self.transactions_mw = MessageMiddlewareExchangeRabbitMQ(
-            self.mom_host, self.transactions_queue_name
+            self.mom_host, 
+            self.transactions_queue_name, 
+            exchange_type="fanout"
         )
         self.accounts_mw = MessageMiddlewareQueueRabbitMQ(
             self.mom_host, self.accounts_queue_name
@@ -151,19 +153,13 @@ class Gateway:
 
     def send_transactions_data(self, serialized_message: bytes):
         """Sends data via Round-Robin to a specific worker."""
-        routing_key = f"transactions_{self.current_tx_worker}"
-        
         with self._send_lock:
-            self.transactions_mw.send(serialized_message, routing_key=routing_key)
-        
-        self.current_tx_worker = (self.current_tx_worker % self.num_tx_workers) + 1
+            self.transactions_mw.send(serialized_message)
 
     def send_transactions_eof(self, serialized_message: bytes):
         """Broadcasts EOF to all workers listening to the exchange."""
-        routing_key = "eof_broadcast"
-        
         with self._send_lock:
-            self.transactions_mw.send(serialized_message, routing_key=routing_key)
+            self.transactions_mw.send(serialized_message, routing_key="")
 
     def handle_client_request(self, client_socket):
         tcp = TCPSocket(client_socket)

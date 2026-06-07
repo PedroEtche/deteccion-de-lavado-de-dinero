@@ -96,7 +96,7 @@ class MessageMiddlewareQueueRabbitMQ(MessageMiddlewareQueue):
 
 
 class MessageMiddlewareExchangeRabbitMQ(MessageMiddlewareExchange):
-    def __init__(self, host, exchange_name, routing_keys=None, queue_name=None):
+    def __init__(self, host, exchange_name, routing_keys=None, queue_name=None, exchange_type="direct"):
         try:
             self.connection = pika.BlockingConnection(
                 pika.ConnectionParameters(
@@ -105,15 +105,15 @@ class MessageMiddlewareExchangeRabbitMQ(MessageMiddlewareExchange):
             )
             self.channel = self.connection.channel()
             self.exchange_name = exchange_name
+            
             self.channel.exchange_declare(
-                exchange=exchange_name, exchange_type="direct"
+                exchange=exchange_name, exchange_type=exchange_type
             )
 
             self.routing_keys = routing_keys or []
 
             if self.routing_keys:
                 if queue_name:
-                    # Named durable-ish queue: survives container restarts within a run
                     self.channel.queue_declare(queue=queue_name)
                     self.queue_name = queue_name
                 else:

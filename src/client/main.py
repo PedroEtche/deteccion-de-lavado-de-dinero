@@ -44,8 +44,13 @@ def _connect_with_retry(host, port):
             time.sleep(_CONNECT_RETRY_DELAY)
 
 
+_opened_files: set = set()
+
+
 def persist_rows(output_file, batch):
-    with open(output_file, "a") as csvfile:
+    mode = "w" if output_file not in _opened_files else "a"
+    _opened_files.add(output_file)
+    with open(output_file, mode) as csvfile:
         csv_writer = csv.writer(csvfile, delimiter=",", quotechar='"')
         for row in batch:
             csv_writer.writerow(
@@ -123,10 +128,13 @@ class Client:
             decoded = deserialize(msg)
             query_type = decoded["type"]
 
-            if query_type == "raw_transactions":
+            if query_type == "q1_result":
                 output_file = output_path + "q1.csv"
                 batch = decoded["payload"]["batch"]
-                persist_rows(output_file, batch)
+                if decoded["eof"]:
+                    query_result_counter += 1
+                else:
+                    persist_rows(output_file, batch)
 
             elif query_type == "q2_result":
                 output_file = output_path + "q2.csv"

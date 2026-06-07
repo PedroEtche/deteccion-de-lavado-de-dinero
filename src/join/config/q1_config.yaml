@@ -1,0 +1,7 @@
+mom_host: rabbitmq
+
+input: q1_filter_queue
+output: result_queue
+
+strategy:
+  - type: q1

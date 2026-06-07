@@ -61,6 +61,22 @@ services:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
     - INPUT_QUEUE=q1_queue
+    - OUTPUT_QUEUE=q1_filter_queue
+
+  q1_join_0:
+    build:
+      context: .
+      dockerfile: src/join/Dockerfile
+    container_name: q1_join_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/join/config/q1_config.yaml:/app/config.yaml:ro
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+    - INPUT_QUEUE=q1_filter_queue
     - OUTPUT_QUEUE=result_queue
 
   client_0:

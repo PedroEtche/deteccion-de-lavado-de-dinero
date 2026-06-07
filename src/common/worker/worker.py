@@ -61,7 +61,7 @@ class BaseWorker(ABC):
             logging.exception("Error processing message")
             nack()
 
-    def send_downstream(self, client_id: str, message: dict, shard_key: str = None) -> None:
+    def send_downstream(self, client_id: str, message: dict, shard_routing_key: str = None) -> None:
         """Serializes and routes a fully built message to the next stage."""
         if not message:
             return
@@ -73,10 +73,7 @@ class BaseWorker(ABC):
             self.current_downstream_worker = (self.current_downstream_worker % self.config.num_downstream_workers) + 1
             
         elif self.config.routing_strategy == "sharded":
-            hash_val = zlib.crc32(shard_key.encode("utf-8"))
-            target_worker = (hash_val % self.config.num_downstream_workers) + 1
-            
-            routing_key = f"worker_{target_worker}"
+            routing_key = shard_routing_key
             
         else:
             raise ValueError(f"Unknown routing strategy: {self.config.routing_strategy}")
@@ -99,6 +96,12 @@ class BaseWorker(ABC):
         self.input_exchange.close()
         self.output_exchange.close()
     
+    def get_sharded_route(self, shard_key: str) -> str:
+        """Helper for subclasses that need to pre-batch data by physical route."""
+        hash_val = zlib.crc32(shard_key.encode("utf-8"))
+        target_worker = (hash_val % self.config.num_downstream_workers) + 1
+        return f"worker_{target_worker}"
+
     @abstractmethod
     def process_data(self, client_id: str, msg_id: str, payload: dict) -> None:
         """Process incoming data."""

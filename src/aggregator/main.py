@@ -111,6 +111,8 @@ class AggregatorWorker(BaseWorker):
         
         final_batch = self.strategy.get_result_for_client(client_id)
         
+        logging.info("Final aggregated batch for client %s: %s", client_id, final_batch)
+
         if final_batch:
             batch_msg = build_batch_message(
                 message_type="batch",

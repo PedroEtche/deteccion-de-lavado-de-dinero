@@ -1,7 +1,7 @@
 mom_host: rabbitmq
 
 input: transactions_exchange
-output: q1_queue
+output: usd_filtered_exchange
 
 strategy:
   - type: currency

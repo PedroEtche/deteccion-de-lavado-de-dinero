@@ -3,7 +3,7 @@ import os
 import signal
 import uuid
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import yaml
 
@@ -107,19 +107,21 @@ class GroupWorker(BaseWorker):
         batch = payload.get("batch", [])
         
         routed = self.strategy.group_and_route(batch)
-        
+
+        batches: Dict[str, List[dict]] = {}
         for route, grouped in routed:
-            if not grouped:
-                continue
-            
+            route = self.get_sharded_route(route)
+            batches.setdefault(route, []).extend(grouped)
+
+        for route, mega_batch in batches.items():
             batch_msg = build_batch_message(
-                message_type="batch",
+                message_type="batch", 
                 client=client_id,
                 msg_id=str(uuid.uuid4()),
-                batch=grouped,
+                batch=mega_batch,
             )
             
-            self.send_downstream(client_id, batch_msg, shard_key=route)
+            self.send_downstream(client_id, batch_msg, shard_routing_key=route)
 
     def flush_state(self, client_id: str) -> None:
         pass

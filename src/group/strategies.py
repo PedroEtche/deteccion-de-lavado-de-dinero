@@ -117,7 +117,7 @@ class AccountPairCountStategy(GroupStrategy):
         counts = {}
 
         for tx in batch:
-            key = (tx["from_bank"], tx["from_account"], tx["to_bank"], tx["to_account"])
+            key = (tx.from_bank, tx.from_account, tx.to_bank, tx.to_account)
             counts[key] = counts.get(key, 0) + 1
 
         routed_batches = {}

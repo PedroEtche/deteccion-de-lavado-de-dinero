@@ -1,20 +1,8 @@
 mom_host: rabbitmq
 
-input_queue: group_max_amount_output_queue
+input: grouped_max_by_bank_exchange
 
-output_queue: output_queue
-
-log_level: DEBUG
-
-# Fanout intra-stage para coordinar EOFs entre réplicas del aggregator.
-# Todas las réplicas se bindean al mismo exchange.
-eof_fanout: agg_max_amount_eof
-
-# Cantidad de EOFs upstream que se esperan por cliente. Debe ser igual a la
-# cantidad de réplicas del último worker stateful aguas arriba (o del gateway
-# si no hay stateful intermedio). Los filtros stateless reenvían el EOF sin
-# alterar la cuenta.
-expected_eofs: 1
+output: results_queue
 
 strategy:
   type: BankMaxAmount

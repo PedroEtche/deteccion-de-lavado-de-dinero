@@ -1,0 +1,8 @@
+mom_host: rabbitmq
+
+input: usd_filtered_exchange
+
+output: grouped_max_by_bank_exchange
+
+strategy:
+  type: account_pair_count

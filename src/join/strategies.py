@@ -2,6 +2,12 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
 
+from src.common.communication.internal import (
+    build_eof_message,
+    build_q1_result,
+)
+
+
 class JoinStrategy(ABC):
     """Abstract strategy for grouping batches of messages."""
 
@@ -26,6 +32,9 @@ class JoinStrategy(ABC):
     def add_accounts(self, batch: List[Any], client: Optional[str] = None) -> None:
         pass
 
+    def build_eof_message(self, client, msg_id=None):
+        raise NotImplementedError()
+
 
 class NoStrategy(JoinStrategy):
     """A strategy that returns the input batch unchanged."""
@@ -41,6 +50,26 @@ class NoStrategy(JoinStrategy):
 
     def get_joined_for_client(self, client: str) -> List[Any]:
         return []
+
+    def build_eof_message(self, client, msg_id=None):
+        return {}
+
+
+class Q1Strategy(JoinStrategy):
+    def __init__(self):
+        pass
+
+    def __str__(self) -> str:
+        return "Q1Strategy"
+
+    def join_batch(self, batch: List[Any], client: Optional[str] = None) -> List[Any]:
+        return batch
+
+    def get_joined_for_client(self, client: str) -> List[Any]:
+        return []
+
+    def build_eof_message(self, client, msg_id=None):
+        return build_q1_result(batch=[], eof=True, client=client)
 
 
 class UnionStrategy(JoinStrategy):

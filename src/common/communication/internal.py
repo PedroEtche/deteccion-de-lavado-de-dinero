@@ -254,17 +254,16 @@ def build_eof_message(*, client, msg_id):
     return build_message("eof", client=client, msg_id=msg_id)
 
 
-def build_q1_result(*, batch):
+def build_q1_result(*, batch, eof, client):
     """Wrapper for building q1 result message"""
     if not isinstance(batch, list):
         raise MessageValidationError("message must be a list")
     if not all(isinstance(row, TransactionRow) for row in batch):
         raise MessageValidationError("message must be a list of TransactionRow objects")
 
-    return build_batch_message(
-        "q1_result",
-        batch=batch,
-    )
+    msg = build_batch_message("q1_result", batch=batch, client=client)
+    msg["eof"] = eof
+    return msg
 
 
 def serialize(message):
@@ -295,7 +294,7 @@ def deserialize(message):
 
     # Convert batch dictionaries back to objects based on the message type.
     msg_type = decoded.get("type")
-    if msg_type == "raw_transactions":
+    if msg_type in ("raw_transactions", "q1_result"):
         decoded["payload"]["batch"] = [
             TransactionRow.from_dict(row) if isinstance(row, dict) else row
             for row in batch

@@ -4,4 +4,4 @@ input: q1_filter_queue
 output: gateway_results_exchange
 
 strategy:
-  - type: q1
+  - type: query_result

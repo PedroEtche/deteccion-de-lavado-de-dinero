@@ -5,7 +5,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from src.common.communication.internal import (
     build_batch_message,
-    build_q1_result,
+    build_results_for_query,
 )
 
 
@@ -68,18 +68,22 @@ class NoStrategy(JoinStrategy):
         return build_q1_result(batch=[], eof=True, client=client)
 
 
-class Q1Strategy(JoinStrategy):
-    """Streaming pass-through for Q1 transactions."""
+class QueryResultStrategy(JoinStrategy):
+    """Streaming pass-through for query result transactions."""
+    
+    def __init__(self, query_number: int) -> None:
+        super().__init__()
+        self.query_number = query_number
 
     def join_batch(self, batch: List[Any], client: str) -> None:
         if batch:
-            self._emit(client, build_q1_result(batch=batch, eof=False, client=client))
+            self._emit(client, build_results_for_query(query_number=self.query_number, batch=batch, eof=False, client=client))
 
     def flush(self, client: str) -> Optional[dict]:
         return None
 
     def build_eof_message(self, client, msg_id=None):
-        return build_q1_result(batch=[], eof=True, client=client)
+        return build_results_for_query(query_number=self.query_number, batch=[], eof=True, client=client)
 
 
 # class UnionStrategy(JoinStrategy):

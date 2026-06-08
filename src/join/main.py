@@ -15,7 +15,7 @@ from src.common.worker import BaseWorker
 from .strategies import (
     JoinStrategy,
     NoStrategy,
-    Q1Strategy,
+    QueryResultStrategy,
 )
 
 CONFIG_PATH = "./config.yaml"
@@ -43,7 +43,7 @@ def _load_file_config() -> Dict[str, Any]:
         return {}
 
 
-def _build_strategy(strategy_data: List[Dict[str, Any]]) -> JoinStrategy:
+def _build_strategy(strategy_data: List[Dict[str, Any]], query_result_number: str = None) -> JoinStrategy:
     params: Dict[str, Any] = {}
     for item in strategy_data:
         params.update(item)
@@ -52,7 +52,7 @@ def _build_strategy(strategy_data: List[Dict[str, Any]]) -> JoinStrategy:
 
     _BUILDERS = {
         "none": lambda _: NoStrategy(),
-        "q1": lambda _: Q1Strategy(),
+        "query_result": lambda _: QueryResultStrategy(query_result_number),
     }
 
     builder = _BUILDERS.get(strategy_type)
@@ -60,15 +60,15 @@ def _build_strategy(strategy_data: List[Dict[str, Any]]) -> JoinStrategy:
         raise ValueError(f"Unknown strategy type: {strategy_type!r}")
     return builder(params)
 
-
 def init_config() -> JoinConfig:
     data = _load_file_config()
+    query_result_number = os.getenv("QUERY_RESULT_NUMBER", "1").lower()
     return JoinConfig(
         mom_host=data.get("mom_host", "rabbitmq"),
         input_exchange=data.get("input", ""),
         output_exchange=data.get("output", ""),
         log_level=os.environ.get("LOG_LEVEL", "INFO"),
-        strategy=_build_strategy(data.get("strategy", [])),
+        strategy=_build_strategy(data.get("strategy", []), query_result_number=query_result_number),
         expected_eofs=int(os.getenv("EOF_EXPECTED", "1")),
         worker_id=int(os.getenv("WORKER_ID", "1")),
         num_downstream_workers=int(os.getenv("NUM_DOWNSTREAM_WORKERS", "1")),
@@ -91,10 +91,9 @@ class JoinWorker(BaseWorker):
     def __init__(self, config: JoinConfig):
         super().__init__(config)
         self.strategy = config.strategy
-        # The strategy emits ready batches mid-stream through this callback.
         self.strategy.register_join_callback(self.send_downstream)
 
-    def process_data(self, client_id: str, msg_id: str, payload: dict) -> None:
+    def process_data(self, client_id: str, msg_id: str, msg_type: str, payload: dict) -> None:
         batch = payload.get("batch", [])
         logging.info("Join batch: %d rows in for client %s", len(batch), client_id)
         self.strategy.join_batch(batch, client_id)

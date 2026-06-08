@@ -76,6 +76,7 @@ services:
     - EOF_EXPECTED=1
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=1
+    - QUERY_RESULT_NUMBER=1
 
   client_0:
     build:

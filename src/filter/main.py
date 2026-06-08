@@ -95,7 +95,7 @@ class FilterWorker(BaseWorker):
         super().__init__(config)
         self.strategy = config.strategy
 
-    def process_data(self, client_id: str, msg_id: str, payload: dict) -> None:
+    def process_data(self, client_id: str, msg_id: str, msg_type: str, payload: dict) -> None:
         batch = payload.get("batch", [])
 
         filtered_batch = self.strategy.filter_batch(batch)

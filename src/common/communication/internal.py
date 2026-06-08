@@ -253,15 +253,25 @@ def build_eof_message(*, client, msg_id):
     """Wrapper for building EOF message"""
     return build_message("eof", client=client, msg_id=msg_id)
 
-
+"""
 def build_q1_result(*, batch, eof, client):
-    """Wrapper for building q1 result message"""
     if not isinstance(batch, list):
         raise MessageValidationError("message must be a list")
     if not all(isinstance(row, TransactionRow) for row in batch):
         raise MessageValidationError("message must be a list of TransactionRow objects")
 
     msg = build_batch_message("q1_result", batch=batch, client=client)
+    msg["eof"] = eof
+    return msg
+"""
+
+def build_results_for_query(query_number: int, batch: list, eof: bool, client: str):
+    """Wrapper for building query result messages based on query number"""
+    if not isinstance(batch, list):
+        raise MessageValidationError("message must be a list")
+
+    msg_type = f"q{query_number}_result"
+    msg = build_batch_message(msg_type, batch=batch, client=client)
     msg["eof"] = eof
     return msg
 

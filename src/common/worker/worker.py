@@ -36,7 +36,9 @@ class BaseWorker(ABC):
             "eof_broadcast"
         ]
         self.input_exchange = MessageMiddlewareExchangeRabbitMQ(
-            self.config.mom_host, self.config.input_exchange, routing_keys
+            host=self.config.mom_host, 
+            exchange_name=self.config.input_exchange, 
+            routing_keys=routing_keys
         )
 
         if getattr(self.config, "output_exchange", None):

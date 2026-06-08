@@ -1,6 +1,6 @@
 mom_host: rabbitmq
 
-input: transactions_exchange
+input: transactions_usd_exchange
 output: usd_filtered_exchange
 
 strategy:

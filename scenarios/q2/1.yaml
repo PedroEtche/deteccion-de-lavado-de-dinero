@@ -1,0 +1,134 @@
+services:
+  rabbitmq:
+    build:
+      context: ./src/rabbitmq
+      dockerfile: Dockerfile
+    container_name: rabbitmq
+    environment:
+    - RABBITMQ_LOG_LEVELS=error
+    healthcheck:
+      interval: 5s
+      retries: 10
+      start_period: 50s
+      test: rabbitmq-diagnostics check_port_connectivity
+      timeout: 3s
+    ports:
+    - 5672:5672
+    - 15672:15672
+
+  gateway:
+    build:
+      context: .
+      dockerfile: src/gateway/Dockerfile
+    container_name: gateway
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+    - PYTHONUNBUFFERED=1
+    - MOM_HOST=rabbitmq
+    - TRANSACTIONS_EXCHANGE=transactions_exchange
+    - ACCOUNTS_EXCHANGE=merge_max_by_account_exchange
+    - RESULT_EXCHANGE=gateway_results_exchange
+    - SERVER_PORT=5678
+    - NUM_TX_WORKERS=3
+
+  filter_usd_0:
+    build:
+      context: .
+      dockerfile: src/filter/Dockerfile
+    container_name: filter_usd_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/filter/config/usd_config.yaml:/app/config.yaml:ro
+    environment:
+    - EOF_EXPECTED=1
+    - WORKER_ID=1
+    - NUM_DOWNSTREAM_WORKERS=1
+    - WORKER_NAME=filter_usd
+
+  filter_usd_1:
+    build:
+      context: .
+      dockerfile: src/filter/Dockerfile
+    container_name: filter_usd_1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/filter/config/usd_config.yaml:/app/config.yaml:ro
+    environment:
+    - EOF_EXPECTED=1
+    - WORKER_ID=2
+    - NUM_DOWNSTREAM_WORKERS=1
+    - WORKER_NAME=filter_usd
+
+  group_by_bank_max_0:
+    build:
+      context: .
+      dockerfile: src/group/Dockerfile
+    container_name: group_by_bank_max_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/group/config/bank_max_amount.yaml:/app/config.yaml:ro
+    environment:
+    - EOF_EXPECTED=2
+    - WORKER_ID=1
+    - NUM_DOWNSTREAM_WORKERS=1
+    - WORKER_NAME=group_by_bank_max
+
+  aggregator_bank_max_amount_0:
+    build:
+      context: .
+      dockerfile: src/aggregator/Dockerfile
+    container_name: aggregator_bank_max_amount_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/aggregator/config/max_amount_per_bank_config.yaml:/app/config.yaml:ro
+    environment:
+    - EOF_EXPECTED=1
+    - WORKER_ID=1
+    - NUM_DOWNSTREAM_WORKERS=1
+    - WORKER_NAME=aggregator_bank_max_amount
+
+  merge_account_info_0:
+    build:
+      context: .
+      dockerfile: src/merge/Dockerfile
+    container_name: merge_account_info_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/merge/config/merge_account_info_config.yaml:/app/config.yaml:ro
+    environment:
+    - EOF_EXPECTED=1
+    - WORKER_ID=1
+    - NUM_DOWNSTREAM_WORKERS=1
+    - WORKER_NAME=merge_account_info
+
+  client_0:
+    build:
+      context: .
+      dockerfile: src/client/Dockerfile
+    container_name: client_0
+    depends_on:
+    - gateway
+    volumes:
+    - ./data/small_trans.csv:/data/small_trans.csv
+    - ./data/small_accounts.csv:/data/small_accounts.csv
+    - ./results/clients/client_0:/results/clients/client_0
+    environment:
+    - PYTHONUNBUFFERED=1
+    - SERVER_HOST=gateway
+    - SERVER_PORT=5678
+    - OUTPUT_PATH=/results/clients/client_0/
+    - ACCOUNTS_PATH=/data/small_accounts.csv
+    - TRANSACTIONS_PATH=/data/small_trans.csv
+    - BATCH_SIZE=500

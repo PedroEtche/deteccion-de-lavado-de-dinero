@@ -28,7 +28,8 @@ class GatewayConfig:
     host: str
     port: int
     mom_host: str
-    transactions_exchange: str
+    transactions_usd_exchange: str
+    transactions_date_exchange: str
     accounts_queue: str
     result_exchange: str
     log_level: str
@@ -49,9 +50,13 @@ def init_config():
         host=os.getenv("SERVER_HOST", file_config.get("host", "0.0.0.0")),
         port=int(os.getenv("SERVER_PORT", file_config.get("port", 5678))),
         mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
-        transactions_exchange=os.getenv(
-            "TRANSACTIONS_EXCHANGE",
-            file_config.get("TRANSACTIONS_EXCHANGE", "transactions_exchange"),
+        transactions_usd_exchange=os.getenv(
+            "TRANSACTIONS_USD_EXCHANGE",
+            file_config.get("TRANSACTIONS_USD_EXCHANGE", "transactions_usd_exchange"),
+        ),
+        transactions_date_exchange=os.getenv(
+            "TRANSACTIONS_DATE_EXCHANGE",
+            file_config.get("TRANSACTIONS_DATE_EXCHANGE", "transactions_date_exchange"),
         ),
         accounts_queue=os.getenv(
             "ACCOUNTS_QUEUE",
@@ -71,7 +76,7 @@ def log_config(config: GatewayConfig):
         config.host,
         config.port,
         config.mom_host,
-        config.transactions_exchange,
+        config.transactions_usd_exchange,
         config.accounts_queue,
         config.result_exchange,
     )
@@ -82,17 +87,22 @@ class Gateway:
         self.server_host = gateway_config.host
         self.server_port = gateway_config.port
         self.mom_host = gateway_config.mom_host
-        self.transactions_exchange_name = gateway_config.transactions_exchange
+        
+        self.transactions_usd_exchange_name = gateway_config.transactions_usd_exchange
+        self.transactions_date_exchange_name = gateway_config.transactions_date_exchange
         self.accounts_queue_name = gateway_config.accounts_queue
         self.result_exchange_name = gateway_config.result_exchange
-        self.current_tx_worker = 1
 
-        self.transactions_mw = None
-        self.num_tx_workers = 3
-    
+        # PLACEHOLDER: si esta cosa horrible queda hay que abstraerlo y alimentarlo de envs/config
+        self.transactions_usd_workers = 3
+        self.transactions_usd_current_worker = 1
+        self.transactions_usd_mw = None
+
+        self.transactions_date_workers = 1
+        self.transactions_date_current_worker = 1
+        self.transactions_date_mw = None
+
         self.accounts_mw = None
-        self.num_account_workers = 1
-
         self.result_mw = None
 
         self.server_socket = None
@@ -105,8 +115,11 @@ class Gateway:
         self._result_thread = None
 
     def _setup_middleware(self):
-        self.transactions_mw = MessageMiddlewareExchangeRabbitMQ(
-            self.mom_host, self.transactions_exchange_name
+        self.transactions_usd_mw = MessageMiddlewareExchangeRabbitMQ(
+            self.mom_host, self.transactions_usd_exchange_name, exchange_type="direct"
+        )
+        self.transactions_date_mw = MessageMiddlewareExchangeRabbitMQ(
+            self.mom_host, self.transactions_date_exchange_name, exchange_type="direct"
         )
         self.accounts_mw = MessageMiddlewareQueueRabbitMQ(
             self.mom_host, self.accounts_queue_name
@@ -119,7 +132,6 @@ class Gateway:
         )
 
     def _dispatch_result(self, message, ack, _nack):
-        logging.info("Received message from result queue: %s", message)
         try:
             decoded = deserialize(message)
         except Exception:
@@ -155,19 +167,27 @@ class Gateway:
 
     def send_transactions_data(self, serialized_message: bytes):
         """Sends data via Round-Robin to a specific worker."""
-        routing_key = f"worker_{self.current_tx_worker}"
-        
         with self._send_lock:
-            self.transactions_mw.send(serialized_message, routing_key=routing_key)
-        
-        self.current_tx_worker = (self.current_tx_worker % self.num_tx_workers) + 1
+            logging.info("Routing transactions message to workers with Round-Robin strategy")
+            self.transactions_date_mw.send(
+                serialized_message,
+                routing_key=f"worker_{self.transactions_date_current_worker}",
+            )
+            self.transactions_usd_mw.send(
+                serialized_message,
+                routing_key=f"worker_{self.transactions_usd_current_worker}",
+            )
 
-    def send_transactions_eof(self, serialized_message: bytes):
+        self.transactions_date_current_worker = (self.transactions_date_current_worker % self.transactions_date_workers) + 1
+        self.transactions_usd_current_worker = (self.transactions_usd_current_worker % self.transactions_usd_workers) + 1
+
+    def send_transactions_eof(self, eof_message: bytes):
         """Broadcasts EOF to all workers listening to the exchange."""
         routing_key = "eof_broadcast"
         
         with self._send_lock:
-            self.transactions_mw.send(serialized_message, routing_key=routing_key)
+            self.transactions_usd_mw.send(eof_message, routing_key=routing_key)
+            self.transactions_date_mw.send(eof_message, routing_key=routing_key)
 
     def handle_client_request(self, client_socket):
         tcp = TCPSocket(client_socket)
@@ -249,7 +269,7 @@ class Gateway:
                 self.server_socket.close()
             except OSError:
                 pass
-        for mw in (self.transactions_mw, self.accounts_mw, self.result_mw):
+        for mw in (self.transactions_date_mw, self.transactions_usd_mw, self.accounts_mw, self.result_mw):
             if mw:
                 try:
                     mw.close()

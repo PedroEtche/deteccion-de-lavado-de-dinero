@@ -9,4 +9,4 @@ COPY src /app/src
 
 ENV PYTHONUNBUFFERED=1
 
-CMD ["python", "-m", "src.joiner.main"]
+CMD ["python", "-m", "src.merge.main"]

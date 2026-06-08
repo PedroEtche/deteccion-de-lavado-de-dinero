@@ -1,6 +1,6 @@
 import zlib
 from abc import ABC, abstractmethod
-from common.communication.internal import TransactionRow
+from src.common.communication.internal import TransactionRow
 from typing import Any, Dict, List
 
 
@@ -33,37 +33,48 @@ class NoStrategy(MergeStrategy):
         pass
 
 
-class AccountsStrategy(MergeStrategy):
+class AccountsStrategy:
     def __init__(self) -> None:
-        self.data = {}
+        self.accounts: Dict[str, Dict[str, str]] = {}
+        self.joined_transactions: Dict[str, List[dict]] = {}
 
     def __str__(self) -> str:
         return "AccountsStrategy(left=From Bank right=Bank ID)"
 
-    def merge_batch(self, batch: List[Any], client_id: str):
+    def merge_batch(self, batch: dict, client_id: str) -> None:
         msg_type = batch.get("type")
         payload = batch.get("payload", {})
         rows = payload.get("batch", [])
 
-        if msg_type == "raw_transactions":
-            for row in rows:
-                bank_id = row["From Bank"]
-                if bank_id not in self.data:
-                    self.data[bank_id] = {}
-                self.data[bank_id]["From Bank"] = bank_id
-                self.data[bank_id]["Account"] = row["Account"]
-                self.data[bank_id]["Amount Paid"] = row["Amount Paid"]
-
-        else:  # msg_type == "raw_accounts"
+        if msg_type == "raw_accounts":
+            if client_id not in self.accounts:
+                self.accounts[client_id] = {}
+                
             for row in rows:
                 bank_id = row["Bank ID"]
-                if bank_id not in self.data:
-                    self.data[bank_id] = {}
-                self.data[bank_id]["Bank ID"] = bank_id
-                self.data[bank_id]["Bank Name"] = row["Bank Name"]
+                self.accounts[client_id][bank_id] = row["Bank Name"]
+
+            return []
+
+        elif msg_type == "raw_transactions":
+            enriched_batch = []
+                
+            client_accounts = self.accounts.get(client_id, {})
+            
+            for row in rows:
+                bank_id = row["From Bank"]
+                bank_name = client_accounts.get(bank_id, "Unknown")
+                
+                enriched_row = row.copy()
+                enriched_row["Bank Name"] = bank_name
+                enriched_batch.append(enriched_row)
+                
+            return enriched_batch
 
     def clear_client_state(self, client_id: str) -> None:
-        self.data = {}
+        """Clean up memory after the client finishes."""
+        self.accounts.pop(client_id, None)
+        self.joined_transactions.pop(client_id, None)
 
 
 class SelfMergeStrategy(MergeStrategy):

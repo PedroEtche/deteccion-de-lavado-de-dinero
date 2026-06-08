@@ -1,8 +1,8 @@
 mom_host: rabbitmq
 
-input_queue: merge_max_by_account_exchange
+input: merge_max_by_account_exchange
 
-output_queue: gateway_results_exchange
+output: gateway_results_exchange
 
 strategy:
   type: accounts

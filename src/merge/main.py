@@ -97,6 +97,9 @@ class MergeWorker(BaseWorker):
         joined_batch = self.strategy.joiner_batch(batch, client_id)
 
         # revisar para poner un callback aca
+        logging.info("Merge batch: %d rows in for client %s", len(batch), client_id)
+        logging.info("batch: %s", batch)
+
         if joined_batch:
             batch_msg = build_batch_message(
                 message_type="grouped_data",

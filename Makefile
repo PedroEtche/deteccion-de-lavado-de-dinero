@@ -55,3 +55,10 @@ q4_switch:
 	cp ./scenarios/q4/$${option}.yaml docker-compose.yaml
 .PHONY: q4_switch
 
+
+q5_switch:
+	@echo Escenarios de prueba:
+	@echo "1) Un cliente, set de datos de prueba (small_trans), una sola replica de cada elemento"
+	@read -p "Selecciona uno: " option;	\
+	cp ./scenarios/q5/$${option}.yaml docker-compose.yaml
+.PHONY: q5_switch

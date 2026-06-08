@@ -84,6 +84,22 @@ class AmountComparisonStrategy(FilterStrategy):
         ]
 
 
+class PaymentFormatStrategy(FilterStrategy):
+    def __init__(self, conditions: List[str]) -> None:
+        self.conditions = conditions
+
+    def __str__(self) -> str:
+        return f"PaymentFormatStrategy(formats{self.conditions})"
+
+    def filter_batch(self, batch: List[Any]) -> List[Any]:
+        # From Bank,Account,To Bank,Account.1,Amount Paid
+        result = []
+        for row in batch:
+            if row.payment_format in self.conditions:
+                result.append(row)
+        return result
+
+
 # class FieldLessThanStrategy(FilterStrategy):
 #     def __init__(self, output_queue: str, field_name: str, threshold: float) -> None:
 #         self.output_queue = output_queue

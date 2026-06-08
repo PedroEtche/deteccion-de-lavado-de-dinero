@@ -14,7 +14,7 @@ from .strategies import (
     MergeStrategy,
     NoStrategy,
     AccountsStrategy,
-    SelfMergeStrategy,
+    # SelfMergeStrategy,
 )
 
 CONFIG_PATH = "./config.yaml"
@@ -91,21 +91,21 @@ class MergeWorker(BaseWorker):
     def __init__(self, config: MergeConfig):
         super().__init__(config)
 
-    def process_data(self, client_id: str, msg_id: str, payload: dict) -> None:
+    def process_data(self, client_id: str, msg_id: str, msg_type: str, payload: dict) -> None:
         batch = payload.get("batch", [])
-        
-        joined_batch = self.strategy.joiner_batch(batch, client_id)
+    
+        merged_batch = self.strategy.merge_batch(batch, client_id, msg_type)
 
         # revisar para poner un callback aca
         logging.info("Merge batch: %d rows in for client %s", len(batch), client_id)
         logging.info("batch: %s", batch)
 
-        if joined_batch:
+        if merged_batch:
             batch_msg = build_batch_message(
                 message_type="grouped_data",
                 client=client_id,
                 msg_id=str(uuid.uuid4()),
-                batch=joined_batch,
+                batch=merged_batch,
             )
             self.send_downstream(client_id, batch_msg)
 

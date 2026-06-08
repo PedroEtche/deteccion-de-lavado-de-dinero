@@ -102,8 +102,10 @@ class AggregatorWorker(BaseWorker):
     def __init__(self, config: AggregatorConfig) -> None:
         super().__init__(config)
 
-    def process_data(self, client_id: str, msg_id: str, payload: dict) -> None:
+    def process_data(self, client_id: str, msg_id: str, msg_type: str, payload: dict) -> None:
         batch = payload.get("batch", [])
+        logging.info("Processing batch of %d rows for client %s", len(batch), client_id)
+        logging.info("Batch content: %s", batch)
         self.strategy.aggregate_batch(batch, client_id)
 
     def flush_state(self, client_id: str) -> None:

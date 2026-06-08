@@ -42,6 +42,7 @@ class BankMaxAmountStrategy(GroupStrategy):
 
     def group_and_route(self, batch: List[Any]) -> List[Tuple[str, List[Any]]]:
         max_per_bank = {}
+        
         for tx in batch:
             bank = tx.from_bank
             amount = tx.amount_paid or 0.0
@@ -54,13 +55,13 @@ class BankMaxAmountStrategy(GroupStrategy):
                     "amount_paid": amount,
                 }
 
-            for bank, info in max_per_bank.items():
-                route = f"bank_{bank}"
-                if route not in max_per_bank:
-                    max_per_bank[route] = []
-                max_per_bank[route].append(info)
+        routed_data = []
+        
+        for bank, info in max_per_bank.items():
+            route = f"bank_{bank}"
+            routed_data.append((route, [info]))
 
-        return [(route, b) for route, b in max_per_bank.items()]
+        return routed_data
 
 
 class PaymentFormatAverageStrategy(GroupStrategy):

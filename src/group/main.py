@@ -103,7 +103,7 @@ class GroupWorker(BaseWorker):
     def __init__(self, config: GroupConfig):
         super().__init__(config)
 
-    def process_data(self, client_id: str, msg_id: str, payload: dict) -> None:
+    def process_data(self, client_id: str, msg_id: str, msg_type: str, payload: dict) -> None:
         batch = payload.get("batch", [])
         
         routed = self.strategy.group_and_route(batch)

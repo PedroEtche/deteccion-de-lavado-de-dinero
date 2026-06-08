@@ -26,7 +26,7 @@ class NoStrategy(MergeStrategy):
     def __str__(self) -> str:
         return "NoStrategy"
 
-    def merge_batch(self, batch: List[Any], client_id: str):
+    def merge_batch(self, batch: List[Any], client_id: str) -> List[dict]:
         return batch
     
     def clear_client_state(self, client_id: str) -> None:
@@ -41,16 +41,14 @@ class AccountsStrategy:
     def __str__(self) -> str:
         return "AccountsStrategy(left=From Bank right=Bank ID)"
 
-    def merge_batch(self, batch: dict, client_id: str) -> None:
-        msg_type = batch.get("type")
+    def merge_batch(self, batch: dict, client_id: str, msg_type: str) -> List[dict]:
         payload = batch.get("payload", {})
-        rows = payload.get("batch", [])
 
         if msg_type == "raw_accounts":
             if client_id not in self.accounts:
                 self.accounts[client_id] = {}
                 
-            for row in rows:
+            for row in batch:
                 bank_id = row["Bank ID"]
                 self.accounts[client_id][bank_id] = row["Bank Name"]
 
@@ -61,7 +59,7 @@ class AccountsStrategy:
                 
             client_accounts = self.accounts.get(client_id, {})
             
-            for row in rows:
+            for row in batch:
                 bank_id = row["From Bank"]
                 bank_name = client_accounts.get(bank_id, "Unknown")
                 
@@ -77,68 +75,68 @@ class AccountsStrategy:
         self.joined_transactions.pop(client_id, None)
 
 
-class SelfMergeStrategy(MergeStrategy):
-    """
-    Detects A→B→C chains.
-    """
+# class SelfMergeStrategy(MergeStrategy):
+#     """
+#     Detects A→B→C chains.
+#     """
 
-    def __init__(self) -> None:
-        self.inbound_txs: Dict[str, Dict[tuple, List[Dict]]] = {}
-        self.outbound_txs: Dict[str, Dict[tuple, List[Dict]]] = {}
+#     def __init__(self) -> None:
+#         self.inbound_txs: Dict[str, Dict[tuple, List[Dict]]] = {}
+#         self.outbound_txs: Dict[str, Dict[tuple, List[Dict]]] = {}
 
-    def __str__(self) -> str:
-        return "SelfMergeStrategy"
+#     def __str__(self) -> str:
+#         return "SelfMergeStrategy"
 
-    def joiner_batch(self, batch: List[Any], client_id: str):
-        joined_txs = []
+#     def joiner_batch(self, batch: List[Any], client_id: str):
+#         joined_txs = []
 
-        if client_id not in self.inbound_txs:
-            self.inbound_txs[client_id] = {}
-            self.outbound_txs[client_id] = {}
+#         if client_id not in self.inbound_txs:
+#             self.inbound_txs[client_id] = {}
+#             self.outbound_txs[client_id] = {}
 
-        client_inbound = self.inbound_txs[client_id]
-        client_outbound = self.outbound_txs[client_id]
+#         client_inbound = self.inbound_txs[client_id]
+#         client_outbound = self.outbound_txs[client_id]
 
-        for tx in batch:
-            origin_key = (tx["from_bank"], tx["from_account"])
-            dest_key = (tx["to_bank"], tx["to_account"])
+#         for tx in batch:
+#             origin_key = (tx["from_bank"], tx["from_account"])
+#             dest_key = (tx["to_bank"], tx["to_account"])
 
-            if origin_key in client_inbound:
-                for inbound_tx in client_inbound[origin_key]:
-                    merged_record = self._create_merged_record(inbound_tx, tx)
-                    if merged_record is not None:
-                        joined_txs.append(merged_record)
+#             if origin_key in client_inbound:
+#                 for inbound_tx in client_inbound[origin_key]:
+#                     merged_record = self._create_merged_record(inbound_tx, tx)
+#                     if merged_record is not None:
+#                         joined_txs.append(merged_record)
 
-            if origin_key not in client_outbound:
-                client_outbound[origin_key] = []
-            client_outbound[origin_key].append(tx)
+#             if origin_key not in client_outbound:
+#                 client_outbound[origin_key] = []
+#             client_outbound[origin_key].append(tx)
 
-            if dest_key in client_outbound:
-                for outbound_tx in client_outbound[dest_key]:
-                    merged_record = self._create_merged_record(tx, outbound_tx)
-                    if merged_record is not None:
-                        joined_txs.append(merged_record)
+#             if dest_key in client_outbound:
+#                 for outbound_tx in client_outbound[dest_key]:
+#                     merged_record = self._create_merged_record(tx, outbound_tx)
+#                     if merged_record is not None:
+#                         joined_txs.append(merged_record)
 
-            if dest_key not in client_inbound:
-                client_inbound[dest_key] = []
-            client_inbound[dest_key].append(tx)
+#             if dest_key not in client_inbound:
+#                 client_inbound[dest_key] = []
+#             client_inbound[dest_key].append(tx)
 
-        return joined_txs
+#         return joined_txs
 
-    def _create_merged_record(self, tx_1: dict, tx_2: dict):
-        if (
-            tx_1["from_bank"] == tx_2["to_bank"]
-            and tx_1["from_account"] == tx_2["to_account"]
-        ):
-            return None
+#     def _create_merged_record(self, tx_1: dict, tx_2: dict):
+#         if (
+#             tx_1["from_bank"] == tx_2["to_bank"]
+#             and tx_1["from_account"] == tx_2["to_account"]
+#         ):
+#             return None
 
-        return TransactionRow(
-            from_bank=tx_1.get("from_bank"),
-            from_account=tx_1.get("from_account"),
-            to_bank=tx_2.get("to_bank"),
-            to_account=tx_2.get("to_account"),
-        )
+#         return TransactionRow(
+#             from_bank=tx_1.get("from_bank"),
+#             from_account=tx_1.get("from_account"),
+#             to_bank=tx_2.get("to_bank"),
+#             to_account=tx_2.get("to_account"),
+#         )
 
-    def clear_client_state(self, client_id: str) -> None:
-        self.inbound_txs.pop(client_id, None)
-        self.outbound_txs.pop(client_id, None)
+#     def clear_client_state(self, client_id: str) -> None:
+#         self.inbound_txs.pop(client_id, None)
+#         self.outbound_txs.pop(client_id, None)

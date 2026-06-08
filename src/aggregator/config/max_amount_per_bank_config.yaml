@@ -5,4 +5,4 @@ input: grouped_max_by_bank_exchange
 output: merge_max_by_account_exchange
 
 strategy:
-  type: BankMaxAmount
+  type: bank_max_amount

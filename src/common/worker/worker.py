@@ -57,7 +57,7 @@ class BaseWorker(ABC):
                 self.eof_coordinator.handle_eof(client_id)
             else:
                 logging.info("Received message of type %s for client %s", msg_type, client_id)
-                self.process_data(client_id, decoded["msg_id"], decoded["payload"])
+                self.process_data(client_id, decoded["msg_id"], msg_type, decoded["payload"])
             ack()
         except Exception:
             logging.exception("Error processing message")
@@ -105,7 +105,7 @@ class BaseWorker(ABC):
         return f"worker_{target_worker}"
 
     @abstractmethod
-    def process_data(self, client_id: str, msg_id: str, payload: dict) -> None:
+    def process_data(self, client_id: str, msg_id: str, msg_type: str, payload: dict) -> None:
         """Process incoming data."""
         pass
 

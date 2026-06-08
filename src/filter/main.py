@@ -11,7 +11,7 @@ from src.common.communication.internal import build_raw_transactions_message
 
 from .strategies import (
     AmountComparisonStrategy,
-    PaymentFormatStrategy,
+    CurrencyConversionStrategy,
     CurrencyStrategy,
     FilterStrategy,
     NoStrategy,
@@ -54,7 +54,7 @@ def _build_strategy(strategy_data: List[Dict[str, Any]]) -> FilterStrategy:
         "none": lambda _: NoStrategy(),
         "currency": lambda p: CurrencyStrategy(p["value"]),
         "amount": lambda p: AmountComparisonStrategy(p["condition"], p["threshold"]),
-        "payment_format": lambda p: PaymentFormatStrategy(p["conditions"]),
+        "currency_conversion": lambda p: CurrencyConversionStrategy(p["conditions"]),
     }
 
     builder = _BUILDERS.get(strategy_type)

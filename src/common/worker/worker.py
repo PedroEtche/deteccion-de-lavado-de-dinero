@@ -41,12 +41,7 @@ class BaseWorker(ABC):
             routing_keys=routing_keys
         )
 
-        if getattr(self.config, "output_exchange", None):
-            self.output_exchange = MessageMiddlewareExchangeRabbitMQ(self.config.mom_host, self.config.output_exchange)
-        else:
-            self.output_exchange = None
-
-        self.setup_outputs()
+        self.output_exchange = MessageMiddlewareExchangeRabbitMQ(self.config.mom_host, self.config.output_exchange)
 
         self.input_exchange.start_consuming(self._on_message)
 
@@ -96,17 +91,12 @@ class BaseWorker(ABC):
         eof_msg = serialize(build_eof_message(client=client_id, msg_id=str(uuid.uuid4())))
         self.output_exchange.send(eof_msg, routing_key="eof_broadcast")
 
-    def setup_outputs(self) -> None:
-        """Hook for subclasses that manage their own output exchanges (e.g. multidate router)."""
-        pass
-
     def stop(self) -> None:
         self._running = False
 
         self.input_exchange.stop_consuming()
         self.input_exchange.close()
-        if self.output_exchange is not None:
-            self.output_exchange.close()
+        self.output_exchange.close()
     
     def get_sharded_route(self, shard_key: str) -> str:
         """Helper for subclasses that need to pre-batch data by physical route."""

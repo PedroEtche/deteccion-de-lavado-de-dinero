@@ -41,12 +41,14 @@ class BaseWorker(ABC):
             routing_keys=routing_keys
         )
 
-        self.output_exchange = MessageMiddlewareExchangeRabbitMQ(self.config.mom_host, self.config.output_exchange)
+        self.output_exchange = MessageMiddlewareExchangeRabbitMQ(
+            self.config.mom_host, 
+            self.config.output_exchange
+            )
 
         self.input_exchange.start_consuming(self._on_message)
 
     def _on_message(self, message: bytes, ack, nack) -> None:
-        """The core network loop. Infrastructure only."""
         try:
             decoded = deserialize(message)
             msg_type = decoded.get("type")

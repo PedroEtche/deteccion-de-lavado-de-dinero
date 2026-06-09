@@ -106,12 +106,27 @@ services:
       rabbitmq:
         condition: service_healthy
     volumes:
-    - ./src/merge/config/merge_account_info_config.yaml:/app/config.yaml:ro
+    - ./src/merge/config/accounts_config.yaml:/app/config.yaml:ro
+    environment:
+    - EOF_EXPECTED=2
+    - WORKER_ID=1
+    - NUM_DOWNSTREAM_WORKERS=1
+
+  join_query_result_0:
+    build:
+      context: .
+      dockerfile: src/join/Dockerfile
+    container_name: join_query_result_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/join/config/q2_result.yaml:/app/config.yaml:ro
     environment:
     - EOF_EXPECTED=1
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=1
-    - WORKER_NAME=merge_account_info
+    - QUERY_RESULT_NUMBER=2
 
   client_0:
     build:

@@ -2,7 +2,7 @@ mom_host: rabbitmq
 
 input: merge_max_by_account_exchange
 
-output: gateway_results_exchange
+output: merged_accounts_exchange
 
 strategy:
   type: accounts

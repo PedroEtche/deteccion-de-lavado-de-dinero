@@ -104,17 +104,12 @@ class AggregatorWorker(BaseWorker):
 
     def process_data(self, client_id: str, msg_id: str, msg_type: str, payload: dict) -> None:
         batch = payload.get("batch", [])
-        logging.info("Processing batch of %d rows for client %s", len(batch), client_id)
-        logging.info("Batch content: %s", batch)
         self.strategy.aggregate_batch(batch, client_id)
 
     def flush_state(self, client_id: str) -> None:
         logging.info("All EOFs received. Flushing aggregated result for client %s", client_id)
         
         final_batch = self.strategy.get_result_for_client(client_id)
-        
-        logging.info("Final aggregated batch for client %s: %s", client_id, final_batch)
-
         if final_batch:
             batch_msg = build_batch_message(
                 message_type="batch",

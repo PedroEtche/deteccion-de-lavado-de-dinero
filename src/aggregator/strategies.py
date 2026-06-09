@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Set
-import logging
 
 class AggregatorStrategy(ABC):
     """Abstract strategy for aggregating batches of messages."""
@@ -67,8 +66,6 @@ class BankMaxAmountStrategy(AggregatorStrategy):
                     "from_account": tx["from_account"],
                     "amount_paid": amount,
                 }
-
-        logging.info("Updated max amounts for client %s: %s", client, current_max_per_bank)
 
         return []
 

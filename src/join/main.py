@@ -91,11 +91,12 @@ class JoinWorker(BaseWorker):
     def __init__(self, config: JoinConfig):
         super().__init__(config)
         self.strategy = config.strategy
+
         self.strategy.register_join_callback(self.send_downstream)
 
     def process_data(self, client_id: str, msg_id: str, msg_type: str, payload: dict) -> None:
         batch = payload.get("batch", [])
-        logging.info("Join batch: %d rows in for client %s", len(batch), client_id)
+
         self.strategy.join_batch(batch, client_id)
 
     def flush_state(self, client_id: str) -> None:

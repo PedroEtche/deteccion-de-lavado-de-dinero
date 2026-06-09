@@ -30,7 +30,7 @@ class GatewayConfig:
     mom_host: str
     transactions_usd_exchange: str
     transactions_date_exchange: str
-    accounts_queue: str
+    accounts_exchange: str
     result_exchange: str
     log_level: str
 
@@ -58,9 +58,9 @@ def init_config():
             "TRANSACTIONS_DATE_EXCHANGE",
             file_config.get("TRANSACTIONS_DATE_EXCHANGE", "transactions_date_exchange"),
         ),
-        accounts_queue=os.getenv(
-            "ACCOUNTS_QUEUE",
-            file_config.get("accounts_queue", "accounts_queue"),
+        accounts_exchange=os.getenv(
+            "ACCOUNTS_EXCHANGE",
+            file_config.get("accounts_exchange", "accounts_exchange"),
         ),
         result_exchange=os.getenv(
             "RESULT_EXCHANGE",
@@ -72,12 +72,12 @@ def init_config():
 
 def log_config(config: GatewayConfig):
     logging.info(
-        "Gateway startup with: host=%s | port=%s | mom_host=%s | transactions_exchange=%s | accounts_queue=%s | result_exchange=%s",
+        "Gateway startup with: host=%s | port=%s | mom_host=%s | transactions_exchange=%s | accounts_exchange=%s | result_exchange=%s",
         config.host,
         config.port,
         config.mom_host,
         config.transactions_usd_exchange,
-        config.accounts_queue,
+        config.accounts_exchange,
         config.result_exchange,
     )
 
@@ -90,7 +90,7 @@ class Gateway:
         
         self.transactions_usd_exchange_name = gateway_config.transactions_usd_exchange
         self.transactions_date_exchange_name = gateway_config.transactions_date_exchange
-        self.accounts_queue_name = gateway_config.accounts_queue
+        self.accounts_exchange_name = gateway_config.accounts_exchange
         self.result_exchange_name = gateway_config.result_exchange
 
         # PLACEHOLDER: si esta cosa horrible queda hay que abstraerlo y alimentarlo de envs/config
@@ -102,6 +102,8 @@ class Gateway:
         self.transactions_date_current_worker = 1
         self.transactions_date_mw = None
 
+        self.accounts_workers = 1
+        self.accounts_current_worker = 1
         self.accounts_mw = None
         self.result_mw = None
 
@@ -121,8 +123,8 @@ class Gateway:
         self.transactions_date_mw = MessageMiddlewareExchangeRabbitMQ(
             self.mom_host, self.transactions_date_exchange_name, exchange_type="direct"
         )
-        self.accounts_mw = MessageMiddlewareQueueRabbitMQ(
-            self.mom_host, self.accounts_queue_name
+        self.accounts_mw = MessageMiddlewareExchangeRabbitMQ(
+            self.mom_host, self.accounts_exchange_name, exchange_type="direct"
         )
         self.result_mw = MessageMiddlewareExchangeRabbitMQ(
             host=self.mom_host, 
@@ -150,7 +152,6 @@ class Gateway:
             )
             ack()
             return
-
         try:
             entry["tcp"].send_bytes(message)
         except Exception:
@@ -164,6 +165,16 @@ class Gateway:
         if decoded.get("type") == "eof":
             logging.info("Received EOF on result queue for client %s", client_id)
             entry["done"].set()
+
+    def send_accounts_data(self, serialized_message: bytes):
+        """Sends data to accounts workers using Round-Robin strategy."""
+        with self._send_lock:
+            logging.info("Routing accounts message to workers with Round-Robin strategy")
+            self.accounts_mw.send(
+                serialized_message,
+                routing_key=f"worker_{self.accounts_current_worker}",
+            )
+        self.accounts_current_worker = (self.accounts_current_worker % self.accounts_workers) + 1
 
     def send_transactions_data(self, serialized_message: bytes):
         """Sends data via Round-Robin to a specific worker."""
@@ -181,13 +192,14 @@ class Gateway:
         self.transactions_date_current_worker = (self.transactions_date_current_worker % self.transactions_date_workers) + 1
         self.transactions_usd_current_worker = (self.transactions_usd_current_worker % self.transactions_usd_workers) + 1
 
-    def send_transactions_eof(self, eof_message: bytes):
+    def send_eof(self, eof_message: bytes):
         """Broadcasts EOF to all workers listening to the exchange."""
         routing_key = "eof_broadcast"
         
         with self._send_lock:
             self.transactions_usd_mw.send(eof_message, routing_key=routing_key)
             self.transactions_date_mw.send(eof_message, routing_key=routing_key)
+            self.accounts_mw.send(eof_message, routing_key=routing_key)
 
     def handle_client_request(self, client_socket):
         tcp = TCPSocket(client_socket)
@@ -212,6 +224,7 @@ class Gateway:
 
                 message = deserialize(raw_bytes)
                 msg_type = message.get("type")
+                logging.info("Received message of type %s from client %s", msg_type, client_id)
 
                 if msg_type == "raw_transactions":
                     txs = message.get("payload", {}).get("batch", [])
@@ -227,6 +240,7 @@ class Gateway:
 
                 elif msg_type == "raw_accounts":
                     accounts = message.get("payload", {}).get("batch", [])
+                    logging.info("sending accounts batch of %d rows for client %s", len(accounts), client_id)
                     serialized_message = serialize(
                         build_raw_accounts_message(
                             client=client_id,
@@ -234,8 +248,7 @@ class Gateway:
                             batch=accounts,
                         )
                     )
-                    with self._send_lock:
-                        self.accounts_mw.send(serialized_message)
+                    self.send_accounts_data(serialized_message)
 
             logging.info(
                 "Inbound EOF received for client %s; forwarding EOF downstream",
@@ -245,9 +258,7 @@ class Gateway:
                 build_eof_message(client=client_id, msg_id=str(uuid.uuid4()))
             )
             
-            self.send_transactions_eof(eof_message)
-            with self._send_lock:
-                self.accounts_mw.send(eof_message)
+            self.send_eof(eof_message)
 
             done.wait()
             logging.info(

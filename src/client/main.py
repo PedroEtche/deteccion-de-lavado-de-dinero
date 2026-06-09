@@ -139,6 +139,7 @@ class Client:
             elif query_type == "q2_result":
                 output_file = output_path + "q2.csv"
                 batch = decoded["payload"]["batch"]
+                logging.info("Persisting batch of %d rows for q2 result", len(batch)) # llega bien, hay que revisar func persist rows
                 persist_rows(output_file, batch)
 
             elif query_type == "q3_result":

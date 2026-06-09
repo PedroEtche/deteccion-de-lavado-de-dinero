@@ -1,8 +1,7 @@
-import zlib
 from abc import ABC, abstractmethod
 from src.common.communication.internal import TransactionRow
 from typing import Any, Dict, List
-
+import logging
 
 class MergeStrategy(ABC):
     """Abstract strategy for filtering batches of messages.
@@ -42,31 +41,30 @@ class AccountsStrategy:
         return "AccountsStrategy(left=From Bank right=Bank ID)"
 
     def merge_batch(self, batch: dict, client_id: str, msg_type: str) -> List[dict]:
-        payload = batch.get("payload", {})
-
         if msg_type == "raw_accounts":
+            logging.info("Processing raw_accounts batch for client")
             if client_id not in self.accounts:
                 self.accounts[client_id] = {}
                 
             for row in batch:
-                bank_id = row["Bank ID"]
-                self.accounts[client_id][bank_id] = row["Bank Name"]
+                bank_id = row.bank_id
+                self.accounts[client_id][bank_id] = row.bank_name
 
             return []
 
-        elif msg_type == "raw_transactions":
+        else:
             enriched_batch = []
                 
             client_accounts = self.accounts.get(client_id, {})
             
             for row in batch:
-                bank_id = row["From Bank"]
+                bank_id = row["from_bank"]
                 bank_name = client_accounts.get(bank_id, "Unknown")
                 
                 enriched_row = row.copy()
-                enriched_row["Bank Name"] = bank_name
+                enriched_row["bank_name"] = bank_name
                 enriched_batch.append(enriched_row)
-                
+
             return enriched_batch
 
     def clear_client_state(self, client_id: str) -> None:

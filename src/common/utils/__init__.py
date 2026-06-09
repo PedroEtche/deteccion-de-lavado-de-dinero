@@ -1,1 +1,1 @@
-from .worker import BaseWorker
+from .config import load_yaml_config

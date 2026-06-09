@@ -1,0 +1,9 @@
+mom_host: rabbitmq
+
+input: q1_input_exchange
+output: q1_filter_queue
+
+strategy:
+  - type: amount
+  - condition: <
+  - threshold: 50

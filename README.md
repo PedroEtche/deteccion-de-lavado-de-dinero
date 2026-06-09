@@ -1,3 +1,12 @@
+# Preguntas y bugs pendientes
+
+## Client (`src/client/main.py`)
+- `recv_results` solo incrementa `query_result_counter` cuando llega un EOF de **Q1**. Las ramas Q2/Q3/Q4/Q5 no lo incrementan 
+
+## Gateway (`src/gateway/main.py`)
+- **Bug** `main` registra `SIGTERM`/`SIGINT` llamando a `gateway.stop()`, pero `Gateway` no define `stop()`. 
+- Por que los `msg_id` se generan con `uuid.uuid4()` random en vez de un counter incremental por cliente? podria ser más barato y útil para dedup/ordering downstream. (no estoy seguro si lo necesitamos igual)
+
 # Minuta de desciciones de diseño
 Tener presente que puede ser necesaria la clase clase `StatefullWorker`
 Delegar a los strategies el estado

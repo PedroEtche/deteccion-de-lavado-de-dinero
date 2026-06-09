@@ -16,6 +16,13 @@ import csv
 import glob
 import sys
 
+# ANSI color codes (suprimidos si stdout/stderr no es una TTY,
+# para que los logs en archivo o pipe no se llenen de ruido).
+_USE_COLOR = sys.stdout.isatty()
+GREEN = "\033[1;32m" if _USE_COLOR else ""
+RED = "\033[1;31m" if _USE_COLOR else ""
+RESET = "\033[0m" if _USE_COLOR else ""
+
 
 def read_csv(path):
     with open(path, newline="", encoding="utf-8") as fh:
@@ -98,16 +105,16 @@ def main():
     client_files = sorted(glob.glob(pattern))
 
     if not client_files:
-        print(f"FAIL  no client result files found at {pattern}", file=sys.stderr)
+        print(f"\n{RED}FAIL{RESET}  no client result files found at {pattern}\n", file=sys.stderr)
         sys.exit(1)
 
     overall_ok = True
     for client_csv in client_files:
         ok, reason = compare_csvs(client_csv, expected_path)
         if ok:
-            print(f"PASS  {client_csv}")
+            print(f"\n{GREEN}PASS{RESET}  {client_csv}\n")
         else:
-            print(f"FAIL  {client_csv}\n      {reason}")
+            print(f"\n{RED}FAIL{RESET}  {client_csv}\n      {reason}\n")
             overall_ok = False
 
     sys.exit(0 if overall_ok else 1)

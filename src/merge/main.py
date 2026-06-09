@@ -45,8 +45,8 @@ def _parse_strategy_config(raw_strategy: Any) -> MergeStrategy:
     if strategy_type == "accounts":
         return AccountsStrategy()
 
-    if strategy_type == "self_merge":
-        return SelfMergeStrategy()
+    # if strategy_type == "self_merge":
+    #     return SelfMergeStrategy()
 
     return NoStrategy()
 

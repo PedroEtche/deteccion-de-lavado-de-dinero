@@ -13,6 +13,7 @@ from src.common.communication.internal import (
 from src.common.worker import BaseWorker
 
 from .strategies import (
+    CountStrategy,
     JoinStrategy,
     NoStrategy,
     QueryResultStrategy,
@@ -43,7 +44,9 @@ def _load_file_config() -> Dict[str, Any]:
         return {}
 
 
-def _build_strategy(strategy_data: List[Dict[str, Any]], query_result_number: str = None) -> JoinStrategy:
+def _build_strategy(
+    strategy_data: List[Dict[str, Any]], query_result_number: str = None
+) -> JoinStrategy:
     params: Dict[str, Any] = {}
     for item in strategy_data:
         params.update(item)
@@ -53,12 +56,14 @@ def _build_strategy(strategy_data: List[Dict[str, Any]], query_result_number: st
     _BUILDERS = {
         "none": lambda _: NoStrategy(),
         "query_result": lambda _: QueryResultStrategy(query_result_number),
+        "count": lambda _: CountStrategy(),
     }
 
     builder = _BUILDERS.get(strategy_type)
     if builder is None:
         raise ValueError(f"Unknown strategy type: {strategy_type!r}")
     return builder(params)
+
 
 def init_config() -> JoinConfig:
     data = _load_file_config()
@@ -68,7 +73,9 @@ def init_config() -> JoinConfig:
         input_exchange=data.get("input", ""),
         output_exchange=data.get("output", ""),
         log_level=os.environ.get("LOG_LEVEL", "INFO"),
-        strategy=_build_strategy(data.get("strategy", []), query_result_number=query_result_number),
+        strategy=_build_strategy(
+            data.get("strategy", []), query_result_number=query_result_number
+        ),
         expected_eofs=int(os.getenv("EOF_EXPECTED", "1")),
         worker_id=int(os.getenv("WORKER_ID", "1")),
         num_downstream_workers=int(os.getenv("NUM_DOWNSTREAM_WORKERS", "1")),
@@ -94,7 +101,9 @@ class JoinWorker(BaseWorker):
 
         self.strategy.register_join_callback(self.send_downstream)
 
-    def process_data(self, client_id: str, msg_id: str, msg_type: str, payload: dict) -> None:
+    def process_data(
+        self, client_id: str, msg_id: str, msg_type: str, payload: dict
+    ) -> None:
         batch = payload.get("batch", [])
 
         self.strategy.join_batch(batch, client_id)

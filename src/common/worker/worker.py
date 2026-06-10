@@ -75,10 +75,15 @@ class BaseWorker(ABC):
         if self.config.routing_strategy == "round_robin":
             routing_key = f"worker_{self.current_downstream_worker}"
             self.current_downstream_worker = (self.current_downstream_worker % self.config.num_downstream_workers) + 1
-            
+
         elif self.config.routing_strategy == "sharded":
             routing_key = shard_routing_key
-            
+
+        elif self.config.routing_strategy == "broadcast":
+            # Fanout: todos los workers downstream bindean "data_broadcast" y
+            # reciben una copia del mensaje (mismo mecanismo que "eof_broadcast").
+            routing_key = "data_broadcast"
+
         else:
             raise ValueError(f"Unknown routing strategy: {self.config.routing_strategy}")
 

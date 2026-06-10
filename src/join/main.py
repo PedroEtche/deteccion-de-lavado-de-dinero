@@ -13,6 +13,7 @@ from src.common.communication.internal import (
 from src.common.worker import BaseWorker
 
 from .strategies import (
+    AveragesUnionStrategy,
     CountStrategy,
     JoinStrategy,
     NoStrategy,
@@ -57,6 +58,7 @@ def _build_strategy(
         "none": lambda _: NoStrategy(),
         "query_result": lambda _: QueryResultStrategy(query_result_number),
         "count": lambda _: CountStrategy(),
+        "averages_union": lambda _: AveragesUnionStrategy(),
     }
 
     builder = _BUILDERS.get(strategy_type)

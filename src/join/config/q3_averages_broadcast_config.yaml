@@ -1,0 +1,10 @@
+mom_host: rabbitmq
+
+# Recibe los promedios parciales de los N shards del aggregator y emite la
+# union por fanout (routing_strategy=broadcast via env) hacia todos los
+# historical_filter workers.
+input: q3_averages_exchange
+output: q3_histavg_input_exchange
+
+strategy:
+  - type: averages_union

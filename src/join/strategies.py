@@ -98,6 +98,37 @@ class QueryResultStrategy(JoinStrategy):
         )
 
 
+class AveragesUnionStrategy(JoinStrategy):
+    """Stateful: junta los promedios parciales que llegan de los N shards del
+    aggregator (cada shard trae los formatos que le tocaron) y en el flush emite
+    la union de todos. El Join se configura con routing_strategy=broadcast para
+    que esa union llegue por fanout a todos los historical_filter workers.
+
+    Los promedios entran como batches "batch" con items
+    {payment_format, average_amount}; se emiten igual (msg_type "batch")."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.averages_by_client: Dict[str, List[Any]] = {}
+
+    def join_batch(self, batch: List[Any], client: str) -> None:
+        if batch:
+            self.averages_by_client.setdefault(client, []).extend(batch)
+
+    def flush(self, client: str) -> Optional[dict]:
+        averages = self.averages_by_client.pop(client, [])
+        if not averages:
+            return None
+        return build_batch_message(
+            "batch", batch=averages, client=client, msg_id=str(uuid.uuid4())
+        )
+
+    def build_eof_message(self, client, msg_id=None):
+        # El EOF lo broadcastea BaseWorker por "eof_broadcast"; no hace falta
+        # payload especial aca.
+        return None
+
+
 class CountStrategy(JoinStrategy):
     """Stateful: accumulates how many rows arrive per client and emits the total
     on flush. Used to count how many rows passed an upstream filter."""

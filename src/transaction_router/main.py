@@ -113,6 +113,11 @@ class TransactionRouter:
             if not sub_batch:
                 continue
 
+            if route.routing_strategy != "round_robin":
+                raise ValueError(
+                    f"Unsupported routing strategy: {route.routing_strategy}"
+                )
+
             out_msg = serialize(
                 build_raw_transactions_message(
                     client=client_id,
@@ -120,14 +125,7 @@ class TransactionRouter:
                     batch=sub_batch,
                 )
             )
-
-            if route.routing_strategy == "round_robin":
-                routing_key = route.next_routing_key()
-            else:
-                raise ValueError(
-                    f"Unsupported routing strategy: {route.routing_strategy}"
-                )
-
+            routing_key = route.next_routing_key()
             route.exchange.send(out_msg, routing_key=routing_key)
             logging.info(
                 "Route %s: sent %d txs to %s (key=%s)",

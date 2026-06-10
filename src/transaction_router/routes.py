@@ -25,6 +25,7 @@ class Route:
         return True
 
     def next_routing_key(self) -> str:
+        """Round-robin: rota worker_1 .. worker_N en cada llamada."""
         key = f"worker_{self.next_worker}"
         self.next_worker = (self.next_worker % self.num_downstream_workers) + 1
         return key

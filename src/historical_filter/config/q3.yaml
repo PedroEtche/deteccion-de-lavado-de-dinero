@@ -1,0 +1,10 @@
+mom_host: rabbitmq
+
+# Ambos upstreams (aggregator de promedios y filtro USD de candidatas)
+# publican a este mismo exchange con routing key worker_N.
+input: q3_histavg_input_exchange
+
+output: q3_result_exchange
+
+# "monto menor a 1 centesimo del promedio" => promedio / 100.
+threshold_divisor: 100

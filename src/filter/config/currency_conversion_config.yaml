@@ -1,7 +1,7 @@
 mom_host: rabbitmq
 
-input: transactions_exchange
-output: transactions_usd_exchange
+input: q5_currency_input_exchange
+output: conversion_filtered
 
 strategy:
   - type: currency_conversion

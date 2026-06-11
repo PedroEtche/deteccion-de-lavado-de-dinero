@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, List, Optional
 from src.common.communication.internal import (
     build_batch_message,
     build_results_for_query,
+    Q5ResultRow,
 )
 
 
@@ -144,7 +145,7 @@ class CountStrategy(JoinStrategy):
     def flush(self, client: str) -> Optional[dict]:
         count = self.count_by_client.pop(client, 0)
         return build_results_for_query(
-            query_number=self.query_number, batch=[count], eof=True, client=client
+            query_number=self.query_number, batch=[Q5ResultRow(count=count)], eof=True, client=client
         )
 
     def build_eof_message(self, client, msg_id=None):

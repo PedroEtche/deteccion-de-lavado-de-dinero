@@ -1,6 +1,6 @@
 mom_host: rabbitmq
 
-input: q1_filter_queue
+input: conversion_filtered
 output: gateway_results_exchange
 
 strategy:

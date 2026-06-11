@@ -27,51 +27,65 @@ services:
     environment:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
-    - TRANSACTIONS_EXCHANGE=transactions_exchange
+    - TRANSACTIONS_USD_EXCHANGE=transactions_exchange
+    - TRANSACTIONS_DATE_EXCHANGE=transactions_unused_exchange
     - ACCOUNTS_QUEUE=accounts_queue
     - RESULT_EXCHANGE=gateway_results_exchange
     - SERVER_PORT=5678
 
-  filter_usd_0:
+  transaction_router_0:
     build:
       context: .
-      dockerfile: src/filter/Dockerfile
-    container_name: filter_usd_0
+      dockerfile: src/transaction_router/Dockerfile
+    container_name: transaction_router_0
     depends_on:
       rabbitmq:
         condition: service_healthy
     volumes:
-    - ./src/filter/config/usd_config.yaml:/app/config.yaml:ro
+    - ./src/transaction_router/config/q1_only.yaml:/app/config.yaml:ro
+    environment:
+    - EOF_EXPECTED=1
+    - WORKER_ID=1
+
+  transaction_router_q5:
+    build:
+      context: .
+      dockerfile: src/transaction_router/Dockerfile
+    container_name: transaction_router_q5
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/transaction_router/config/q5_dates.yaml:/app/config.yaml:ro
+    environment:
+    - EOF_EXPECTED=1
+    - WORKER_ID=1
+
+  q5_currency_convertor_0:
+    build:
+      context: .
+      dockerfile: src/filter/Dockerfile
+    container_name: q5_currency_convertor_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/filter/config/currency_conversion_config.yaml:/app/config.yaml:ro
     environment:
     - EOF_EXPECTED=1
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=1
 
-  q1_filter_less_than_fifty_0:
-    build:
-      context: .
-      dockerfile: src/filter/Dockerfile
-    container_name: q1_filter_less_than_fifty_0
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    volumes:
-    - ./src/filter/config/q1_config.yaml:/app/config.yaml:ro
-    environment:
-    - EOF_EXPECTED=1
-    - WORKER_ID=1
-    - NUM_DOWNSTREAM_WORKERS=1
-
-  q1_join_0:
+  q5_join_0:
     build:
       context: .
       dockerfile: src/join/Dockerfile
-    container_name: q1_join_0
+    container_name: q5_join_0
     depends_on:
       rabbitmq:
         condition: service_healthy
     volumes:
-    - ./src/join/config/q1_config.yaml:/app/config.yaml:ro
+    - ./src/join/config/q5_join_count_config.yaml:/app/config.yaml:ro
     environment:
     - EOF_EXPECTED=1
     - WORKER_ID=1

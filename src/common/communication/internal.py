@@ -92,7 +92,7 @@ register_message_type(
     "q5_result",
     payload_required=True,
     required_fields=["payload"],
-    payload_validator=_validate_payload,
+    payload_validator=_validate_batch_payload,
 )
 
 
@@ -107,6 +107,11 @@ class Payload:
             raise MessageDecodeError(f"{cls.__name__}.from_dict expects a dict")
 
         return cls(**data)
+
+
+@dataclass
+class Q5ResultRow(Payload):
+    count: int = 0
 
 
 @dataclass
@@ -271,6 +276,7 @@ def build_results_for_query(query_number: int, batch: list, eof: bool, client: s
         raise MessageValidationError("message must be a list")
 
     msg_type = f"q{query_number}_result"
+
     msg = build_batch_message(msg_type, batch=batch, client=client)
     msg["eof"] = eof
     return msg
@@ -312,6 +318,10 @@ def deserialize(message):
     elif msg_type == "raw_accounts":
         decoded["payload"]["batch"] = [
             AccountRow.from_dict(row) if isinstance(row, dict) else row for row in batch
+        ]
+    elif msg_type == "q5_result":
+        decoded["payload"]["batch"] = [
+            Q5ResultRow.from_dict(row) if isinstance(row, dict) else row for row in batch
         ]
 
     return decoded

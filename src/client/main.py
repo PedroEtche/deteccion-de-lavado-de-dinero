@@ -185,7 +185,8 @@ class Client:
             elif query_type == "q5_result":
                 output_file = output_path + "q5.txt"
                 with open(output_file, "a") as txtfile:
-                    txtfile.write(decoded["payload"])
+                    for row in decoded["payload"]["batch"]:
+                        txtfile.write(str(row.count))
 
             else:
                 logging.info("Unexpected Message: %s", decoded)

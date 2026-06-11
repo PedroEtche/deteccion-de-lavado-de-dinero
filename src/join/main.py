@@ -108,6 +108,7 @@ class JoinWorker(BaseWorker):
     ) -> None:
         batch = payload.get("batch", [])
 
+        logging.info("Batch arrived of len: %d", len(batch))
         self.strategy.join_batch(batch, client_id)
 
     def flush_state(self, client_id: str) -> None:

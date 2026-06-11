@@ -1,6 +1,0 @@
-mom_host: rabbitmq
-
-strategy:
-  type: amount_less_than
-  params:
-    threshold: 1.0

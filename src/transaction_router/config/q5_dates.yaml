@@ -1,0 +1,13 @@
+mom_host: rabbitmq
+
+input: transactions_exchange
+
+routes:
+  - name: q5
+    output: q5_currency_input_exchange
+    num_downstream_workers: 1
+    routing_strategy: round_robin
+    filters:
+      - type: date_range
+        from: 2022-09-01
+        to: 2022-09-05

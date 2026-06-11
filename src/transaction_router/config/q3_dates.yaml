@@ -1,0 +1,30 @@
+# Router por fecha de Q3 ("Filtro Fecha" del diagrama). Recibe las USD ya
+# filtradas y las rutea a dos pipelines segun el rango de fecha:
+#   - [9/1, 9/5]  -> rama del promedio historico (group + aggregator + join).
+#   - [9/6, 9/15] -> candidatas, directo al historical_filter.
+#
+# TODO: Si se agregan replicas del router, actualizar a mano EOF_EXPECTED en
+# los downstream (group y historical_filter) para que coincida.
+
+mom_host: rabbitmq
+
+input: q3_usd_filtered_exchange
+
+routes:
+  - name: q3_historic
+    output: q3_group_input_exchange
+    num_downstream_workers: 1
+    routing_strategy: round_robin
+    filters:
+      - type: date_range
+        from: 2022-09-01
+        to: 2022-09-05
+
+  - name: q3_candidates
+    output: q3_histavg_input_exchange
+    num_downstream_workers: 1
+    routing_strategy: round_robin
+    filters:
+      - type: date_range
+        from: 2022-09-06
+        to: 2022-09-15

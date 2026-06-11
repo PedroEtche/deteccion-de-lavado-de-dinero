@@ -6,6 +6,8 @@
 ## Gateway (`src/gateway/main.py`)
 - **Bug** `main` registra `SIGTERM`/`SIGINT` llamando a `gateway.stop()`, pero `Gateway` no define `stop()`. 
 - Por que los `msg_id` se generan con `uuid.uuid4()` random en vez de un counter incremental por cliente? podria ser más barato y útil para dedup/ordering downstream. (no estoy seguro si lo necesitamos igual)
+- **Revisar el doble publish a `transactions_date_exchange`**: `send_transactions_data` (`src/gateway/main.py:171-179`) publica cada batch a `transactions_usd_exchange` Y a `transactions_date_exchange`. Por qué? no coincide con el diagrama. Por ahora los scenarios apuntan `TRANSACTIONS_DATE_EXCHANGE` a un exchange muerto (`transactions_unused_exchange`) para dropear los duplicados. Además el conteo de workers USD está hardcodeado en 3 (`transactions_usd_workers`).
+- Puede que falte proyectar columnas entre los stages? revisar porque no estoy 100% (al menos q3)
 
 # Minuta de desciciones de diseño
 Tener presente que puede ser necesaria la clase clase `StatefullWorker`

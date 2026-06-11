@@ -1,0 +1,9 @@
+mom_host: rabbitmq
+
+# Aggregator de Q3 (shard por payment_format): suma los parciales de su(s)
+# formato(s) y al flush emite el promedio final. Manda al join broadcast.
+input: q3_group_to_agg_exchange
+output: q3_averages_exchange
+
+strategy:
+  type: payment_format_average

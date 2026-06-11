@@ -304,7 +304,7 @@ def deserialize(message):
 
     # Convert batch dictionaries back to objects based on the message type.
     msg_type = decoded.get("type")
-    if msg_type in ("raw_transactions", "q1_result"):
+    if msg_type in ("raw_transactions", "q1_result", "q3_result"):
         decoded["payload"]["batch"] = [
             TransactionRow.from_dict(row) if isinstance(row, dict) else row
             for row in batch

@@ -1,0 +1,10 @@
+mom_host: rabbitmq
+
+# Group de Q3: agrupa por payment_format y emite parciales {total_amount,
+# tx_quantity}. Se levanta con ROUTING_STRATEGY=sharded para que cada formato
+# caiga siempre en el mismo aggregator shard.
+input: q3_group_input_exchange
+output: q3_group_to_agg_exchange
+
+strategy:
+  type: payment_format_average

@@ -1,0 +1,9 @@
+mom_host: rabbitmq
+
+# Join final de Q3: passthrough que envuelve las transacciones filtradas como
+# q3_result y las manda al gateway. Se levanta con QUERY_RESULT_NUMBER=3.
+input: q3_result_exchange
+output: gateway_results_exchange
+
+strategy:
+  - type: query_result

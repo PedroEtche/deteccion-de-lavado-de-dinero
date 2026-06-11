@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List
 
 from src.common.communication.internal import (
+    TransactionRow,
     build_eof_message,
     build_raw_transactions_message,
     deserialize,
@@ -79,9 +80,8 @@ class HistoricalAverageFilter:
     (cuando llegaron todos los EOFs).
 
     No usa BaseWorker porque este stage necesita distinguir de que stream
-    viene cada batch (via msg_type) Y emitir en el flush; ningun worker base
-    ofrece las dos cosas a la vez (JoinWorker descarta msg_type, MergeWorker
-    no emite en flush).
+    viene cada batch (via msg_type) Y emitir en el flush. Consideramos que era mejor
+    no modificar las otras abstracciones y codear esta clase especifica.
     """
 
     def __init__(self, config: HistoricalFilterConfig):
@@ -175,7 +175,17 @@ class HistoricalAverageFilter:
                 # comparar, se descarta.
                 continue
             if (tx.amount_paid or 0.0) < threshold:
-                result.append(tx)
+                # Proyeccion al resultado de Q3: solo from_bank, from_account,
+                # payment_format y amount_paid (el resto queda None y el cliente
+                # no lo escribe). El orden de columnas final lo decide el cliente.
+                result.append(
+                    TransactionRow(
+                        from_bank=tx.from_bank,
+                        from_account=tx.from_account,
+                        payment_format=tx.payment_format,
+                        amount_paid=tx.amount_paid,
+                    )
+                )
 
         logging.info(
             "Flush client %s: %d candidates -> %d below threshold",

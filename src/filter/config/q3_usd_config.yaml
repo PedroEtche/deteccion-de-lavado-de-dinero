@@ -1,0 +1,10 @@
+mom_host: rabbitmq
+
+# Filtro USD de Q3: recibe las transacciones crudas del gateway y deja pasar
+# solo las USD. La salida alimenta al transaction_router (filtro por fecha).
+input: transactions_exchange
+output: q3_usd_filtered_exchange
+
+strategy:
+  - type: currency
+  - value: US Dollar

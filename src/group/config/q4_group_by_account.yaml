@@ -1,8 +1,0 @@
-mom_host: rabbitmq
-
-input: q4_filtered_count
-
-output: groupby_account_route
-
-strategy:
-  type: account

@@ -27,198 +27,161 @@ services:
     environment:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
-    - TRANSACTIONS_QUEUE=transactions_queue
+    - TRANSACTIONS_EXCHANGE=transactions_exchange
     - ACCOUNTS_QUEUE=accounts_queue
-    - INPUT_QUEUE=result_queue
+    - RESULT_EXCHANGE=gateway_results_exchange
     - SERVER_PORT=5678
 
-  q4_filter_usd_0:
+  filter_usd_0:
     build:
       context: .
       dockerfile: src/filter/Dockerfile
-    container_name: q4_filter_usd_0
+    container_name: filter_usd_0
     depends_on:
       rabbitmq:
         condition: service_healthy
     volumes:
     - ./src/filter/config/usd_config.yaml:/app/config.yaml:ro
     environment:
-    - EOF_FANOUT=filter_by_usd_eof
-    - EXPECTED_EOFS=1
+    - EOF_EXPECTED=1
+    - WORKER_ID=1
+    - NUM_DOWNSTREAM_WORKERS=1
 
-  q4_filter_by_datetime_0:
-    build:
-      context: .
-      dockerfile: src/filter/Dockerfile
-    container_name: q4_filter_by_datetime_0
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    volumes:
-    - ./src/filter/config/date_multiplex_config.yaml:/app/config.yaml:ro
-    environment:
-    - EOF_FANOUT=filter_by_datetime_eof
-    - EXPECTED_EOFS=1
+  # filter_by_datetime_0:
+  #   build:
+  #     context: .
+  #     dockerfile: src/filter/Dockerfile
+  #   container_name: filter_by_datetime_0
+  #   depends_on:
+  #     rabbitmq:
+  #       condition: service_healthy
+  #   volumes:
+  #   - ./src/filter/config/datetime_config.yaml:/app/config.yaml:ro
+  #   environment:
+  #   - EOF_EXPECTED=1
+  #   - WORKER_ID=1
+  #   - NUM_DOWNSTREAM_WORKERS=1
 
-  q4_scatter_group_0:
+  group_scatter_0:
     build:
       context: .
       dockerfile: src/group/Dockerfile
-    container_name: q4_scatter_group_0
+    container_name: group_scatter_0
     depends_on:
       rabbitmq:
         condition: service_healthy
     volumes:
     - ./src/group/config/q4_scatter_group.yaml:/app/config.yaml:ro
     environment:
-    - EOF_FANOUT=scatter_group_eof
-    - EXPECTED_EOFS=1
+    - EOF_EXPECTED=1
+    - WORKER_ID=1
+    - NUM_DOWNSTREAM_WORKERS=1
 
-  q4_scatter_aggregator_0:
+  aggregator_scatter_group_0:
     build:
       context: .
       dockerfile: src/aggregator/Dockerfile
-    container_name: q4_scatter_aggregator_0
+    container_name: aggregator_scatter_group_0 
     depends_on:
       rabbitmq:
         condition: service_healthy
     volumes:
     - ./src/aggregator/config/q4_scatter_aggregator.yaml:/app/config.yaml:ro
     environment:
-    - SHARD_ID=0
-    - EOF_FANOUT=scatter_aggregator_eof
-    - EXPECTED_EOFS=1
+    - EOF_EXPECTED=1
+    - WORKER_ID=1
+    - NUM_DOWNSTREAM_WORKERS=1
 
-  q4_scatter_filter_0:
+  merge_with_self_0:
     build:
       context: .
-      dockerfile: src/filter/Dockerfile
-    container_name: q4_scatter_filter_0
+      dockerfile: src/merge/Dockerfile
+    container_name: merge_with_self_0 
     depends_on:
       rabbitmq:
         condition: service_healthy
     volumes:
-    - ./src/filter/config/q4_scatter_filter.yaml:/app/config.yaml:ro
+    - ./src/merge/config/selfmerge.yaml:/app/config.yaml:ro
     environment:
-    - EOF_FANOUT=scatter_filter_eof
-    - EXPECTED_EOFS=1
-    - OUTPUT_MESSAGE_TYPE=raw_transactions 
+    - EOF_EXPECTED=1
+    - WORKER_ID=1
+    - NUM_DOWNSTREAM_WORKERS=1
 
-  q4_selfmerge_route_group_0:
-    build:
-      context: .
-      dockerfile: src/group/Dockerfile
-    container_name: q4_selfmerge_route_group_0
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    volumes:
-    - ./src/group/config/q4_selfmerge_route.yaml:/app/config.yaml:ro
-    environment:
-    - EOF_FANOUT=selfmerge_route_eof
-    - EXPECTED_EOFS=1
-
-  q4_merge_with_self_0:
-    build:
-      context: .
-      dockerfile: src/joiner/Dockerfile
-    container_name: q4_merge_with_self_0
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    volumes:
-    - ./src/joiner/config/q4_merge_with_self.yaml:/app/config.yaml:ro
-    environment:
-    - SHARD_ID=0
-    - EOF_FANOUT=selfmerge_eof
-    - EXPECTED_EOFS=1
-
-  q4_group_by_orig_dest_0:
+  group_account_pair_0:
     build:
       context: .
       dockerfile: src/group/Dockerfile
-    container_name: q4_group_by_orig_dest
+    container_name: group_account_pair_0
     depends_on:
       rabbitmq:
         condition: service_healthy
     volumes:
-    - ./src/group/config/q4_group_by_orig_dest.yaml:/app/config.yaml:ro
+    - ./src/group/config/account_pair_count.yaml:/app/config.yaml:ro
     environment:
-    - EOF_FANOUT=group_by_orig_dest_eof
-    - EXPECTED_EOFS=1
-
-  q4_aggregator_count_pairs_0:
+    - EOF_EXPECTED=1
+    - WORKER_ID=1
+    - NUM_DOWNSTREAM_WORKERS=1
+    
+  aggreator_account_pair_0:
     build:
       context: .
       dockerfile: src/aggregator/Dockerfile
-    container_name: q4_aggregator_count_pairs_0
+    container_name: aggregator_account_pair_0 
     depends_on:
       rabbitmq:
         condition: service_healthy
     volumes:
-    - ./src/aggregator/config/q4_aggregator_count_pairs.yaml:/app/config.yaml:ro
+    - ./src/aggregator/config/account_pairs_aggregator.yaml:/app/config.yaml:ro
     environment:
-    - SHARD_ID=0
-    - EOF_FANOUT=aggregator_count_pairs_eof
-    - EXPECTED_EOFS=1
+    - EOF_EXPECTED=1
+    - WORKER_ID=1
+    - NUM_DOWNSTREAM_WORKERS=1
 
-  q4_filter_by_count_0:
-    build:
-      context: .
-      dockerfile: src/filter/Dockerfile
-    container_name: q4_filter_by_count_0
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    volumes:
-    - ./src/filter/config/q4_count_more_than_5.yaml:/app/config.yaml:ro
-    environment:
-    - EOF_FANOUT=filter_by_count_eof
-    - EXPECTED_EOFS=2
-    - OUTPUT_MESSAGE_TYPE=batch
-
-  q4_group_by_account_0:
+  group_by_accounts_0:
     build:
       context: .
       dockerfile: src/group/Dockerfile
-    container_name: q4_group_by_account_0
+    container_name: group_by_accounts_0
     depends_on:
       rabbitmq:
         condition: service_healthy
     volumes:
-    - ./src/group/config/q4_group_by_account.yaml:/app/config.yaml:ro
+    - ./src/group/config/group_by_accounts.yaml:/app/config.yaml:ro
     environment:
-    - EOF_FANOUT=group_by_account_eof
-    - EXPECTED_EOFS=1
+    - EOF_EXPECTED=1
+    - WORKER_ID=1
+    - NUM_DOWNSTREAM_WORKERS=1
 
-  q4_aggregator_accounts_0:
+  aggregator_accounts_0:
     build:
       context: .
       dockerfile: src/aggregator/Dockerfile
-    container_name: q4_aggregator_accounts_0
+    container_name: aggregator_accounts_0 
     depends_on:
       rabbitmq:
         condition: service_healthy
     volumes:
     - ./src/aggregator/config/q4_aggregator_accounts.yaml:/app/config.yaml:ro
     environment:
-    - SHARD_ID=0
-    - EOF_FANOUT=aggregator_accounts_eof
-    - EXPECTED_EOFS=1
+    - EOF_EXPECTED=1
+    - WORKER_ID=1
+    - NUM_DOWNSTREAM_WORKERS=1
 
-  q4_join_accounts_0:
+  q4_join_0:  
     build:
       context: .
       dockerfile: src/join/Dockerfile
-    container_name: q4_join_accounts_0
+    container_name: q4_join_0
     depends_on:
       rabbitmq:
         condition: service_healthy
     volumes:
-      - ./src/join/config/q4_join_accounts.yaml:/app/config.yaml:ro
+    - ./src/join/config/q4_result.yaml:/app/config.yaml:ro
     environment:
-      - EOF_FANOUT=q4_join_accounts_eof
-      - EXPECTED_EOFS=1
+    - EOF_EXPECTED=1
+    - WORKER_ID=1
+    - NUM_DOWNSTREAM_WORKERS=1
+    - QUERY_RESULT_NUMBER=4
 
   client_0:
     build:
@@ -228,12 +191,14 @@ services:
     depends_on:
     - gateway
     volumes:
-    - ./data/my_sample_500k.csv:/data/dataset.csv:ro
-    - ./data/accounts.csv:/data/accounts.csv:ro
+    - ./data/q4_trans.csv:/data/small_trans.csv
+    - ./data/small_accounts.csv:/data/small_accounts.csv
+    - ./results/clients/client_0:/results/clients/client_0
     environment:
     - PYTHONUNBUFFERED=1
     - SERVER_HOST=gateway
     - SERVER_PORT=5678
-    - TRANSACTIONS_DATASET_PATH=/data/dataset.csv
-    - ACCOUNTS_DATASET_PATH=/data/accounts.csv
+    - OUTPUT_PATH=/results/clients/client_0/
+    - ACCOUNTS_PATH=/data/small_accounts.csv
+    - TRANSACTIONS_PATH=/data/small_trans.csv
     - BATCH_SIZE=500

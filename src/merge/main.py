@@ -14,7 +14,7 @@ from .strategies import (
     MergeStrategy,
     NoStrategy,
     AccountsStrategy,
-    # SelfMergeStrategy,
+    SelfMergeStrategy,
 )
 
 CONFIG_PATH = "./config.yaml"
@@ -45,8 +45,8 @@ def _parse_strategy_config(raw_strategy: Any) -> MergeStrategy:
     if strategy_type == "accounts":
         return AccountsStrategy()
 
-    # if strategy_type == "self_merge":
-    #     return SelfMergeStrategy()
+    if strategy_type == "self_merge":
+        return SelfMergeStrategy()
 
     return NoStrategy()
 
@@ -93,10 +93,11 @@ class MergeWorker(BaseWorker):
 
     def process_data(self, client_id: str, msg_id: str, msg_type: str, payload: dict) -> None:
         batch = payload.get("batch", [])
-    
+        logging.info("Processing batch of %d rows for client %s with strategy %s", len(batch), client_id, str(self.strategy))
         merged_batch = self.strategy.merge_batch(batch, client_id, msg_type)
 
         # revisar para poner un callback aca
+        logging.info("Merged batch for client %s with strategy %s: %s", client_id, str(self.strategy), merged_batch)
         if merged_batch:
             batch_msg = build_batch_message(
                 message_type="grouped_data",

@@ -1,0 +1,8 @@
+mom_host: rabbitmq
+
+input: aggregator_account_pairs_exchange
+
+output: groupby_account_exchange
+
+strategy:
+  type: account

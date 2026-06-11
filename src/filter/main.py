@@ -13,6 +13,7 @@ from .strategies import (
     AmountComparisonStrategy,
     CurrencyConversionStrategy,
     CurrencyStrategy,
+    CountFieldComparisonStrategy,
     FilterStrategy,
     NoStrategy,
 )
@@ -55,6 +56,7 @@ def _build_strategy(strategy_data: List[Dict[str, Any]]) -> FilterStrategy:
         "currency": lambda p: CurrencyStrategy(p["value"]),
         "amount": lambda p: AmountComparisonStrategy(p["condition"], p["threshold"]),
         "currency_conversion": lambda p: CurrencyConversionStrategy(p["conditions"]),
+        "count": lambda p: CountFieldComparisonStrategy(p["condition"], p["threshold"]),
     }
 
     builder = _BUILDERS.get(strategy_type)

@@ -1,8 +1,8 @@
 mom_host: rabbitmq
 
-input: groupby_account_route_0 
+input: groupby_account_exchange 
 
-output: q4_join_queue
+output: q4_aggregator_accounts_exchange
 
 strategy:
-  type: Account
+  type: account

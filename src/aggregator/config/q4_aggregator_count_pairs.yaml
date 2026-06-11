@@ -1,8 +1,0 @@
-mom_host: rabbitmq
-
-input: groupby_orig_dest_route_0
-
-output: aggregator_count_pairs_queue
-
-strategy:
-  type: AccountPairCount

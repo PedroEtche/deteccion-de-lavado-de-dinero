@@ -105,7 +105,7 @@ class GroupWorker(BaseWorker):
 
     def process_data(self, client_id: str, msg_id: str, msg_type: str, payload: dict) -> None:
         batch = payload.get("batch", [])
-        
+        logging.info("Processing batch of %d rows for client %s", len(batch), client_id)
         routed = self.strategy.group_and_route(batch)
 
         batches: Dict[str, List[dict]] = {}

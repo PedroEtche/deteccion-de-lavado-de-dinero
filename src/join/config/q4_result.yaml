@@ -1,0 +1,7 @@
+mom_host: rabbitmq
+
+input: q4_aggregator_accounts_exchange
+output: gateway_results_exchange
+
+strategy:
+  - type: query_result

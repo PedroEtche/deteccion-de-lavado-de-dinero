@@ -1,0 +1,8 @@
+mom_host: rabbitmq
+
+input: q4_scatter_filter_exchange
+
+output: q4_self_merge_exchange
+
+strategy:
+  type: self_merge

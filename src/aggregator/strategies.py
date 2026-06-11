@@ -223,7 +223,7 @@ class AccountStrategy(AggregatorStrategy):
 
     def clear_client_state(self, client: str) -> None:
         self.accounts_by_client.pop(client, None)
-
+import logging
 
 class ScatterAggregatorStrategy(AggregatorStrategy):
     def __init__(self):
@@ -243,7 +243,6 @@ class ScatterAggregatorStrategy(AggregatorStrategy):
         for tx in batch:
             origin = (tx["from_bank"], tx["from_account"])
             dest = (tx["to_bank"], tx["to_account"])
-
             data = client_state.setdefault(origin, {"dests": set(), "txs": []})
             data["dests"].add(dest)
             data["txs"].append(tx)

@@ -1,8 +1,0 @@
-mom_host: rabbitmq
-
-input: q4_merged_with_self_queue
-
-output: groupby_orig_dest_route
-
-strategy:
-  type: account_pair_count

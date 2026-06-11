@@ -1,0 +1,8 @@
+mom_host: rabbitmq
+
+input: q4_self_merge_exchange
+
+output: grouped_account_pair_count_exchange
+
+strategy:
+  type: account_pair_count

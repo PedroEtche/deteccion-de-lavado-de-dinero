@@ -1,8 +1,8 @@
 mom_host: rabbitmq
 
-input: q4_scatter_route_0
+input: q4_grouped_exchange
 
-output: q4_scatter_filter_queue
+output: q4_scatter_filter_exchange
 
 strategy:
-  type: ScatterAggregator
+  type: scatter_aggregator

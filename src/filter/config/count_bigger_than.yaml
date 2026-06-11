@@ -1,0 +1,9 @@
+mom_host: rabbitmq
+
+input: aggregator_account_pairs_exchange
+output: count_bigger_than_exchange
+
+strategy:
+  - type: "count"
+  - condition: ">"
+  - threshold: 5

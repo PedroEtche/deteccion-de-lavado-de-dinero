@@ -117,6 +117,13 @@ class Client:
             self._reader_thread.join(timeout=5)
 
     def start(self, accounts_path, transactions_path, batch_size):
+        # TODO: fix this. Esperamos 10s a que todos los workers terminen de bindear sus
+        # colas antes de mandar datos. Si publicamos antes, los exchanges
+        # `direct` descartan los mensajes (race de arranque). Es un una solucion
+        # fragil que tenemos que arreglar
+        logging.info("Waiting for workers to bind their queues...")
+        time.sleep(10)
+
         logging.info("Sending data")
         try:
             send_csv(self.server_socket, accounts_path, batch_size, STREAM_ACCOUNTS)

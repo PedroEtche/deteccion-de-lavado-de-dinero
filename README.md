@@ -1,5 +1,8 @@
 # Preguntas y bugs pendientes
 
+## Race de arranque (pérdida silenciosa de mensajes)
+Los exchanges `direct`/`fanout` de RabbitMQ **descartan** los mensajes publicados cuando, en ese instante, no hay ninguna cola bindeada que matchee (no hay buffer ni reintento). Cada worker bindea su cola de entrada al arrancar (constructor del middleware), y como todos arrancan a la vez sin orden garantizado, un upstream puede publicar antes de que el downstream haya bindeado → se pierden esos mensajes en silencio.
+
 ## Client (`src/client/main.py`)
 - `recv_results` solo incrementa `query_result_counter` cuando llega un EOF de **Q1**. Las ramas Q2/Q3/Q4/Q5 no lo incrementan 
 

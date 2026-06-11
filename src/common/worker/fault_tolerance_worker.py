@@ -12,13 +12,13 @@ from src.common.eof import EofCoordinator
 from src.common.middleware import MessageMiddlewareExchangeRabbitMQ
 
 
-class StatelessWorker(ABC):
+class FaultToleranceWorker(ABC):
     """
-    Base for stateless workers (filters). Handles all RabbitMQ infrastructure,
+    Base for workers. Handles all RabbitMQ infrastructure,
     round-robin routing, and EOF coordination. Subclasses only need to implement
     `process_data` and `flush_state`.
 
-    Supports a master-slave replication lane: the master republishes every raw
+    Supports a master-slave replication lane: the master republishes every
     message to a fanout exchange before processing it, and the slave consumes only
     from that fanout (so it sees an exact copy of the master's input). The slave
     never emits anything downstream.

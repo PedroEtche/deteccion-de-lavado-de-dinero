@@ -10,7 +10,8 @@ import yaml
 from src.common.communication.internal import (
     serialize,
 )
-from src.common.worker import BaseWorker
+# from src.common.worker import BaseWorker
+from src.common.worker.fault_tolerance_worker import FaultToleranceWorker
 
 from .strategies import (
     AveragesUnionStrategy,
@@ -34,6 +35,8 @@ class JoinConfig:
     worker_id: int
     num_downstream_workers: int
     routing_strategy: str
+    role: str
+    replication_exchange: str
 
 
 def _load_file_config() -> Dict[str, Any]:
@@ -82,6 +85,8 @@ def init_config() -> JoinConfig:
         worker_id=int(os.getenv("WORKER_ID", "1")),
         num_downstream_workers=int(os.getenv("NUM_DOWNSTREAM_WORKERS", "1")),
         routing_strategy=os.getenv("ROUTING_STRATEGY", "round_robin").lower(),
+        role=os.getenv("ROLE", "master"),
+        replication_exchange=os.getenv("REPLICATION_EXCHANGE", ""),
     )
 
 
@@ -96,7 +101,7 @@ def log_config(config: JoinConfig) -> None:
     )
 
 
-class JoinWorker(BaseWorker):
+class JoinWorker(FaultToleranceWorker):
     def __init__(self, config: JoinConfig):
         super().__init__(config)
         self.strategy = config.strategy

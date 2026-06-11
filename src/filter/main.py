@@ -6,7 +6,8 @@ from typing import Any, Dict, List
 
 import yaml
 
-from src.common.worker import BaseWorker
+# from src.common.worker import BaseWorker
+from src.common.worker.fault_tolerance_worker import FaultToleranceWorker
 from src.common.communication.internal import build_raw_transactions_message
 
 from .strategies import (
@@ -33,6 +34,8 @@ class FilterConfig:
     num_downstream_workers: int
     routing_strategy: str
     worker_name: str
+    role: str
+    replication_exchange: str
 
 
 def _load_file_config() -> Dict[str, Any]:
@@ -78,6 +81,8 @@ def init_config() -> FilterConfig:
         num_downstream_workers=int(os.getenv("NUM_DOWNSTREAM_WORKERS", "1")),
         routing_strategy=os.getenv("ROUTING_STRATEGY", "round_robin").lower(),
         worker_name=os.getenv("WORKER_NAME", "filter"),
+        role=os.getenv("ROLE", "master"),
+        replication_exchange=os.getenv("REPLICATION_EXCHANGE", ""),
     )
 
 
@@ -92,7 +97,7 @@ def log_config(config: FilterConfig) -> None:
     )
 
 
-class FilterWorker(BaseWorker):
+class FilterWorker(FaultToleranceWorker):
     def __init__(self, config: FilterConfig):
         super().__init__(config)
         self.strategy = config.strategy

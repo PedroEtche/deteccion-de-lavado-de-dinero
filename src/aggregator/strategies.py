@@ -92,13 +92,14 @@ class AccountPairCountStategy(AggregatorStrategy):
         counts = self.counts_by_client.setdefault(client, {})
         for tx in batch:
             key = (tx["from_bank"], tx["from_account"], tx["to_bank"], tx["to_account"])
-            counts[key] = counts.get(key, 0) + 1
+            count_from_batch = tx["count"] if "count" in tx else 1
+            counts[key] = counts.get(key, 0) + count_from_batch
 
-        return self._build_results(counts)
+        return []
 
     def get_result_for_client(self, client: str) -> List[Any]:
         counts = self.counts_by_client.get(client, {})
-        return self._build_results(counts)
+        return [(None, self._build_results(counts))]
 
     def clear_client_state(self, client: str) -> None:
         self.counts_by_client.pop(client, None)
@@ -106,15 +107,16 @@ class AccountPairCountStategy(AggregatorStrategy):
     def _build_results(self, counts: Dict[tuple, int]) -> List[Any]:
         results = []
         for (from_bank, from_account, to_bank, to_account), count in counts.items():
-            results.append(
-                {
-                    "from_bank": from_bank,
-                    "from_account": from_account,
-                    "to_bank": to_bank,
-                    "to_account": to_account,
-                    "count": count,
-                }
-            )
+            if count > 5:
+                results.append(
+                    {
+                        "from_bank": from_bank,
+                        "from_account": from_account,
+                        "to_bank": to_bank,
+                        "to_account": to_account,
+                        "count": count,
+                    }
+                )
         return results
 
 
@@ -137,7 +139,7 @@ class CountStrategy(AggregatorStrategy):
 
     def get_result_for_client(self, client: str) -> List[Any]:
         count = self._counts.pop(client, 0)
-        return [{"count": count}]
+        return [(None, {"count": count})]
 
     def clear_client_state(self, client: str) -> None:
         self._counts.pop(client, None)
@@ -219,11 +221,10 @@ class AccountStrategy(AggregatorStrategy):
         for bank, account in self.accounts_by_client.get(client, set()):
             final_accounts.append({"bank": bank, "account": account})
 
-        return final_accounts
+        return [(None, final_accounts)]
 
     def clear_client_state(self, client: str) -> None:
         self.accounts_by_client.pop(client, None)
-import logging
 
 class ScatterAggregatorStrategy(AggregatorStrategy):
     def __init__(self):
@@ -252,12 +253,12 @@ class ScatterAggregatorStrategy(AggregatorStrategy):
     def get_result_for_client(self, client: str) -> List[Any]:
         client_state = self.state_by_client.get(client, {})
 
-        filtered_results = []
-        for origin, data in client_state.items():
+        routed_results = []
+        for dest, data in client_state.items():
             if len(data["dests"]) > 5:
-                filtered_results.extend(data["txs"])
+                routed_results.append((dest, data["txs"]))
 
-        return filtered_results
+        return routed_results
 
     def clear_client_state(self, client: str) -> None:
         self.state_by_client.pop(client, None)

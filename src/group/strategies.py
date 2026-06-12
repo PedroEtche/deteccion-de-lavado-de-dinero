@@ -106,7 +106,6 @@ class PaymentFormatAverageStrategy(GroupStrategy):
 
         return [(route, b) for route, b in routed_batches.items()]
 
-
 class AccountPairCountStategy(GroupStrategy):
     def __init__(self):
         pass

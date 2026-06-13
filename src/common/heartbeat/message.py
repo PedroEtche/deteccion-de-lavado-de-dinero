@@ -1,14 +1,12 @@
-from dataclasses import dataclass, asdict
 import json
+from dataclasses import asdict, dataclass
 
 
 @dataclass
 class HeartbeatMessage:
     msg_type: str  # "heartbeat" | "election" | "ok"
-    sender: str # name/id from sender
-    role: str # master | slave
-    timestamp: float # time when the sender created this message
-    epoch: int # epoch used for indicate if a new master has been selected
+    sender: str  # name/id from sender
+    timestamp: float  # time when the sender created this message
 
     def to_bytes(self) -> bytes:
         return json.dumps(asdict(self)).encode("utf-8")

@@ -46,15 +46,6 @@ def _connect_with_retry(host, port):
 
 _opened_files: set = set()
 
-# Proyeccion de columnas por query: (header mostrado, atributo del TransactionRow).
-# Define que columnas se escriben, en que orden, y con que nombre de header.
-Q3_COLUMNS = [
-    ("From Bank", "from_bank"),
-    ("Account", "from_account"),
-    ("Payment Format", "payment_format"),
-    ("Amount Paid", "amount_paid"),
-]
-
 
 def persist_rows(output_file, batch):
     mode = "w" if output_file not in _opened_files else "a"
@@ -65,20 +56,6 @@ def persist_rows(output_file, batch):
             csv_writer.writerow(
                 v for v in dataclasses.asdict(row).values() if v is not None
             )
-
-
-def persist_projected(output_file, batch, columns):
-    """Escribe el batch proyectando solo `columns` (orden y nombres fijos),
-    con una fila de header la primera vez que se abre el archivo."""
-    write_header = output_file not in _opened_files
-    mode = "w" if write_header else "a"
-    _opened_files.add(output_file)
-    with open(output_file, mode, newline="") as csvfile:
-        csv_writer = csv.writer(csvfile, delimiter=",", quotechar='"')
-        if write_header:
-            csv_writer.writerow([header for header, _ in columns])
-        for row in batch:
-            csv_writer.writerow([getattr(row, attr) for _, attr in columns])
 
 
 class Client:
@@ -175,7 +152,7 @@ class Client:
             elif query_type == "q3_result":
                 output_file = output_path + "q3.csv"
                 batch = decoded["payload"]["batch"]
-                persist_projected(output_file, batch, Q3_COLUMNS)
+                persist_rows(output_file, batch)
 
             elif query_type == "q4_result":
                 output_file = output_path + "q4.csv"

@@ -188,7 +188,7 @@ class PaymentFormatAverageStrategy(AggregatorStrategy):
                 }
             )
 
-        return results
+        return [(None, results)]
 
     def clear_client_state(self, client: str) -> None:
         self.stats_by_client.pop(client, None)

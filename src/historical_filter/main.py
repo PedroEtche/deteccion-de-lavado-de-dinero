@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from typing import Any, Dict, List
 
 from src.common.communication.internal import (
-    TransactionRow,
+    Q3ResultRow,
+    build_batch_message,
     build_eof_message,
-    build_raw_transactions_message,
     deserialize,
     serialize,
 )
@@ -175,11 +175,10 @@ class HistoricalAverageFilter:
                 # comparar, se descarta.
                 continue
             if (tx.amount_paid or 0.0) < threshold:
-                # Proyeccion al resultado de Q3: solo from_bank, from_account,
-                # payment_format y amount_paid (el resto queda None y el cliente
-                # no lo escribe). El orden de columnas final lo decide el cliente.
+                # Proyeccion al resultado de Q3. El orden de columnas del CSV lo
+                # define el orden de campos de Q3ResultRow.
                 result.append(
-                    TransactionRow(
+                    Q3ResultRow(
                         from_bank=tx.from_bank,
                         from_account=tx.from_account,
                         payment_format=tx.payment_format,
@@ -195,8 +194,12 @@ class HistoricalAverageFilter:
         )
 
         if result:
+            # msg_type "batch": tipo generico ya usado entre workers (group,
+            # aggregator). No dispara conversion a TransactionRow en el join,
+            # que lo reenvuelve como q3_result (QueryResultStrategy 3).
             out_msg = serialize(
-                build_raw_transactions_message(
+                build_batch_message(
+                    "batch",
                     client=client_id,
                     msg_id=str(uuid.uuid4()),
                     batch=result,

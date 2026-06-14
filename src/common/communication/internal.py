@@ -114,6 +114,15 @@ class Q5ResultRow(Payload):
     count: int = 0
 
 
+# usamos dataclass para la result row para que las columnas esten
+# en el orden que queremos en el csv fixed de resultados
+@dataclass
+class Q3ResultRow(Payload):
+    from_bank: str | None = None
+    from_account: str | None = None
+    payment_format: str | None = None
+    amount_paid: float | None = None
+
 @dataclass
 class AccountRow(Payload):
     bank_name: str | None = None
@@ -310,7 +319,7 @@ def deserialize(message):
 
     # Convert batch dictionaries back to objects based on the message type.
     msg_type = decoded.get("type")
-    if msg_type in ("raw_transactions", "q1_result", "q3_result"):
+    if msg_type in ("raw_transactions", "q1_result"):
         decoded["payload"]["batch"] = [
             TransactionRow.from_dict(row) if isinstance(row, dict) else row
             for row in batch
@@ -318,6 +327,10 @@ def deserialize(message):
     elif msg_type == "raw_accounts":
         decoded["payload"]["batch"] = [
             AccountRow.from_dict(row) if isinstance(row, dict) else row for row in batch
+        ]
+    elif msg_type == "q3_result":
+        decoded["payload"]["batch"] = [
+            Q3ResultRow.from_dict(row) if isinstance(row, dict) else row for row in batch
         ]
     elif msg_type == "q5_result":
         decoded["payload"]["batch"] = [

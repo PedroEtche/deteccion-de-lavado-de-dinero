@@ -132,6 +132,7 @@ services:
     build:
       context: .
       dockerfile: src/client/Dockerfile
+    command: ["sh", "-c", "sleep 10 && python -m src.client.main"]
     container_name: client_0
     depends_on:
     - gateway

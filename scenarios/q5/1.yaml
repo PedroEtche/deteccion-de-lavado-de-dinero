@@ -42,7 +42,7 @@ services:
       rabbitmq:
         condition: service_healthy
     volumes:
-    - ./src/transaction_router/config/q1_only.yaml:/app/config.yaml:ro
+    - ./src/transaction_router/config/q5_dates.yaml:/app/config.yaml:ro
     environment:
     - EOF_EXPECTED=1
     - WORKER_ID=1

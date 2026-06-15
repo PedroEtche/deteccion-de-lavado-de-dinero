@@ -153,10 +153,9 @@ class Client:
                 persist_rows(output_file, batch)
 
             elif query_type == "q5_result":
-                output_file = output_path + "q5.txt"
-                with open(output_file, "a") as txtfile:
-                    for row in decoded["payload"]["batch"]:
-                        txtfile.write(str(row.count))
+                output_file = output_path + "q5.csv"
+                batch = decoded["payload"]["batch"]
+                persist_rows(output_file, batch)
 
             else:
                 logging.info("Unexpected Message: %s", decoded)

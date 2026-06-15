@@ -34,6 +34,8 @@ class JoinConfig:
     worker_id: int
     num_downstream_workers: int
     routing_strategy: str
+    role: str
+    replication_exchange: str
 
 
 def _load_file_config() -> Dict[str, Any]:
@@ -82,6 +84,8 @@ def init_config() -> JoinConfig:
         worker_id=int(os.getenv("WORKER_ID", "1")),
         num_downstream_workers=int(os.getenv("NUM_DOWNSTREAM_WORKERS", "1")),
         routing_strategy=os.getenv("ROUTING_STRATEGY", "round_robin").lower(),
+        role=os.getenv("ROLE", "master"),
+        replication_exchange=os.getenv("REPLICATION_EXCHANGE", ""),
     )
 
 

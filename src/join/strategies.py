@@ -1,14 +1,16 @@
 import uuid
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional
-
+import dataclasses
 
 from src.common.communication.internal import (
     build_batch_message,
     build_results_for_query,
+    Q2ResultRow,
+    Q3ResultRow,
+    Q4ResultRow,
     Q5ResultRow,
 )
-
 
 class JoinStrategy(ABC):
     """Abstract strategy that owns all join state.
@@ -78,17 +80,40 @@ class QueryResultStrategy(JoinStrategy):
         super().__init__()
         self.query_number = query_number
 
+        _ROW_CLASSES = {
+            2: Q2ResultRow,
+            3: Q3ResultRow,
+            4: Q4ResultRow,
+        }
+        self.row_class = _ROW_CLASSES.get(self.query_number)
+
     def join_batch(self, batch: List[Any], client: str) -> None:
-        if batch:
-            self._emit(
-                client,
-                build_results_for_query(
-                    query_number=self.query_number,
-                    batch=batch,
-                    eof=False,
-                    client=client,
-                ),
-            )
+        if not batch:
+            return
+
+        processed_batch = batch
+        if self.row_class:
+            processed_batch = []
+            
+            valid_keys = {f.name for f in dataclasses.fields(self.row_class)}
+            
+            for item in batch:
+                if isinstance(item, dict):
+                    safe_kwargs = {k: v for k, v in item.items() if k in valid_keys}
+                else:
+                    safe_kwargs = {k: getattr(item, k) for k in valid_keys if hasattr(item, k)}
+                
+                processed_batch.append(self.row_class(**safe_kwargs))
+
+        self._emit(
+            client,
+            build_results_for_query(
+                query_number=self.query_number,
+                batch=processed_batch,
+                eof=False,
+                client=client,
+            ),
+        )
 
     def flush(self, client: str) -> Optional[dict]:
         return None

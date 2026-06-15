@@ -109,10 +109,16 @@ class Payload:
         return cls(**data)
 
 
-@dataclass
-class Q5ResultRow(Payload):
-    count: int = 0
 
+# @dataclass
+# class Q1ResultRow(Payload):
+    
+@dataclass
+class Q2ResultRow(Payload):
+    from_bank: str | None = None
+    from_account: str | None = None
+    bank_name: str | None = None
+    amount_paid: float | None = None
 
 # usamos dataclass para la result row para que las columnas esten
 # en el orden que queremos en el csv fixed de resultados
@@ -122,6 +128,15 @@ class Q3ResultRow(Payload):
     from_account: str | None = None
     payment_format: str | None = None
     amount_paid: float | None = None
+
+@dataclass
+class Q4ResultRow(Payload):
+    bank: str | None = None
+    account: str | None = None
+
+@dataclass
+class Q5ResultRow(Payload):
+    count: int = 0
 
 @dataclass
 class AccountRow(Payload):

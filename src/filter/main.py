@@ -6,15 +6,14 @@ from typing import Any, Dict, List
 
 import yaml
 
-# from src.common.worker import BaseWorker
-from src.common.worker.fault_tolerance_worker import FaultToleranceWorker
 from src.common.communication.internal import build_raw_transactions_message
+from src.common.worker import BaseWorker
 
 from .strategies import (
     AmountComparisonStrategy,
+    CountFieldComparisonStrategy,
     CurrencyConversionStrategy,
     CurrencyStrategy,
-    CountFieldComparisonStrategy,
     FilterStrategy,
     NoStrategy,
 )
@@ -97,12 +96,14 @@ def log_config(config: FilterConfig) -> None:
     )
 
 
-class FilterWorker(FaultToleranceWorker):
+class FilterWorker(BaseWorker):
     def __init__(self, config: FilterConfig):
         super().__init__(config)
         self.strategy = config.strategy
 
-    def process_data(self, client_id: str, msg_id: str, msg_type: str, payload: dict) -> None:
+    def process_data(
+        self, client_id: str, msg_id: str, msg_type: str, payload: dict
+    ) -> None:
         batch = payload.get("batch", [])
 
         filtered_batch = self.strategy.filter_batch(batch)

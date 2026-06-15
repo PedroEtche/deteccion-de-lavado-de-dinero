@@ -10,8 +10,7 @@ import yaml
 from src.common.communication.internal import (
     serialize,
 )
-# from src.common.worker import BaseWorker
-from src.common.worker.fault_tolerance_worker import FaultToleranceWorker
+from src.common.worker import BaseWorker
 
 from .strategies import (
     AveragesUnionStrategy,
@@ -101,7 +100,7 @@ def log_config(config: JoinConfig) -> None:
     )
 
 
-class JoinWorker(FaultToleranceWorker):
+class JoinWorker(BaseWorker):
     def __init__(self, config: JoinConfig):
         super().__init__(config)
         self.strategy = config.strategy

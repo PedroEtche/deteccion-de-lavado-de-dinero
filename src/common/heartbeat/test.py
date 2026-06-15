@@ -1,30 +1,47 @@
 import logging
 import os
 
-from heartbeat import PORT, Heartbeat
+from fail_detection import PORT, Node
 
 
 def main():
     node_id = os.environ["NODE_ID"]
-    peers = [p.strip() for p in os.environ.get("PEERS", "").split(",") if p.strip()]
-    port = int(os.environ.get("HEARTBEAT_PORT", PORT))
-    interval = float(os.environ.get("HEARTBEAT_INTERVAL", 1.0))
+    peers_env = os.environ.get("PEERS", "")
+    container_name = os.environ.get("CONTAINER_NAME", node_id)
+    peer_containers_env = os.environ.get("PEER_CONTAINERS", "")
 
     logging.basicConfig(
         level=logging.INFO,
         format=f"%(asctime)s [{node_id}] %(levelname)s %(message)s",
     )
 
-    # Send to every peer except ourselves.
-    targets = [(peer, port) for peer in peers if peer != node_id]
-    logging.info("Node %s starting with targets: %s", node_id, targets)
+    # Comma-separated hostnames, excluding self.
+    peer_hosts = [
+        p.strip() for p in peers_env.split(",") if p.strip() and p.strip() != node_id
+    ]
+    peers = [(host, host, PORT) for host in peer_hosts]
 
-    heartbeat = Heartbeat(sender_id=node_id, targets=targets, interval=interval)
+    # "node1:hb_node1,node2:hb_node2" -> {node1: hb_node1, ...}
+    peer_containers: dict[str, str] = {}
+    for entry in peer_containers_env.split(","):
+        entry = entry.strip()
+        if ":" in entry:
+            nid, cname = entry.split(":", 1)
+            peer_containers[nid.strip()] = cname.strip()
+
+    logging.info("Node %s starting with peers: %s", node_id, peers)
+
+    node = Node(
+        node_id=node_id,
+        peers=peers,
+        container_name=container_name,
+        peer_containers=peer_containers,
+    )
     try:
-        heartbeat.start()  # blocks in the receive loop
+        node.start()  # blocks in the monitor loop
     except KeyboardInterrupt:
         logging.info("Stopping node %s", node_id)
-        heartbeat.stop()
+        node.stop()
 
 
 if __name__ == "__main__":

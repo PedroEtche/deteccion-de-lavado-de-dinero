@@ -31,7 +31,7 @@ services:
     - ACCOUNTS_EXCHANGE=merge_max_by_account_exchange
     - RESULT_EXCHANGE=gateway_results_exchange
     - SERVER_PORT=5678
-    - NUM_TX_WORKERS=3
+    - NUM_TX_WORKERS=1
 
   filter_usd_0:
     build:
@@ -49,22 +49,6 @@ services:
     - NUM_DOWNSTREAM_WORKERS=1
     - WORKER_NAME=filter_usd
 
-  filter_usd_1:
-    build:
-      context: .
-      dockerfile: src/filter/Dockerfile
-    container_name: filter_usd_1
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    volumes:
-    - ./src/filter/config/usd_config.yaml:/app/config.yaml:ro
-    environment:
-    - EOF_EXPECTED=1
-    - WORKER_ID=2
-    - NUM_DOWNSTREAM_WORKERS=1
-    - WORKER_NAME=filter_usd
-
   group_by_bank_max_0:
     build:
       context: .
@@ -76,7 +60,7 @@ services:
     volumes:
     - ./src/group/config/bank_max_amount.yaml:/app/config.yaml:ro
     environment:
-    - EOF_EXPECTED=2
+    - EOF_EXPECTED=1
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=1
     - WORKER_NAME=group_by_bank_max

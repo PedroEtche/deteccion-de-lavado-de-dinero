@@ -70,7 +70,7 @@ class BankMaxAmountStrategy(AggregatorStrategy):
         return []
 
     def get_result_for_client(self, client: str) -> List[Any]:
-        return list(self.max_per_bank_by_client.get(client, {}).values())
+        return [(None, list(self.max_per_bank_by_client.get(client, {}).values()))]
 
     def clear_client_state(self, client: str) -> None:
         self.max_per_bank_by_client.pop(client, None)

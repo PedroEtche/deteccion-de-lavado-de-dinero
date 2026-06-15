@@ -116,7 +116,7 @@ class QueryResultStrategy(JoinStrategy):
         )
 
     def flush(self, client: str) -> Optional[dict]:
-        return None
+        return self.build_eof_message(client)
 
     def build_eof_message(self, client, msg_id=None):
         return build_results_for_query(

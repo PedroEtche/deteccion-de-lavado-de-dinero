@@ -195,7 +195,7 @@ services:
     depends_on:
     - gateway
     volumes:
-    - ./data/q4_trans.csv:/data/small_trans.csv
+    - ./data/small_trans.csv:/data/small_trans.csv
     - ./data/small_accounts.csv:/data/small_accounts.csv
     - ./results/clients/client_0:/results/clients/client_0
     environment:

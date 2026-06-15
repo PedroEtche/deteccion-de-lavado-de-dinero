@@ -113,9 +113,8 @@ class JoinWorker(BaseWorker):
 
     def flush_state(self, client_id: str) -> None:
         final_msg = self.strategy.flush(client_id)
-        logging.info("Flushing state for client %s. Final message: %s", client_id, final_msg)
-        if final_msg:
-            self.send_downstream(client_id, final_msg)
+        logging.info("Flushing final joined result for client %s: %s", client_id, final_msg)
+        self.send_downstream(client_id, final_msg)
 
 
 def main() -> int:

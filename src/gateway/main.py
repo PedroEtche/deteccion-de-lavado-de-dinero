@@ -33,6 +33,9 @@ class GatewayConfig:
     accounts_exchange: str
     result_exchange: str
     log_level: str
+    transactions_usd_workers: int
+    transactions_date_workers: int
+    accounts_workers: int
 
 
 def _load_file_config():
@@ -67,6 +70,18 @@ def init_config():
             file_config.get("result_exchange", "result_exchange"),
         ),
         log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
+        transactions_usd_workers=int(os.getenv(
+            "TRANSACTIONS_USD_WORKERS", 
+            file_config.get("transactions_usd_workers", 1)
+        )),
+        transactions_date_workers=int(os.getenv(
+            "TRANSACTIONS_DATE_WORKERS", 
+            file_config.get("transactions_date_workers", 1)
+        )),
+        accounts_workers=int(os.getenv(
+            "ACCOUNTS_WORKERS", 
+            file_config.get("accounts_workers", 1)
+        )),
     )
 
 
@@ -93,16 +108,15 @@ class Gateway:
         self.accounts_exchange_name = gateway_config.accounts_exchange
         self.result_exchange_name = gateway_config.result_exchange
 
-        # PLACEHOLDER: si esta cosa horrible queda hay que abstraerlo y alimentarlo de envs/config
-        self.transactions_usd_workers = 3
+        self.transactions_usd_workers = gateway_config.transactions_usd_workers
         self.transactions_usd_current_worker = 1
         self.transactions_usd_mw = None
 
-        self.transactions_date_workers = 1
+        self.transactions_date_workers = gateway_config.transactions_date_workers
         self.transactions_date_current_worker = 1
         self.transactions_date_mw = None
 
-        self.accounts_workers = 1
+        self.accounts_workers = gateway_config.accounts_workers
         self.accounts_current_worker = 1
         self.accounts_mw = None
         self.result_mw = None

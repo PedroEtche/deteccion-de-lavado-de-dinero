@@ -254,9 +254,13 @@ class ScatterAggregatorStrategy(AggregatorStrategy):
         client_state = self.state_by_client.get(client, {})
 
         routed_results = []
-        for dest, data in client_state.items():
+        for origin, data in client_state.items():
             if len(data["dests"]) > 5:
-                routed_results.append((dest, data["txs"]))
+                routed_results.append((origin, data["txs"]))
+
+                for tx in data["txs"]:
+                    dest = (tx["to_bank"], tx["to_account"])
+                    routed_results.append((dest, [tx]))
 
         return routed_results
 

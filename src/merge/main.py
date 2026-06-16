@@ -9,6 +9,7 @@ import yaml
 
 from src.common.worker import BaseWorker
 from src.common.communication.internal import build_batch_message
+from src.common.state_manager import WorkerStateManager
 
 from .strategies import (
     MergeStrategy,
@@ -30,6 +31,7 @@ class MergeConfig:
     num_downstream_workers: int
     routing_strategy: str
     strategy: MergeStrategy
+    stage_name: str
 
 def _load_file_config() -> Dict[str, Any]:
     try:
@@ -68,7 +70,8 @@ def init_config() -> MergeConfig:
         expected_eofs=int(os.getenv("EOF_EXPECTED", "1")),
         worker_id=int(os.getenv("WORKER_ID", "1")),
         num_downstream_workers=int(os.getenv("NUM_DOWNSTREAM_WORKERS", "1")),
-        routing_strategy=os.getenv("ROUTING_STRATEGY", "round_robin").lower()
+        routing_strategy=os.getenv("ROUTING_STRATEGY", "round_robin").lower(),
+        stage_name=os.getenv("STAGE_NAME", "merge"),
     )
 
 def log_config(config: MergeConfig) -> None:
@@ -91,6 +94,16 @@ class MergeWorker(BaseWorker):
     def __init__(self, config: MergeConfig):
         super().__init__(config)
 
+        self.state_manager = WorkerStateManager(
+            base_dir="/app/state",
+            stage_name=config.stage_name,
+            worker_id=config.worker_id
+        )
+
+        recovered_state = self.state_manager.load_client_state()
+        for client_id, state in recovered_state.items():
+            self.strategy.set_client_state(client_id, state)
+
     def process_data(self, client_id: str, msg_id: str, msg_type: str, payload: dict) -> None:
         batch = payload.get("batch", [])
         logging.info("Processing batch of %d rows for client %s with strategy %s", len(batch), client_id, str(self.strategy))
@@ -107,12 +120,12 @@ class MergeWorker(BaseWorker):
             )
             self.send_downstream(client_id, batch_msg)
 
-    def flush_state(self, client_id: str) -> None:
-        logging.info("All EOFs received. Flushing joiner state for client %s", client_id)
-        
-        self.strategy.clear_client_state(client_id)
+        self.state_manager.save_client(client_id, self.strategy.get_client_state(client_id))
 
-        # aca ver que no este faltando flushear algo    
+    def flush_state(self, client_id: str) -> None:
+        logging.info("All EOFs received. Flushing joiner state for client %s", client_id)    
+        self.strategy.clear_client_state(client_id)
+        self.state_manager.delete_client(client_id)
 
 def main() -> int:
     config = init_config()
@@ -129,7 +142,6 @@ def main() -> int:
     signal.signal(signal.SIGTERM, handle_sigterm)
     signal.signal(signal.SIGINT, handle_sigterm)
 
-    # Start blocks and consumes
     worker.start()
     return 0
 

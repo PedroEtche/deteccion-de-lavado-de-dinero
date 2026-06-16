@@ -106,13 +106,14 @@ class AggregatorWorker(BaseWorker):
         super().__init__(config)
 
         self.state_manager = WorkerStateManager(
-            base_dir="./state",
+            base_dir="/app/state",
             stage_name=config.stage_name,
             worker_id=config.worker_id
         )
 
-        # aca tendriamos que recontruir el estado 
-        # self.strategy.state_by_client = self.state_manager.load_all()
+        recovered_state = self.state_manager.load_client_state()
+        for client_id, state in recovered_state.items():
+            self.strategy.set_client_state(client_id, state)
 
     def process_data(self, client_id: str, msg_id: str, msg_type: str, payload: dict) -> None:
         batch = payload.get("batch", [])

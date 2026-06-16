@@ -17,6 +17,14 @@ class MergeStrategy(ABC):
     @abstractmethod
     def merge_batch(self, batch: List[Any], client_id: str,  msg_type: str) -> List[dict]:
         raise NotImplementedError()
+    
+    @abstractmethod
+    def get_client_state(self, client_id: str) -> Any:
+        raise NotImplementedError()
+
+    @abstractmethod
+    def set_client_state(self, client_id: str, state: Any) -> None:
+        raise NotImplementedError()
 
 
 class NoStrategy(MergeStrategy):
@@ -29,6 +37,12 @@ class NoStrategy(MergeStrategy):
         return batch
     
     def clear_client_state(self, client_id: str) -> None:
+        pass
+
+    def get_client_state(self, client_id: str) -> Any:
+        return None
+
+    def set_client_state(self, client_id: str, state: Any) -> None:
         pass
 
 
@@ -71,6 +85,17 @@ class AccountsStrategy:
         """Clean up memory after the client finishes."""
         self.accounts.pop(client_id, None)
         self.joined_transactions.pop(client_id, None)
+
+    def get_client_state(self, client_id: str) -> Any:
+        return (
+            self.accounts.get(client_id, {}),
+            self.joined_transactions.get(client_id, [])
+        )
+
+    def set_client_state(self, client_id: str, state: Any) -> None:
+        if state:
+            self.accounts[client_id] = state[0]
+            self.joined_transactions[client_id] = state[1]
 
 
 class SelfMergeStrategy(MergeStrategy):
@@ -141,3 +166,14 @@ class SelfMergeStrategy(MergeStrategy):
     def clear_client_state(self, client_id: str) -> None:
         self.inbound_txs.pop(client_id, None)
         self.outbound_txs.pop(client_id, None)
+
+    def get_client_state(self, client_id: str) -> Any:
+        return (
+            self.inbound_txs.get(client_id, {}),
+            self.outbound_txs.get(client_id, {})
+        )
+
+    def set_client_state(self, client_id: str, state: Any) -> None:
+        if state:
+            self.inbound_txs[client_id] = state[0]
+            self.outbound_txs[client_id] = state[1]

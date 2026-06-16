@@ -10,6 +10,7 @@ from src.common.communication.internal import (
     serialize,
 )
 from src.common.eof import EofCoordinator
+from src.common.state_manager import WorkerStateManager
 
 class BaseWorker(ABC):
     """
@@ -21,6 +22,12 @@ class BaseWorker(ABC):
         self.current_downstream_worker = 1
         self._running = False
         self.strategy = config.strategy    
+
+        self.eof_state_manager = WorkerStateManager(
+            base_dir="/app/state",
+            stage_name=f"{self.config.stage_name}_eof", 
+            worker_id=self.config.worker_id
+        )
 
     def start(self) -> None:
         logging.info(f"Starting {self.__class__.__name__}...")

@@ -7,10 +7,8 @@ from typing import Any, Dict, List
 
 import yaml
 
-from src.common.communication.internal import (
-    serialize,
-)
 from src.common.worker import BaseWorker
+from src.common.state_manager import WorkerStateManager
 
 from .strategies import (
     AveragesUnionStrategy,
@@ -34,6 +32,7 @@ class JoinConfig:
     worker_id: int
     num_downstream_workers: int
     routing_strategy: str
+    stage_name: str
 
 
 def _load_file_config() -> Dict[str, Any]:
@@ -82,6 +81,7 @@ def init_config() -> JoinConfig:
         worker_id=int(os.getenv("WORKER_ID", "1")),
         num_downstream_workers=int(os.getenv("NUM_DOWNSTREAM_WORKERS", "1")),
         routing_strategy=os.getenv("ROUTING_STRATEGY", "round_robin").lower(),
+        stage_name=os.getenv("STAGE_NAME", "join"),
     )
 
 
@@ -100,21 +100,35 @@ class JoinWorker(BaseWorker):
     def __init__(self, config: JoinConfig):
         super().__init__(config)
         self.strategy = config.strategy
-
         self.strategy.register_join_callback(self.send_downstream)
+
+        self.state_manager = WorkerStateManager(
+            base_dir="/app/state",
+            stage_name=config.stage_name,
+            worker_id=config.worker_id
+        )
+
+        recovered_state = self.state_manager.load_all()
+        for client_id, state in recovered_state.items():
+            self.strategy.set_client_state(client_id, state)
 
     def process_data(
         self, client_id: str, msg_id: str, msg_type: str, payload: dict
     ) -> None:
         batch = payload.get("batch", [])
-
-        logging.info("Batch arrived of len: %d", len(batch))
         self.strategy.join_batch(batch, client_id)
+
+        client_state = self.strategy.get_client_state(client_id)
+        if self.client_state is not None:
+            self.state_manager.save_client(client_id, client_state)
 
     def flush_state(self, client_id: str) -> None:
         final_msg = self.strategy.flush(client_id)
-        logging.info("Flushing final joined result for client %s: %s", client_id, final_msg)
         self.send_downstream(client_id, final_msg)
+
+        client_state = self.strategy.get_client_state(client_id)
+        if client_state is not None:
+            self.state_manager.delete_client(client_id)
 
 
 def main() -> int:

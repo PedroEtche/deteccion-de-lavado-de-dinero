@@ -102,6 +102,7 @@ class Client:
             send_csv(
                 self.server_socket, transactions_path, batch_size, STREAM_TRANSACTIONS
             )
+            time.sleep(10)  # aseguramos que los batches anteriores se procesen antes del EOF
             send_eof(self.server_socket)
             logging.info("Datasets sent; waiting for results")
         finally:

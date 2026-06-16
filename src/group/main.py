@@ -36,6 +36,7 @@ class GroupConfig:
     num_downstream_workers: int
     routing_strategy: str
     strategy: GroupStrategy
+    stage_name: str
 
 def _extract_strategy_type(raw_strategy: Any) -> str:
     if isinstance(raw_strategy, dict):
@@ -81,7 +82,8 @@ def init_config() -> GroupConfig:
         expected_eofs=int(os.getenv("EOF_EXPECTED", "1")),
         worker_id=int(os.getenv("WORKER_ID", "1")),
         num_downstream_workers=int(os.getenv("NUM_DOWNSTREAM_WORKERS", "1")),
-        routing_strategy=os.getenv("ROUTING_STRATEGY", "round_robin").lower()
+        routing_strategy=os.getenv("ROUTING_STRATEGY", "round_robin").lower(),
+        stage_name=os.getenv("STAGE_NAME", "group"),
     )
 
 def log_config(config: GroupConfig) -> None:

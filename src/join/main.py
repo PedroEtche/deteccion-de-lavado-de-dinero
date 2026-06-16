@@ -119,7 +119,7 @@ class JoinWorker(BaseWorker):
         self.strategy.join_batch(batch, client_id)
 
         client_state = self.strategy.get_client_state(client_id)
-        if self.client_state is not None:
+        if client_state is not None:
             self.state_manager.save_client(client_id, client_state)
 
     def flush_state(self, client_id: str) -> None:

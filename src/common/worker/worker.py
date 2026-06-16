@@ -36,6 +36,7 @@ class BaseWorker(ABC):
         self.eof_coordinator = EofCoordinator(
             expected_eofs=self.config.expected_eofs,
             on_flush=self._internal_on_flush,
+            state_manager=self.eof_state_manager
         )
         
         routing_keys = [

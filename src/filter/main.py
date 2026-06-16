@@ -33,6 +33,7 @@ class FilterConfig:
     num_downstream_workers: int
     routing_strategy: str
     worker_name: str
+    stage_name: str
 
 
 def _load_file_config() -> Dict[str, Any]:
@@ -78,6 +79,7 @@ def init_config() -> FilterConfig:
         num_downstream_workers=int(os.getenv("NUM_DOWNSTREAM_WORKERS", "1")),
         routing_strategy=os.getenv("ROUTING_STRATEGY", "round_robin").lower(),
         worker_name=os.getenv("WORKER_NAME", "filter"),
+        stage_name=os.getenv("STAGE_NAME", "filter"),
     )
 
 

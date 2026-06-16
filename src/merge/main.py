@@ -100,7 +100,7 @@ class MergeWorker(BaseWorker):
             worker_id=config.worker_id
         )
 
-        recovered_state = self.state_manager.load_client_state()
+        recovered_state = self.state_manager.load_all()
         for client_id, state in recovered_state.items():
             self.strategy.set_client_state(client_id, state)
 

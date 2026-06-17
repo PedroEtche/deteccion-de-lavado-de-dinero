@@ -131,7 +131,7 @@ class AccountPairCountStategy(AggregatorStrategy):
     def clear_client_state(self, client: str) -> None:
         self.counts_by_client.pop(client, None)
 
-    def _build_results(self, counts: Dict[tuple, int]) -> List[Any]:
+    def _build_results(self, counts: Dict[str, Dict[str, Any]]) -> List[Any]:
         results = []
 
         for key, data in counts.items():
@@ -325,10 +325,17 @@ class ScatterAggregatorStrategy(AggregatorStrategy):
                     "dests": list(data["dests"]),
                     "txs": data["txs"],
                 }
-            # data["txs"] = []
 
         return json_state
     
     def set_client_state(self, client: str, state: Any) -> None:
-        if state:
-            self.state_by_client[client] = state
+        if not state: return
+
+        client_state = {}
+        for origin, data in state.items():
+            client_state[origin] = {
+                "dests": set(data["dests"]),
+                "txs": data["txs"]
+            }
+
+        self.state_by_client[client] = client_state

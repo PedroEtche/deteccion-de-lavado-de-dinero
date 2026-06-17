@@ -1,4 +1,5 @@
 from typing import Callable
+import logging
 
 class EofCoordinator:
     """
@@ -29,7 +30,6 @@ class EofCoordinator:
         client_eofs += 1
 
         self.eofs_by_client[client_id] = client_eofs
-        
         self.state_manager.save_client(client_id, client_eofs)
 
         if client_eofs >= self._expected:

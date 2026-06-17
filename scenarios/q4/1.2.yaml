@@ -49,6 +49,7 @@ services:
     - EOF_EXPECTED=1
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=3
+    - STAGE_NAME=filter_usd
 
   filter_usd_1:
     build:
@@ -64,6 +65,7 @@ services:
     - EOF_EXPECTED=1
     - WORKER_ID=2
     - NUM_DOWNSTREAM_WORKERS=3
+    - STAGE_NAME=filter_usd
 
 
   # filter_by_datetime_0:
@@ -96,6 +98,7 @@ services:
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=2
     - ROUTING_STRATEGY=sharded
+    - STAGE_NAME=group_scatter
 
   group_scatter_1:
     build:
@@ -112,6 +115,7 @@ services:
     - WORKER_ID=2
     - NUM_DOWNSTREAM_WORKERS=2
     - ROUTING_STRATEGY=sharded
+    - STAGE_NAME=group_scatter
 
   group_scatter_2:
     build:
@@ -128,6 +132,7 @@ services:
     - WORKER_ID=3
     - NUM_DOWNSTREAM_WORKERS=2
     - ROUTING_STRATEGY=sharded
+    - STAGE_NAME=group_scatter
 
   aggregator_scatter_group_0:
     build:
@@ -144,6 +149,7 @@ services:
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=2
     - ROUTING_STRATEGY=sharded
+    - STAGE_NAME=scatter_aggregator
 
   aggregator_scatter_group_1:
     build:
@@ -160,6 +166,7 @@ services:
     - WORKER_ID=2
     - NUM_DOWNSTREAM_WORKERS=2
     - ROUTING_STRATEGY=sharded
+    - STAGE_NAME=scatter_aggregator
 
   merge_with_self_0:
     build:
@@ -175,6 +182,7 @@ services:
     - EOF_EXPECTED=2
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=2
+    - STAGE_NAME=self_merge
 
   merge_with_self_1:
     build:
@@ -190,6 +198,7 @@ services:
     - EOF_EXPECTED=2
     - WORKER_ID=2
     - NUM_DOWNSTREAM_WORKERS=2
+    - STAGE_NAME=self_merge
 
   group_account_pair_0:
     build:
@@ -205,6 +214,7 @@ services:
     - EOF_EXPECTED=2
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=1
+    - STAGE_NAME=group_account_pair
 
   group_account_pair_1:
     build:
@@ -220,6 +230,7 @@ services:
     - EOF_EXPECTED=2
     - WORKER_ID=2
     - NUM_DOWNSTREAM_WORKERS=1
+    - STAGE_NAME=group_account_pair
     
   aggreator_account_pair_0:
     build:
@@ -235,6 +246,7 @@ services:
     - EOF_EXPECTED=2
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=1
+    - STAGE_NAME=aggregator_account_pair
 
   group_by_accounts_0:
     build:
@@ -251,6 +263,7 @@ services:
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=2
     - ROUTING_STRATEGY=sharded
+    - STAGE_NAME=group_accounts
 
   aggregator_accounts_0:
     build:
@@ -266,6 +279,7 @@ services:
     - EOF_EXPECTED=1
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=1
+    - STAGE_NAME=aggregator_accounts
 
   aggregator_accounts_1:
     build:
@@ -281,6 +295,7 @@ services:
     - EOF_EXPECTED=1
     - WORKER_ID=2
     - NUM_DOWNSTREAM_WORKERS=1
+    - STAGE_NAME=aggregator_accounts
 
   q4_join_0:  
     build:
@@ -297,6 +312,7 @@ services:
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=1
     - QUERY_RESULT_NUMBER=4
+    - STAGE_NAME=join_query_result
 
   client_0:
     build:

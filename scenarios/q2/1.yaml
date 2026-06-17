@@ -28,10 +28,12 @@ services:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
     - TRANSACTIONS_EXCHANGE=transactions_exchange
-    - ACCOUNTS_EXCHANGE=merge_max_by_account_exchange
+    - ACCOUNTS_QUEUE=accounts_queue
     - RESULT_EXCHANGE=gateway_results_exchange
     - SERVER_PORT=5678
-    - NUM_TX_WORKERS=1
+    - TRANSACTIONS_USD_WORKERS=2
+    - TRANSACTIONS_DATE_WORKERS=1
+    - ACCOUNTS_WORKERS=1
 
   filter_usd_0:
     build:
@@ -48,6 +50,7 @@ services:
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=1
     - WORKER_NAME=filter_usd
+    - STAGE_NAME=filter_usd
 
   group_by_bank_max_0:
     build:
@@ -63,7 +66,7 @@ services:
     - EOF_EXPECTED=1
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=1
-    - WORKER_NAME=group_by_bank_max
+    - STAGE_NAME=group_by_bank_max
 
   aggregator_bank_max_amount_0:
     build:
@@ -79,7 +82,7 @@ services:
     - EOF_EXPECTED=1
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=1
-    - WORKER_NAME=aggregator_bank_max_amount
+    - STAGE_NAME=aggregator_bank_max_amount
 
   merge_account_info_0:
     build:
@@ -95,6 +98,7 @@ services:
     - EOF_EXPECTED=2
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=1
+    - STAGE_NAME=merge_account_info
 
   join_query_result_0:
     build:
@@ -111,6 +115,7 @@ services:
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=1
     - QUERY_RESULT_NUMBER=2
+    - STAGE_NAME=join_query_result
 
   client_0:
     build:

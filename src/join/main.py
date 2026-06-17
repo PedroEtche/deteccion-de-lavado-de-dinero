@@ -126,9 +126,7 @@ class JoinWorker(BaseWorker):
         final_msg = self.strategy.flush(client_id)
         self.send_downstream(client_id, final_msg)
 
-        client_state = self.strategy.get_client_state(client_id)
-        if client_state is not None:
-            self.state_manager.delete_client(client_id)
+        self.state_manager.delete_client(client_id)
 
 
 def main() -> int:

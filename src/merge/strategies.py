@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 from src.common.communication.internal import TransactionRow
 from typing import Any, Dict, List
-import logging
 
 class MergeStrategy(ABC):
     """Abstract strategy for filtering batches of messages.
@@ -56,7 +55,6 @@ class AccountsStrategy:
 
     def merge_batch(self, batch: dict, client_id: str, msg_type: str) -> List[dict]:
         if msg_type == "raw_accounts":
-            logging.info("Processing raw_accounts batch for client")
             if client_id not in self.accounts:
                 self.accounts[client_id] = {}
                 
@@ -112,8 +110,6 @@ class SelfMergeStrategy(MergeStrategy):
 
     def merge_batch(self, batch: List[Any], client_id: str, msg_type: str) -> List[dict]:
         joined_txs = []
-        logging.info("Merging batch for client %s with %d transactions", client_id, len(batch))
-        logging.info("Batch content for client %s: %s", client_id, batch)
         if client_id not in self.inbound_txs:
             self.inbound_txs[client_id] = {}
             self.outbound_txs[client_id] = {}
@@ -145,11 +141,9 @@ class SelfMergeStrategy(MergeStrategy):
                 client_inbound[dest_key] = []
             client_inbound[dest_key].append(tx)
 
-        logging.info("Finished merging batch for client %s, found %d joined transactions", client_id, len(joined_txs))
         return joined_txs
 
     def _create_merged_record(self, tx_1: dict, tx_2: dict):
-        logging.info("Merging records: %s and %s", tx_1, tx_2)
         if (
             tx_1["from_bank"] == tx_2["to_bank"]
             and tx_1["from_account"] == tx_2["to_account"]

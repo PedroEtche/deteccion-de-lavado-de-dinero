@@ -162,7 +162,6 @@ class AggregatorWorker(BaseWorker):
             self.send_downstream(client_id, batch_msg)
 
         self.strategy.clear_client_state(client_id)
-        # limpiar archivo de cliente
         self.state_manager.delete_client(client_id)
 
 def main() -> int:

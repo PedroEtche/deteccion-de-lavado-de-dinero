@@ -104,8 +104,8 @@ class SelfMergeStrategy(MergeStrategy):
     """
 
     def __init__(self) -> None:
-        self.inbound_txs: Dict[str, Dict[tuple, List[Dict]]] = {}
-        self.outbound_txs: Dict[str, Dict[tuple, List[Dict]]] = {}
+        self.inbound_txs: Dict[str, Dict[str, List[Dict]]] = {}
+        self.outbound_txs: Dict[str, Dict[str, List[Dict]]] = {}
 
     def __str__(self) -> str:
         return "SelfMergeStrategy"
@@ -122,8 +122,8 @@ class SelfMergeStrategy(MergeStrategy):
         client_outbound = self.outbound_txs[client_id]
 
         for tx in batch:
-            origin_key = (tx["from_bank"], tx["from_account"])
-            dest_key = (tx["to_bank"], tx["to_account"])
+            origin_key = f"{tx['from_bank']}_{tx['from_account']}"
+            dest_key = f"{tx['to_bank']}_{tx['to_account']}"
 
             if origin_key in client_inbound:
                 for inbound_tx in client_inbound[origin_key]:

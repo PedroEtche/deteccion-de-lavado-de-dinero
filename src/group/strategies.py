@@ -208,6 +208,13 @@ class ScatterGroupStrategy(GroupStrategy):
             if string_key not in routed_batches:
                 routed_batches[string_key] = []
 
-            routed_batches[string_key].append(tx)
+            routed_batches[string_key].append(
+                {
+                    "from_bank": tx.from_bank,
+                    "from_account": tx.from_account,
+                    "to_bank": tx.to_bank,
+                    "to_account": tx.to_account,
+                }
+            )
 
         return [(route, b) for route, b in routed_batches.items()]

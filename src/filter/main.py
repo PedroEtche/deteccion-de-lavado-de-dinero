@@ -6,14 +6,14 @@ from typing import Any, Dict, List
 
 import yaml
 
-from src.common.worker import BaseWorker
 from src.common.communication.internal import build_raw_transactions_message
+from src.common.worker import BaseWorker
 
 from .strategies import (
     AmountComparisonStrategy,
+    CountFieldComparisonStrategy,
     CurrencyConversionStrategy,
     CurrencyStrategy,
-    CountFieldComparisonStrategy,
     FilterStrategy,
     NoStrategy,
 )
@@ -33,6 +33,8 @@ class FilterConfig:
     num_downstream_workers: int
     routing_strategy: str
     worker_name: str
+    role: str
+    replication_exchange: str
 
 
 def _load_file_config() -> Dict[str, Any]:
@@ -78,6 +80,8 @@ def init_config() -> FilterConfig:
         num_downstream_workers=int(os.getenv("NUM_DOWNSTREAM_WORKERS", "1")),
         routing_strategy=os.getenv("ROUTING_STRATEGY", "round_robin").lower(),
         worker_name=os.getenv("WORKER_NAME", "filter"),
+        role=os.getenv("ROLE", "master"),
+        replication_exchange=os.getenv("REPLICATION_EXCHANGE", ""),
     )
 
 
@@ -97,7 +101,9 @@ class FilterWorker(BaseWorker):
         super().__init__(config)
         self.strategy = config.strategy
 
-    def process_data(self, client_id: str, msg_id: str, msg_type: str, payload: dict) -> None:
+    def process_data(
+        self, client_id: str, msg_id: str, msg_type: str, payload: dict
+    ) -> None:
         batch = payload.get("batch", [])
 
         filtered_batch = self.strategy.filter_batch(batch)

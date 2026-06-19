@@ -20,7 +20,14 @@ class EofCoordinator:
         self._on_flush = on_flush
         self.state_manager = state_manager
 
-        self.eofs_by_client = self.state_manager.load_all()
+        self.eofs_by_client = {}
+
+        client_ids = self.state_manager.get_all_client_ids()
+
+        for client_id in client_ids:
+            snapshot, _ = self.state_manager.load_client(client_id)
+            self.eofs_by_client[client_id] = snapshot
+            # aca ver si hace falta ver condicion de expected
 
     def handle_eof(self, client_id: str) -> int:
         """
@@ -30,7 +37,7 @@ class EofCoordinator:
         client_eofs += 1
 
         self.eofs_by_client[client_id] = client_eofs
-        self.state_manager.save_client(client_id, client_eofs)
+        self.state_manager.save_snapshot(client_id, client_eofs)
 
         if client_eofs >= self._expected:
             self._on_flush(client_id)

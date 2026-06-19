@@ -181,14 +181,14 @@ class Gateway:
             entry["done"].set()
 
     def send_accounts_data(self, serialized_message: bytes):
-        """Sends data to accounts workers using Round-Robin strategy."""
+        """Broadcasts data to accounts workers."""
         with self._send_lock:
-            logging.info("Routing accounts message to workers with Round-Robin strategy")
-            self.accounts_mw.send(
-                serialized_message,
-                routing_key=f"worker_{self.accounts_current_worker}",
-            )
-        self.accounts_current_worker = (self.accounts_current_worker % self.accounts_workers) + 1
+            logging.info("Broadcasting accounts message to %d workers", self.accounts_workers)
+            for worker_id in range(1, self.accounts_workers + 1):
+                self.accounts_mw.send(
+                    serialized_message,
+                    routing_key=f"worker_{worker_id}",
+                )
 
     def send_transactions_data(self, serialized_message: bytes):
         """Sends data via Round-Robin to a specific worker."""

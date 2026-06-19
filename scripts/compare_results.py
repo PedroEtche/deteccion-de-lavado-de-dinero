@@ -24,39 +24,29 @@ RED = "\033[1;31m" if _USE_COLOR else ""
 RESET = "\033[0m" if _USE_COLOR else ""
 
 
-def read_csv(path):
+def read_rows(path):
+    # Los CSV de resultado son headerless: cada linea es una fila de datos.
+    # Comparamos como conjunto ordenado, asi el orden de filas no importa.
     with open(path, newline="", encoding="utf-8") as fh:
-        reader = csv.DictReader(fh)
-        if reader.fieldnames is None:
-            return [], []
-        headers = list(reader.fieldnames)
-        rows = sorted(
-            [dict(row) for row in reader],
-            key=lambda r: [r.get(h, "") for h in headers],
-        )
-    return headers, rows
+        reader = csv.reader(fh)
+        rows = sorted(tuple(row) for row in reader if row)
+    return rows
 
 
 def compare_csvs(got_path, expected_path):
     try:
-        got_headers, got_rows = read_csv(got_path)
+        got_rows = read_rows(got_path)
     except FileNotFoundError:
         return False, f"client result not found: {got_path}"
     except Exception as exc:
         return False, f"error reading {got_path}: {exc}"
 
     try:
-        exp_headers, exp_rows = read_csv(expected_path)
+        exp_rows = read_rows(expected_path)
     except FileNotFoundError:
         return False, f"expected result not found: {expected_path}"
     except Exception as exc:
         return False, f"error reading {expected_path}: {exc}"
-
-    if got_headers != exp_headers:
-        return (
-            False,
-            f"header mismatch\n  got:      {got_headers}\n  expected: {exp_headers}",
-        )
 
     if len(got_rows) != len(exp_rows):
         return False, (
@@ -72,10 +62,10 @@ def compare_csvs(got_path, expected_path):
 
 
 def _first_diff(got, expected):
-    got_set = {tuple(sorted(r.items())) for r in got}
-    exp_set = {tuple(sorted(r.items())) for r in expected}
-    missing = [dict(r) for r in (exp_set - got_set)]
-    extra = [dict(r) for r in (got_set - exp_set)]
+    got_set = set(got)
+    exp_set = set(expected)
+    missing = list(exp_set - got_set)
+    extra = list(got_set - exp_set)
     lines = []
     if missing:
         lines.append(f"  missing rows: {missing[:3]}")

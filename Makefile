@@ -102,24 +102,18 @@ q5_switch:
 .PHONY: q5_switch
 
 q5_test_fixed:
-	rm -f results/clients/client_0/q5.txt
+	rm -f results/clients/client_0/q5.csv
 	cp ./scenarios/q5/1.yaml docker-compose.yaml
 	COMPOSE_HTTP_TIMEOUT=300 docker compose -f docker-compose.yaml up --build --remove-orphans --detach
 	@echo "Waiting for client_0 to finish..."
 	@docker wait client_0
-	@got=$$(tr -d '[:space:]' < results/clients/client_0/q5.txt 2>/dev/null); \
-	exp=$$(tr -d '[:space:]' < results/fixed/q5.txt); \
-	if [ "$$got" = "$$exp" ]; then \
-		printf '\n\033[1;32mPASS\033[0m  q5 (count=%s)\n\n' "$$got"; \
-	else \
-		printf '\n\033[1;31mFAIL\033[0m  q5: got=%s expected=%s\n\n' "$$got" "$$exp"; \
-	fi
+	-python3 scripts/compare_results.py q5
 	docker compose -f docker-compose.yaml stop -t 1
 	docker compose -f docker-compose.yaml down
 .PHONY: q5_test_fixed
 
 all_test_fixed:
-	rm -f results/clients/client_0/q1.csv results/clients/client_0/q2.csv results/clients/client_0/q3.csv results/clients/client_0/q5.txt
+	rm -f results/clients/client_0/q1.csv results/clients/client_0/q2.csv results/clients/client_0/q3.csv results/clients/client_0/q5.csv
 	cp ./scenarios/all/1.yaml docker-compose.yaml
 	COMPOSE_HTTP_TIMEOUT=300 docker compose -f docker-compose.yaml up --build --remove-orphans --detach
 	@echo "Waiting for client_0 to finish..."
@@ -127,19 +121,13 @@ all_test_fixed:
 	-python3 scripts/compare_results.py q1
 	-python3 scripts/compare_results.py q2
 	-python3 scripts/compare_results.py q3
-	@got=$$(tr -d '[:space:]' < results/clients/client_0/q5.txt 2>/dev/null); \
-	exp=$$(tr -d '[:space:]' < results/fixed/q5.txt); \
-	if [ "$$got" = "$$exp" ]; then \
-		printf '\n\033[1;32mPASS\033[0m  q5 (count=%s)\n\n' "$$got"; \
-	else \
-		printf '\n\033[1;31mFAIL\033[0m  q5: got=%s expected=%s\n\n' "$$got" "$$exp"; \
-	fi
+	-python3 scripts/compare_results.py q5
 	docker compose -f docker-compose.yaml stop -t 1
 	docker compose -f docker-compose.yaml down
 .PHONY: all_test_fixed
 
 all_multi_test_fixed:
-	rm -f results/clients/client_*/q1.csv results/clients/client_*/q2.csv results/clients/client_*/q3.csv results/clients/client_*/q5.txt
+	rm -f results/clients/client_*/q1.csv results/clients/client_*/q2.csv results/clients/client_*/q3.csv results/clients/client_*/q5.csv
 	cp ./scenarios/all/2.yaml docker-compose.yaml
 	COMPOSE_HTTP_TIMEOUT=300 docker compose -f docker-compose.yaml up --build --remove-orphans --detach
 	@echo "Waiting for all clients to finish..."
@@ -147,15 +135,35 @@ all_multi_test_fixed:
 	-python3 scripts/compare_results.py q1
 	-python3 scripts/compare_results.py q2
 	-python3 scripts/compare_results.py q3
-	@exp=$$(tr -d '[:space:]' < results/fixed/q5.txt); \
-	for c in client_0 client_1 client_2; do \
-		got=$$(tr -d '[:space:]' < results/clients/$$c/q5.txt 2>/dev/null); \
-		if [ "$$got" = "$$exp" ]; then \
-			printf '\033[1;32mPASS\033[0m  %s q5 (count=%s)\n' "$$c" "$$got"; \
-		else \
-			printf '\033[1;31mFAIL\033[0m  %s q5: got=%s expected=%s\n' "$$c" "$$got" "$$exp"; \
-		fi; \
-	done
+	-python3 scripts/compare_results.py q5
 	docker compose -f docker-compose.yaml stop -t 1
 	docker compose -f docker-compose.yaml down
 .PHONY: all_multi_test_fixed
+
+all_scaled_test_fixed:
+	rm -f results/clients/client_0/q1.csv results/clients/client_0/q2.csv results/clients/client_0/q3.csv results/clients/client_0/q5.csv
+	cp ./scenarios/all/3.yaml docker-compose.yaml
+	COMPOSE_HTTP_TIMEOUT=300 docker compose -f docker-compose.yaml up --build --remove-orphans --detach
+	@echo "Waiting for client_0 to finish..."
+	@docker wait client_0
+	-python3 scripts/compare_results.py q1
+	-python3 scripts/compare_results.py q2
+	-python3 scripts/compare_results.py q3
+	-python3 scripts/compare_results.py q5
+	docker compose -f docker-compose.yaml stop -t 1
+	docker compose -f docker-compose.yaml down
+.PHONY: all_scaled_test_fixed
+
+all_scaled_multi_test_fixed:
+	rm -f results/clients/client_*/q1.csv results/clients/client_*/q2.csv results/clients/client_*/q3.csv results/clients/client_*/q5.csv
+	cp ./scenarios/all/4.yaml docker-compose.yaml
+	COMPOSE_HTTP_TIMEOUT=300 docker compose -f docker-compose.yaml up --build --remove-orphans --detach
+	@echo "Waiting for all clients to finish..."
+	@docker wait client_0 client_1 client_2
+	-python3 scripts/compare_results.py q1
+	-python3 scripts/compare_results.py q2
+	-python3 scripts/compare_results.py q3
+	-python3 scripts/compare_results.py q5
+	docker compose -f docker-compose.yaml stop -t 1
+	docker compose -f docker-compose.yaml down
+.PHONY: all_scaled_multi_test_fixed

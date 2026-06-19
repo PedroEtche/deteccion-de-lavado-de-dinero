@@ -1,0 +1,14 @@
+# Router por fecha Q5, escalado: reparte a 2 converters.
+mom_host: rabbitmq
+
+input: transactions_date_exchange
+
+routes:
+  - name: q5
+    output: q5_currency_input_exchange
+    num_downstream_workers: 2
+    routing_strategy: round_robin
+    filters:
+      - type: date_range
+        from: 2022-09-01
+        to: 2022-09-05

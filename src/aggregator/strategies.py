@@ -1,5 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Set
+import logging
+
+logging.basicConfig(level=logging.INFO)
 
 class AggregatorStrategy(ABC):
     """Abstract strategy for aggregating batches of messages."""
@@ -295,7 +298,7 @@ class ScatterAggregatorStrategy(AggregatorStrategy):
             data = client_state.setdefault(origin, {"dests": set(), "txs": []})
             data["dests"].add(dest)
             data["txs"].append(tx)
-
+            
         return []
 
     def get_result_for_client(self, client: str) -> List[Any]:
@@ -303,7 +306,7 @@ class ScatterAggregatorStrategy(AggregatorStrategy):
 
         routed_results = []
         for origin, data in client_state.items():
-            if len(data["dests"]) > 5:
+            if len(data["dests"]) >= 5:
                 routed_results.append((origin, data["txs"]))
 
                 for tx in data["txs"]:

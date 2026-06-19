@@ -33,7 +33,7 @@ services:
     - SERVER_PORT=5678
     - TRANSACTIONS_USD_WORKERS=1
     - TRANSACTIONS_DATE_WORKERS=1
-    - ACCOUNTS_WORKERS=1
+    - ACCOUNTS_WORKERS=3
 
   filter_usd_0:
     build:
@@ -66,8 +66,27 @@ services:
     environment:
     - EOF_EXPECTED=1
     - WORKER_ID=1
-    - NUM_DOWNSTREAM_WORKERS=1
+    - NUM_DOWNSTREAM_WORKERS=2
     - STAGE_NAME=group_by_bank_max
+    - ROUTING_STRATEGY=sharded
+    
+  group_by_bank_max_1:
+    build:
+      context: .
+      dockerfile: src/group/Dockerfile
+    container_name: group_by_bank_max_1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/group/config/bank_max_amount.yaml:/app/config.yaml:ro
+    - ./persisted_state:/app/state
+    environment:
+    - EOF_EXPECTED=1
+    - WORKER_ID=2
+    - NUM_DOWNSTREAM_WORKERS=2
+    - STAGE_NAME=group_by_bank_max
+    - ROUTING_STRATEGY=sharded
 
   aggregator_bank_max_amount_0:
     build:
@@ -81,9 +100,26 @@ services:
     - ./src/aggregator/config/max_amount_per_bank_config.yaml:/app/config.yaml:ro
     - ./persisted_state:/app/state
     environment:
-    - EOF_EXPECTED=1
+    - EOF_EXPECTED=2
     - WORKER_ID=1
-    - NUM_DOWNSTREAM_WORKERS=1
+    - NUM_DOWNSTREAM_WORKERS=3
+    - STAGE_NAME=aggregator_bank_max_amount
+
+  aggregator_bank_max_amount_1:
+    build:
+      context: .
+      dockerfile: src/aggregator/Dockerfile
+    container_name: aggregator_bank_max_amount_1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/aggregator/config/max_amount_per_bank_config.yaml:/app/config.yaml:ro
+    - ./persisted_state:/app/state
+    environment:
+    - EOF_EXPECTED=2
+    - WORKER_ID=2
+    - NUM_DOWNSTREAM_WORKERS=3
     - STAGE_NAME=aggregator_bank_max_amount
 
   merge_account_info_0:
@@ -98,8 +134,42 @@ services:
     - ./src/merge/config/accounts_config.yaml:/app/config.yaml:ro
     - ./persisted_state:/app/state
     environment:
-    - EOF_EXPECTED=2
+    - EOF_EXPECTED=3
     - WORKER_ID=1
+    - NUM_DOWNSTREAM_WORKERS=1
+    - STAGE_NAME=merge_account_info
+
+  merge_account_info_1:
+    build:
+      context: .
+      dockerfile: src/merge/Dockerfile
+    container_name: merge_account_info_1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/merge/config/accounts_config.yaml:/app/config.yaml:ro
+    - ./persisted_state:/app/state
+    environment:
+    - EOF_EXPECTED=3
+    - WORKER_ID=2
+    - NUM_DOWNSTREAM_WORKERS=1
+    - STAGE_NAME=merge_account_info
+
+  merge_account_info_2:
+    build:
+      context: .
+      dockerfile: src/merge/Dockerfile
+    container_name: merge_account_info_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/merge/config/accounts_config.yaml:/app/config.yaml:ro
+    - ./persisted_state:/app/state
+    environment:
+    - EOF_EXPECTED=3
+    - WORKER_ID=3
     - NUM_DOWNSTREAM_WORKERS=1
     - STAGE_NAME=merge_account_info
 
@@ -115,7 +185,7 @@ services:
     - ./src/join/config/q2_result.yaml:/app/config.yaml:ro
     - ./persisted_state:/app/state
     environment:
-    - EOF_EXPECTED=1
+    - EOF_EXPECTED=3
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=1
     - QUERY_RESULT_NUMBER=2
@@ -130,14 +200,35 @@ services:
     depends_on:
     - gateway
     volumes:
-    - ./data/small_trans.csv:/data/small_trans.csv
-    - ./data/small_accounts.csv:/data/small_accounts.csv
+    - ./data/LI-Small_Trans.csv:/data/small_trans.csv
+    - ./data/accounts.csv:/data/small_accounts.csv
     - ./results/clients/client_0:/results/clients/client_0
     environment:
     - PYTHONUNBUFFERED=1
     - SERVER_HOST=gateway
     - SERVER_PORT=5678
     - OUTPUT_PATH=/results/clients/client_0/
+    - ACCOUNTS_PATH=/data/small_accounts.csv
+    - TRANSACTIONS_PATH=/data/small_trans.csv
+    - BATCH_SIZE=500
+
+  client_1:
+    build:
+      context: .
+      dockerfile: src/client/Dockerfile
+    command: ["sh", "-c", "sleep 10 && python -m src.client.main"]
+    container_name: client_1
+    depends_on:
+    - gateway
+    volumes:
+    - ./data/small_trans.csv:/data/small_trans.csv
+    - ./data/small_accounts.csv:/data/small_accounts.csv
+    - ./results/clients/client_1:/results/clients/client_1
+    environment:
+    - PYTHONUNBUFFERED=1
+    - SERVER_HOST=gateway
+    - SERVER_PORT=5678
+    - OUTPUT_PATH=/results/clients/client_1/
     - ACCOUNTS_PATH=/data/small_accounts.csv
     - TRANSACTIONS_PATH=/data/small_trans.csv
     - BATCH_SIZE=500

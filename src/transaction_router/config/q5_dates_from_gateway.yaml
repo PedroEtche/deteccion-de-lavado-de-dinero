@@ -1,0 +1,16 @@
+mom_host: rabbitmq
+
+# Router por fecha de Q5. Lee la rama de TODAS las monedas que el gateway
+# manda al date exchange, y deja pasar solo [2022-09-01, 2022-09-05] hacia
+# el currency converter de Q5.
+input: transactions_date_exchange
+
+routes:
+  - name: q5
+    output: q5_currency_input_exchange
+    num_downstream_workers: 1
+    routing_strategy: round_robin
+    filters:
+      - type: date_range
+        from: 2022-09-01
+        to: 2022-09-05

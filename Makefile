@@ -117,3 +117,23 @@ q5_test_fixed:
 	docker compose -f docker-compose.yaml stop -t 1
 	docker compose -f docker-compose.yaml down
 .PHONY: q5_test_fixed
+
+all_test_fixed:
+	rm -f results/clients/client_0/q1.csv results/clients/client_0/q2.csv results/clients/client_0/q3.csv results/clients/client_0/q5.txt
+	cp ./scenarios/all/1.yaml docker-compose.yaml
+	COMPOSE_HTTP_TIMEOUT=300 docker compose -f docker-compose.yaml up --build --remove-orphans --detach
+	@echo "Waiting for client_0 to finish..."
+	@docker wait client_0
+	-python3 scripts/compare_results.py q1
+	-python3 scripts/compare_results.py q2
+	-python3 scripts/compare_results.py q3
+	@got=$$(tr -d '[:space:]' < results/clients/client_0/q5.txt 2>/dev/null); \
+	exp=$$(tr -d '[:space:]' < results/fixed/q5.txt); \
+	if [ "$$got" = "$$exp" ]; then \
+		printf '\n\033[1;32mPASS\033[0m  q5 (count=%s)\n\n' "$$got"; \
+	else \
+		printf '\n\033[1;31mFAIL\033[0m  q5: got=%s expected=%s\n\n' "$$got" "$$exp"; \
+	fi
+	docker compose -f docker-compose.yaml stop -t 1
+	docker compose -f docker-compose.yaml down
+.PHONY: all_test_fixed

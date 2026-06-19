@@ -1,0 +1,10 @@
+mom_host: rabbitmq
+
+# Q1: recibe USD ya filtradas (rama del fan-out) y deja pasar monto < 50.
+input: q1_input_exchange
+output: q1_filter_queue
+
+strategy:
+  - type: amount
+  - condition: <
+  - threshold: 50

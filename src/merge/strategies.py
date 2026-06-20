@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from src.common.communication.internal import TransactionRow
+from src.common.communication.internal import TransactionRow, Q2ResultRow
 from typing import Any, Dict, List
 import logging
 
@@ -60,10 +60,16 @@ class AccountsStrategy:
             for row in batch:
                 bank_id = row["from_bank"]
                 bank_name = client_accounts.get(bank_id, "Unknown")
-                
-                enriched_row = row.copy()
-                enriched_row["bank_name"] = bank_name
-                enriched_batch.append(enriched_row)
+
+                # El orden de columnas del CSV de Q2 lo define Q2ResultRow.
+                enriched_batch.append(
+                    Q2ResultRow(
+                        from_bank=row["from_bank"],
+                        from_account=row["from_account"],
+                        bank_name=bank_name,
+                        amount_paid=row["amount_paid"],
+                    )
+                )
 
             return enriched_batch
 

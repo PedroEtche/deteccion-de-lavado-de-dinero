@@ -26,6 +26,7 @@ class FilterConfig:
     mom_host: str
     input_exchange: str
     output_exchange: str
+    output_exchanges: List[str]
     log_level: str
     strategy: FilterStrategy
     expected_eofs: int
@@ -69,10 +70,14 @@ def _build_strategy(strategy_data: List[Dict[str, Any]]) -> FilterStrategy:
 
 def init_config() -> FilterConfig:
     data = _load_file_config()
+    # `outputs:` (lista) habilita fan-out a varias ramas; `output:` (single)
+    # se sigue soportando y equivale a una lista de 1.
+    outputs = data.get("outputs") or ([data.get("output")] if data.get("output") else [])
     return FilterConfig(
         mom_host=data.get("mom_host", "rabbitmq"),
         input_exchange=data.get("input", ""),
-        output_exchange=data.get("output", ""),
+        output_exchange=outputs[0] if outputs else "",
+        output_exchanges=outputs,
         log_level=os.environ.get("LOG_LEVEL", "INFO"),
         strategy=_build_strategy(data.get("strategy", [])),
         expected_eofs=int(os.getenv("EOF_EXPECTED", "1")),

@@ -119,7 +119,11 @@ def _map_row(raw_row, field_map, row_cls):
         if csv_col in _IGNORED_COLUMNS:
             continue
         value = raw_row.get(csv_col)
-        if value is not None and value != "":
+        if value is not None:
+            # strip() saca \r (CSV con line-endings Windows), \n y espacios
+            # para que ningun campo arrastre basura al pipeline.
+            value = value.strip()
+        if value:
             kwargs[field_name] = value
     return row_cls(**kwargs)
 

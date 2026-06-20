@@ -36,6 +36,9 @@ class GatewayConfig:
     transactions_usd_workers: int
     transactions_date_workers: int
     accounts_workers: int
+    # Cuantos EOF de resultado esperar antes de cerrar el cliente (1 por query
+    # que corre). Con varias queries a la vez hay que esperarlas a todas.
+    expected_results: int
 
 
 def _load_file_config():
@@ -79,8 +82,12 @@ def init_config():
             file_config.get("transactions_date_workers", 1)
         )),
         accounts_workers=int(os.getenv(
-            "ACCOUNTS_WORKERS", 
+            "ACCOUNTS_WORKERS",
             file_config.get("accounts_workers", 1)
+        )),
+        expected_results=int(os.getenv(
+            "EXPECTED_RESULTS",
+            file_config.get("expected_results", 1)
         )),
     )
 
@@ -120,6 +127,8 @@ class Gateway:
         self.accounts_current_worker = 1
         self.accounts_mw = None
         self.result_mw = None
+
+        self.expected_results = gateway_config.expected_results
 
         self.server_socket = None
         self.running = False
@@ -175,10 +184,18 @@ class Gateway:
             return
 
         ack()
-        
+
         if decoded.get("type") == "eof":
-            logging.info("Received EOF on result queue for client %s", client_id)
-            entry["done"].set()
+            # Cada query que corre manda 1 EOF de resultado al terminar. Con
+            # varias queries a la vez hay que esperarlas a todas antes de
+            # cerrar el cliente; si no, cortariamos al terminar la primera.
+            entry["eofs"] = entry.get("eofs", 0) + 1
+            logging.info(
+                "Received EOF %d/%d on result queue for client %s",
+                entry["eofs"], self.expected_results, client_id,
+            )
+            if entry["eofs"] >= self.expected_results:
+                entry["done"].set()
 
     def send_accounts_data(self, serialized_message: bytes):
         """Sends data to accounts workers using Round-Robin strategy."""
@@ -224,6 +241,7 @@ class Gateway:
             self._client_registry[client_id] = {
                 "tcp": tcp,
                 "done": done,
+                "eofs": 0,
             }
 
         logging.info("Registered client %s", client_id)
@@ -370,6 +388,7 @@ class Gateway:
 def main():
     config = init_config()
     logging.basicConfig(level=getattr(logging, config.log_level.upper(), logging.INFO))
+    logging.getLogger("pika").setLevel(logging.WARNING)
     log_config(config)
 
     gateway = Gateway(config)

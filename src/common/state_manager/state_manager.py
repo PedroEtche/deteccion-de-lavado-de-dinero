@@ -4,6 +4,14 @@ import logging
 import tempfile
 from typing import Any, Dict, List, Tuple
 import glob
+import dataclasses
+
+def _custom_serializer(obj):
+        """Fallback serializer for json.dump to handle custom dataclasses."""
+        if dataclasses.is_dataclass(obj):
+            return dataclasses.asdict(obj)
+            
+        raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
 
 class WorkerStateManager:    
     def __init__(self, base_dir: str, stage_name: str, worker_id: int):
@@ -18,6 +26,8 @@ class WorkerStateManager:
     def _get_wal_path(self, client_id: str) -> str:
         return os.path.join(self.base_dir, f"{self.stage_name}_{self.worker_id}_client_{client_id}.jsonl")
 
+    import dataclasses
+
     def append_batch(self, client_id: str, batch: Any) -> None:
         """Appends a batch to the client's WAL file. Each batch is a new line in JSON format."""
         if not batch: return
@@ -25,7 +35,7 @@ class WorkerStateManager:
         wal_path = self._get_wal_path(client_id)
         try:
             with open(wal_path, "a", encoding="utf-8") as f:
-                json.dump(batch, f)
+                json.dump(batch, f, default=_custom_serializer)
                 f.write("\n")
                 f.flush()
                 os.fsync(f.fileno())
@@ -48,7 +58,7 @@ class WorkerStateManager:
         
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(client_state, f)
+                json.dump(client_state, f, default=_custom_serializer)
                 f.flush()
                 os.fsync(f.fileno()) 
             os.replace(temp_path, snapshot_path)

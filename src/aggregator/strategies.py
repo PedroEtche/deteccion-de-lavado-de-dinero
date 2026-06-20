@@ -306,7 +306,7 @@ class ScatterAggregatorStrategy(AggregatorStrategy):
 
         routed_results = []
         for origin, data in client_state.items():
-            if len(data["dests"]) >= 5:
+            if len(data["dests"]) > 5:
                 routed_results.append((origin, data["txs"]))
 
                 for tx in data["txs"]:

@@ -43,10 +43,14 @@ class BaseWorker(ABC):
             f"worker_{self.config.worker_id}",
             "eof_broadcast"
         ]
+
+        queue_name = f"{self.config.stage_name}_worker_{self.config.worker_id}"
+
         self.input_exchange = MessageMiddlewareExchangeRabbitMQ(
             host=self.config.mom_host, 
             exchange_name=self.config.input_exchange, 
-            routing_keys=routing_keys
+            routing_keys=routing_keys,
+            queue_name=queue_name
         )
 
         self.output_exchange = MessageMiddlewareExchangeRabbitMQ(

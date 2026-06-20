@@ -25,7 +25,8 @@ class EofCoordinator:
         client_ids = self.state_manager.get_all_client_ids()
 
         for client_id in client_ids:
-            snapshot, _ = self.state_manager.load_client(client_id)
+            snapshot, _ = self.state_manager.recover_client(client_id)
+            logging.info("Recovered EOF count for client %s: %s", client_id, snapshot)
             self.eofs_by_client[client_id] = snapshot
             # aca ver si hace falta ver condicion de expected
 

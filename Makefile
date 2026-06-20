@@ -167,3 +167,24 @@ all_scaled_multi_test_fixed:
 	docker compose -f docker-compose.yaml stop -t 1
 	docker compose -f docker-compose.yaml down
 .PHONY: all_scaled_multi_test_fixed
+
+# ---- Monitoreo de logs (sin ruido de pika/rabbit) ----
+LOG_NOISE := pika|AMQP|Streaming transport|Socket connected|Created channel
+
+# Logs de UN container (worker o cliente), en vivo y sin ruido.
+#   make log SVC=q3_group_1   |   make log SVC=gateway   |   make log SVC=client_0
+log:
+	@test -n "$(SVC)" || { echo 'Falta SVC. Ej: make log SVC=q3_group_1'; exit 2; }
+	@docker logs -f --tail 200 $(SVC) 2>&1 | grep --line-buffered -avE '$(LOG_NOISE)'
+.PHONY: log
+
+# Logs de TODOS los containers cuyo nombre contenga PREFIX, mergeados y sin ruido.
+#   make logs_stage PREFIX=q3_group   |   make logs_stage PREFIX=client   |   make logs_stage PREFIX=q5
+logs_stage:
+	@test -n "$(PREFIX)" || { echo 'Falta PREFIX. Ej: make logs_stage PREFIX=q3_group | client | q5'; exit 2; }
+	@names=$$(docker ps -a --filter "name=$(PREFIX)" --format '{{.Names}}' | sort); \
+	test -n "$$names" || { echo "No hay containers que matcheen '$(PREFIX)'"; exit 1; }; \
+	echo "==> siguiendo: $$names"; \
+	docker compose -f docker-compose.yaml logs -f --tail 50 $$names 2>&1 \
+		| grep --line-buffered -avE '$(LOG_NOISE)'
+.PHONY: logs_stage

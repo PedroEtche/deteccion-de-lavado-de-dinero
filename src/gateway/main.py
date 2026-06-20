@@ -388,6 +388,7 @@ class Gateway:
 def main():
     config = init_config()
     logging.basicConfig(level=getattr(logging, config.log_level.upper(), logging.INFO))
+    logging.getLogger("pika").setLevel(logging.WARNING)
     log_config(config)
 
     gateway = Gateway(config)

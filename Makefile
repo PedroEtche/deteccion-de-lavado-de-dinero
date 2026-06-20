@@ -170,21 +170,52 @@ all_scaled_multi_test_fixed:
 
 # ---- Monitoreo de logs (sin ruido de pika/rabbit) ----
 LOG_NOISE := pika|AMQP|Streaming transport|Socket connected|Created channel
+# FOLLOW=1 (default) sigue en vivo; FOLLOW=0 vuelca lo que hay y termina.
+FOLLOW ?= 1
+_FOLLOW := $(if $(filter 0,$(FOLLOW)),,-f)
 
-# Logs de UN container (worker o cliente), en vivo y sin ruido.
-#   make log SVC=q3_group_1   |   make log SVC=gateway   |   make log SVC=client_0
+# Logs de UN container (worker o cliente), sin ruido.
+#   make log SVC=q3_group_1            (en vivo)
+#   make log SVC=gateway FOLLOW=0      (vuelca y sale)
 log:
 	@test -n "$(SVC)" || { echo 'Falta SVC. Ej: make log SVC=q3_group_1'; exit 2; }
-	@docker logs -f --tail 200 $(SVC) 2>&1 | grep --line-buffered -avE '$(LOG_NOISE)'
+	@docker logs $(_FOLLOW) --tail 200 $(SVC) 2>&1 | grep --line-buffered -avE '$(LOG_NOISE)'
 .PHONY: log
 
 # Logs de TODOS los containers cuyo nombre contenga PREFIX, mergeados y sin ruido.
-#   make logs_stage PREFIX=q3_group   |   make logs_stage PREFIX=client   |   make logs_stage PREFIX=q5
+#   make logs_stage PREFIX=q3_group            (en vivo)
+#   make logs_stage PREFIX=client FOLLOW=0     (vuelca y sale)
 logs_stage:
 	@test -n "$(PREFIX)" || { echo 'Falta PREFIX. Ej: make logs_stage PREFIX=q3_group | client | q5'; exit 2; }
 	@names=$$(docker ps -a --filter "name=$(PREFIX)" --format '{{.Names}}' | sort); \
 	test -n "$$names" || { echo "No hay containers que matcheen '$(PREFIX)'"; exit 1; }; \
-	echo "==> siguiendo: $$names"; \
-	docker compose -f docker-compose.yaml logs -f --tail 50 $$names 2>&1 \
+	echo "==> $$names"; \
+	docker compose -f docker-compose.yaml logs $(_FOLLOW) --tail 50 $$names 2>&1 \
 		| grep --line-buffered -avE '$(LOG_NOISE)'
 .PHONY: logs_stage
+# Corre un scenario con un dataset de data/datasets/ (por nombre).
+#   make dataset_run SCENARIO=all/4 DATASET=HI-Small
+# Toma {DATASET}_Trans.csv y {DATASET}_accounts.csv para cada cliente.
+dataset_run:
+	@test -n "$(SCENARIO)" || { echo 'Falta SCENARIO. Ej: make dataset_run SCENARIO=all/4 DATASET=HI-Small'; exit 2; }
+	@test -n "$(DATASET)"  || { echo 'Falta DATASET (ej: HI-Small, LI-Small, HI-Medium...)'; exit 2; }
+	@test -f scenarios/$(SCENARIO).yaml || { echo "No existe scenarios/$(SCENARIO).yaml"; exit 2; }
+	@test -f data/datasets/$(DATASET)_Trans.csv || { echo "No existe data/datasets/$(DATASET)_Trans.csv"; exit 2; }
+	@test -f data/datasets/$(DATASET)_accounts.csv || { echo "No existe data/datasets/$(DATASET)_accounts.csv"; exit 2; }
+	rm -f results/clients/client_*/q*.csv
+	cp ./scenarios/$(SCENARIO).yaml docker-compose.yaml
+	python3 scripts/gen_dataset_override.py docker-compose.yaml $(DATASET) > docker-compose.dataset.yaml
+	COMPOSE_HTTP_TIMEOUT=300 docker compose -f docker-compose.yaml -f docker-compose.dataset.yaml up --build --remove-orphans -d
+	@echo "==> $(SCENARIO) con dataset $(DATASET). Esperando a los clientes..."
+	@clients=$$(docker ps -a --filter "name=client" --format '{{.Names}}'); \
+	docker wait $$clients > /dev/null; \
+	echo ""; echo "==> Tiempos (StartedAt -> FinishedAt, incluye el sleep inicial del cliente):"; \
+	for c in $$clients; do \
+		s=$$(docker inspect -f '{{.State.StartedAt}}' $$c); \
+		e=$$(docker inspect -f '{{.State.FinishedAt}}' $$c); \
+		printf '    %s: %s s\n' "$$c" "$$(( $$(date -d "$$e" +%s) - $$(date -d "$$s" +%s) ))"; \
+	done
+	@echo ""
+	@echo "==> Resultados en results/clients/. La pila sigue arriba."
+	@echo "    bajar: docker compose -f docker-compose.yaml -f docker-compose.dataset.yaml down"
+.PHONY: dataset_run

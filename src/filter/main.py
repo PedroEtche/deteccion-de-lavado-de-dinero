@@ -85,8 +85,6 @@ def init_config() -> FilterConfig:
         num_downstream_workers=int(os.getenv("NUM_DOWNSTREAM_WORKERS", "1")),
         routing_strategy=os.getenv("ROUTING_STRATEGY", "round_robin").lower(),
         worker_name=os.getenv("WORKER_NAME", "filter"),
-        role=os.getenv("ROLE", "master"),
-        replication_exchange=os.getenv("REPLICATION_EXCHANGE", ""),
     )
 
 

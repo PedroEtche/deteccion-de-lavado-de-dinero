@@ -97,6 +97,7 @@ class BaseWorker(ABC):
 
         # Fanout a cada rama downstream (una sola si no es multi-output).
         for exchange in self.output_exchanges:
+            # TODO: hacer roundrobin a cada output exchange - Ver que no se este mandando a todos los workers de cada stage
             exchange.send(out_msg, routing_key=routing_key)
 
     def _internal_on_flush(self, client_id: str) -> None:

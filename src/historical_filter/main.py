@@ -177,7 +177,7 @@ class HistoricalAverageFilter:
             if (tx.amount_paid or 0.0) < threshold:
                 # Proyeccion al resultado de Q3. El orden de columnas del CSV lo
                 # define el orden de campos de Q3ResultRow.
-                result.append(
+                result.append( # TODO cambiar a que sea un batch, la generacion de Q3ResultRow la hace el join
                     Q3ResultRow(
                         from_bank=tx.from_bank,
                         from_account=tx.from_account,

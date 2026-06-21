@@ -138,10 +138,14 @@ class Client:
         if file_name is None:
             logging.info("Unexpected Message: %s", decoded)
             return False
+        batch = decoded["payload"]["batch"]
         if decoded["eof"]:
+            logging.info("Query result EOF: %s", decoded)
+            if len(batch) > 0:
+                persist_rows(self.output_path + file_name, batch)
             # El batch del EOF viene vacio: no se persiste, solo cuenta el cierre.
             return True
-        persist_rows(self.output_path + file_name, decoded["payload"]["batch"])
+        persist_rows(self.output_path + file_name, batch)
         return False
 
 

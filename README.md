@@ -87,3 +87,26 @@ En `gateway/main.py`, el EOF a transactions va por `send_transactions_eof` con `
 
 ### 7. Doble señalización de "fin" en mensajes de resultado
 En `src/common/communication/internal.py`, los mensajes de resultado llevan un flag `eof: true|false` dentro del payload, separado del `type: "eof"` usado entre stages. El cliente revisa `decoded["eof"]`, mientras que el gateway revisa `decoded.get("type") == "eof"`. Son dos mecanismos paralelos para señalar "se terminó X", uno por flag y otro por tipo. No es un bug per se, pero es una fuente fácil de bugs futuros.
+
+
+
+
+aggregator_scatter_group_0  | INFO:root:Recovering state for client e5cc3d49-9c2d-468c-896f-b617c16490f8
+aggregator_scatter_group_0  | Traceback (most recent call last):
+aggregator_scatter_group_0  |   File "<frozen runpy>", line 203, in _run_module_as_main
+aggregator_scatter_group_0  |   File "<frozen runpy>", line 88, in _run_code
+aggregator_scatter_group_0  |   File "/app/src/aggregator/main.py", line 220, in <module>
+aggregator_scatter_group_0  |     raise SystemExit(main())
+aggregator_scatter_group_0  |                      ~~~~^^
+aggregator_scatter_group_0  |   File "/app/src/aggregator/main.py", line 207, in main
+aggregator_scatter_group_0  |     worker = AggregatorWorker(config)
+aggregator_scatter_group_0  |   File "/app/src/aggregator/main.py", line 122, in __init__
+aggregator_scatter_group_0  |     self._recover_client_state(client_id)
+aggregator_scatter_group_0  |     ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+aggregator_scatter_group_0  |   File "/app/src/aggregator/main.py", line 131, in _recover_client_state
+aggregator_scatter_group_0  |     self.strategy.aggregate_batch(batch, client_id)
+aggregator_scatter_group_0  |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+aggregator_scatter_group_0  |   File "/app/src/aggregator/strategies.py", line 297, in aggregate_batch
+aggregator_scatter_group_0  |     origin = f"{tx["from_bank"]}_{tx["from_account"]}"
+aggregator_scatter_group_0  |                 ~~^^^^^^^^^^^^^
+aggregator_scatter_group_0  | TypeError: string indices must be integers, not 'str'

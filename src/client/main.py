@@ -1,18 +1,18 @@
+import csv
 import dataclasses
 import logging
-import csv
 import os
-import time
-import threading
 import signal
+import threading
+import time
 
 from src.common.communication import (
     STREAM_ACCOUNTS,
     STREAM_TRANSACTIONS,
     connect,
+    deserialize,
     send_csv,
     send_eof,
-    deserialize,
 )
 
 _CONNECT_RETRY_DELAY = 1.0
@@ -44,56 +44,52 @@ def _connect_with_retry(host, port):
             time.sleep(_CONNECT_RETRY_DELAY)
 
 
-_opened_files: set = set()
-
-
 def persist_rows(output_file, batch):
-    mode = "w" if output_file not in _opened_files else "a"
-    _opened_files.add(output_file)
-    with open(output_file, mode) as csvfile:
+    with open(output_file, "a") as csvfile:
         csv_writer = csv.writer(csvfile, delimiter=",", quotechar='"')
         for row in batch:
             row_dict = dataclasses.asdict(row) if dataclasses.is_dataclass(row) else row
-            
-            csv_writer.writerow(
-                v for v in row_dict.values() if v is not None
-            )
+
+            csv_writer.writerow(v for v in row_dict.values() if v is not None)
+
+
+# Tabla tipo-de-resultado -> archivo: evita las 5 ramas repetidas del if/elif
+# y hace que agregar/quitar una query sea cambiar una sola linea.
+_RESULT_FILES = {
+    "q1_result": "q1.csv",
+    "q2_result": "q2.csv",
+    "q3_result": "q3.csv",
+    "q4_result": "q4.csv",
+    "q5_result": "q5.csv",
+}
+_EXPECTED_RESULTS = len(_RESULT_FILES)  # un EOF por query
 
 
 class Client:
     def __init__(self, server_host, server_port, output_path):
+        self.output_path = output_path
         self.closed = False
-        self._prev_sigterm_handler = signal.signal(signal.SIGTERM, self.handle_sigterm)
         self.server_socket = _connect_with_retry(server_host, server_port)
+        signal.signal(signal.SIGTERM, self.handle_sigterm)
+        # El lector SOLO lee y persiste; nunca toca el ciclo de vida del socket.
+        # El dueño del socket es el thread principal: lo crea y lo cierra.
         self._reader_thread = threading.Thread(
             target=self.recv_results,
-            args=(
-                self.server_socket,
-                output_path,
-            ),
             daemon=True,  # si el proceso muere, el thread no bloquea el exit
         )
         self._reader_thread.start()
 
     def handle_sigterm(self, signum, frame):
-        logging.info("Recieved SIGTERM signal")
+        # Corre en el thread principal. NO cierra ni hace join: solo marca el
+        # cierre y despierta al lector bloqueado en recv() cerrando el socket.
+        # El thread principal sigue en start() y hace el cierre ordenado, asi
+        # nunca hay dos threads tocando el socket a la vez.
+        logging.info("Received SIGTERM signal")
         self.closed = True
-        self.disconnect()
-
-        if self._prev_sigterm_handler:
-            self._prev_sigterm_handler(signum, frame)
-
-    def disconnect(self):
-        if self.server_socket:
-            # shutdown() es mejor que close(): señaliza al peer sin cerrar
-            # el fd inmediatamente, dando tiempo al thread lector a drenar.
-            # HOW: SHUT_WR señaliza EOF al server; el thread lector recibe
-            # EOF de vuelta y termina; luego close() libera el fd.
+        try:
             self.server_socket.shutdown("rdwr")
-            self.server_socket.close()
-
-        if self._reader_thread and self._reader_thread.is_alive():
-            self._reader_thread.join(timeout=5)
+        except OSError:
+            pass
 
     def start(self, accounts_path, transactions_path, batch_size):
         logging.info("Sending data")
@@ -105,83 +101,59 @@ class Client:
             send_eof(self.server_socket)
             logging.info("Datasets sent; waiting for results")
         finally:
-            # Con o sin error, cerramos escritura: el server sabrá que no
-            # hay más datos y eventualmente cerrará su lado → el thread lector
-            # recibirá EOF y terminará naturalmente
-            self.server_socket.shutdown("wr")
+            # Cerramos solo la escritura: el server sabe que no hay mas datos,
+            # pero seguimos leyendo resultados. Puede fallar si un SIGTERM ya
+            # hizo shutdown del socket; en ese caso no hay nada que señalizar.
+            try:
+                self.server_socket.shutdown("wr")
+            except OSError:
+                pass
 
-        # Esperamos a que el thread lector termine limpiamente
+        # El lector termina al juntar los EOFs (o si el server corta). Recien
+        # cuando termino de persistir cerramos el fd: UN solo close, UN solo thread.
         self._reader_thread.join()
         self.server_socket.close()
 
-    def recv_results(self, sock, output_path):
+    def recv_results(self):
         logging.info("Receiving results")
-        query_result_counter = 0
-        while query_result_counter < 5:
+        pending_eofs = _EXPECTED_RESULTS
+        # 'self.closed' lo escribe el handler (mismo proceso, GIL mediante) y lo
+        # lee este thread: alcanza para cortar el loop si el shutdown nos desperto.
+        while pending_eofs > 0 and not self.closed:
             try:
-                msg = sock.recv_bytes()
+                msg = self.server_socket.recv_bytes()
             except ConnectionError:
                 logging.info(
-                    "Server closed connection (received %d result message(s))",
-                    query_result_counter,
+                    "Server closed connection with %d EOF(s) still pending",
+                    pending_eofs,
                 )
-                break
+                return
 
-            decoded = deserialize(msg)
-            query_type = decoded["type"]
+            if self._persist_message(deserialize(msg)):
+                pending_eofs -= 1
 
-            if query_type == "q1_result":
-                output_file = output_path + "q1.csv"
-                batch = decoded["payload"]["batch"]
-                if decoded["eof"]:
-                    query_result_counter += 1
-                else:
-                    persist_rows(output_file, batch)
-
-            elif query_type == "q2_result":
-                output_file = output_path + "q2.csv"
-                batch = decoded["payload"]["batch"]
-                persist_rows(output_file, batch)
-
-            elif query_type == "q3_result":
-                output_file = output_path + "q3.csv"
-                batch = decoded["payload"]["batch"]
-                persist_rows(output_file, batch)
-
-            elif query_type == "q4_result":
-                output_file = output_path + "q4.csv"
-                batch = decoded["payload"]["batch"]
-                persist_rows(output_file, batch)
-
-            elif query_type == "q5_result":
-                output_file = output_path + "q5.csv"
-                batch = decoded["payload"]["batch"]
-                persist_rows(output_file, batch)
-
-            elif query_type == "eof":
-                # El gateway reenvia el eof interno que usa para contar
-                # resultados; el cliente no necesita hacer nada con el.
-                continue
-
-            else:
-                logging.info("Unexpected Message: %s", decoded)
-                continue
-
-        # Cleanup: el server pudo haber cerrado el socket primero, asi que
-        # shutdown/close pueden fallar con ENOTCONN. Se ignora para que no
-        # salte un mensaje de error.
-        try:
-            sock.shutdown("rd")
-        except OSError:
-            pass
-        try:
-            sock.close()
-        except OSError:
-            pass
+    def _persist_message(self, decoded):
+        """Persiste un batch. Devuelve True solo si era el EOF final de una query."""
+        file_name = _RESULT_FILES.get(decoded["type"])
+        if file_name is None:
+            logging.info("Unexpected Message: %s", decoded)
+            return False
+        if decoded["eof"]:
+            # El batch del EOF viene vacio: no se persiste, solo cuenta el cierre.
+            return True
+        persist_rows(self.output_path + file_name, decoded["payload"]["batch"])
+        return False
 
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO)
+    for i in range(1, 6):
+        # Create 5 output files
+        file_name = f"q{i}.csv"
+        output_file = os.path.join(OUTPUT_PATH, file_name)
+        file = open(output_file, "w")
+        file.close()
+
     client = Client(SERVER_HOST, SERVER_PORT, OUTPUT_PATH)
     client.start(ACCOUNTS_PATH, TRANSACTIONS_PATH, BATCH_SIZE)
 

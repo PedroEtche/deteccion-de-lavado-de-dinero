@@ -12,6 +12,7 @@ from src.common.communication.internal import (
     Q5ResultRow,
 )
 
+
 class JoinStrategy(ABC):
     """Abstract strategy that owns all join state.
 
@@ -47,7 +48,7 @@ class JoinStrategy(ABC):
         """Return a fully built message with everything buffered for ``client``
         (or ``None`` if there is nothing), clearing that client's state."""
         raise NotImplementedError()
-    
+
     @abstractmethod
     def get_client_state(self, client: str) -> Any:
         """Returns the raw internal memory for a specific client. Return None if stateless."""
@@ -99,15 +100,17 @@ class QueryResultStrategy(JoinStrategy):
         processed_batch = batch
         if self.row_class:
             processed_batch = []
-            
+
             valid_keys = {f.name for f in dataclasses.fields(self.row_class)}
-            
+
             for item in batch:
                 if isinstance(item, dict):
                     safe_kwargs = {k: v for k, v in item.items() if k in valid_keys}
                 else:
-                    safe_kwargs = {k: getattr(item, k) for k in valid_keys if hasattr(item, k)}
-                
+                    safe_kwargs = {
+                        k: getattr(item, k) for k in valid_keys if hasattr(item, k)
+                    }
+
                 processed_batch.append(self.row_class(**safe_kwargs))
 
         self._emit(
@@ -133,6 +136,41 @@ class QueryResultStrategy(JoinStrategy):
 
     def set_client_state(self, client: str, state: Any) -> None:
         pass
+
+
+class CountStrategy(JoinStrategy):
+    """Stateful: accumulates how many rows arrive per client and emits the total
+    on flush. Used to count how many rows passed an upstream filter."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.query_number = 5
+        self.count_by_client: Dict[str, int] = {}
+
+    def join_batch(self, batch: List[Any], client: str) -> None:
+        self.count_by_client[client] = self.count_by_client.get(client, 0) + len(batch)
+
+    def flush(self, client: str) -> Optional[dict]:
+        count = self.count_by_client.pop(client, 0)
+        return build_results_for_query(
+            query_number=self.query_number,
+            batch=[Q5ResultRow(count=count)],
+            eof=True,
+            client=client,
+        )
+
+    def build_eof_message(self, client, msg_id=None):
+        return build_results_for_query(
+            query_number=self.query_number, batch=[], eof=True, client=client
+        )
+
+    def get_client_state(self, client: str) -> Any:
+        return self.count_by_client.get(client, 0)
+
+    def set_client_state(self, client: str, state: Any) -> None:
+        if state is not None:
+            self.count_by_client[client] = state
+
 
 class AveragesUnionStrategy(JoinStrategy):
     """Stateful: junta los promedios parciales que llegan de los N shards del
@@ -168,33 +206,5 @@ class AveragesUnionStrategy(JoinStrategy):
         return self.averages_by_client.get(client, [])
 
     def set_client_state(self, client: str, state: Any) -> None:
-        if state: self.averages_by_client[client] = state
-
-class CountStrategy(JoinStrategy):
-    """Stateful: accumulates how many rows arrive per client and emits the total
-    on flush. Used to count how many rows passed an upstream filter."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.query_number = 5
-        self.count_by_client: Dict[str, int] = {}
-
-    def join_batch(self, batch: List[Any], client: str) -> None:
-        self.count_by_client[client] = self.count_by_client.get(client, 0) + len(batch)
-
-    def flush(self, client: str) -> Optional[dict]:
-        count = self.count_by_client.pop(client, 0)
-        return build_results_for_query(
-            query_number=self.query_number, batch=[Q5ResultRow(count=count)], eof=True, client=client
-        )
-
-    def build_eof_message(self, client, msg_id=None):
-        return build_results_for_query(
-            query_number=self.query_number, batch=[], eof=True, client=client
-        )
-
-    def get_client_state(self, client: str) -> Any:
-        return self.count_by_client.get(client, 0)
-
-    def set_client_state(self, client: str, state: Any) -> None:
-        if state is not None: self.count_by_client[client] = state
+        if state:
+            self.averages_by_client[client] = state

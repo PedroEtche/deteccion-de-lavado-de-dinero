@@ -53,6 +53,7 @@ services:
     - EOF_EXPECTED=1        # gateway
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=1
+    - STAGE_NAME=filtro_usd
 
   # ===================== Q1 =====================
   q1_filter_lt50:
@@ -69,6 +70,7 @@ services:
     - EOF_EXPECTED=1        # filtro_usd
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=1
+    - STAGE_NAME=q1_filter_lt50
 
   q1_join:
     build:
@@ -85,6 +87,7 @@ services:
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=1
     - QUERY_RESULT_NUMBER=1
+    - STAGE_NAME=q1_join
 
   # ===================== Q2 =====================
   q2_group_bank_max:
@@ -101,6 +104,7 @@ services:
     - EOF_EXPECTED=1        # filtro_usd
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=1
+    - STAGE_NAME=q2_group_bank_max
 
   q2_aggregator:
     build:
@@ -116,6 +120,7 @@ services:
     - EOF_EXPECTED=1        # group
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=1
+    - STAGE_NAME=q2_aggregator
 
   q2_merge:
     build:
@@ -131,6 +136,7 @@ services:
     - EOF_EXPECTED=2        # aggregator (txs) + gateway (accounts)
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=1
+    - STAGE_NAME=q2_merge
 
   q2_join:
     build:
@@ -147,6 +153,7 @@ services:
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=1
     - QUERY_RESULT_NUMBER=2
+    - STAGE_NAME=q2_join
 
   # ===================== Q3 & Q4 Router =====================
   
@@ -163,6 +170,7 @@ services:
     environment:
     - EOF_EXPECTED=1        # filtro_usd
     - WORKER_ID=1
+    - STAGE_NAME=q3_q4_router
 
   # ===================== Q3 =====================
 
@@ -181,6 +189,7 @@ services:
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=1
     - ROUTING_STRATEGY=sharded
+    - STAGE_NAME=q3_group
 
   q3_aggregator:
     build:
@@ -197,6 +206,7 @@ services:
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=1
     - ROUTING_STRATEGY=round_robin
+    - STAGE_NAME=q3_aggregator
 
   q3_averages_join:
     build:
@@ -213,6 +223,7 @@ services:
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=1
     - ROUTING_STRATEGY=broadcast
+    - STAGE_NAME=q3_averages_join
 
   q3_historical_filter:
     build:
@@ -228,6 +239,7 @@ services:
     - EOF_EXPECTED=2        # router (candidatas) + averages_join (promedios)
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=1
+    - STAGE_NAME=q3_historical_filter
 
   q3_result_join:
     build:
@@ -244,6 +256,7 @@ services:
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=1
     - QUERY_RESULT_NUMBER=3
+    - STAGE_NAME=q3_result_join
 
   # ===================== Q4 =====================
 
@@ -401,6 +414,7 @@ services:
     environment:
     - EOF_EXPECTED=1        # gateway (rama date)
     - WORKER_ID=1
+    - STAGE_NAME=q5_router
 
   q5_converter:
     build:
@@ -416,6 +430,7 @@ services:
     - EOF_EXPECTED=1        # router
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=1
+    - STAGE_NAME=q5_converter
 
   q5_join:
     build:
@@ -432,6 +447,7 @@ services:
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=1
     - QUERY_RESULT_NUMBER=5
+    - STAGE_NAME=q5_join
 
   # ===================== Cliente =====================
   client_0:

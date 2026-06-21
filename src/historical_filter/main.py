@@ -15,6 +15,7 @@ from src.common.communication.internal import (
 from src.common.eof import EofCoordinator
 from src.common.middleware import MessageMiddlewareExchangeRabbitMQ
 from src.common.utils import load_yaml_config
+from src.common.state_manager import WorkerStateManager
 
 CONFIG_PATH = "./config.yaml"
 
@@ -37,6 +38,7 @@ class HistoricalFilterConfig:
     worker_id: int
     num_downstream_workers: int
     log_level: str
+    stage_name: str
 
 
 def init_config() -> HistoricalFilterConfig:
@@ -50,6 +52,7 @@ def init_config() -> HistoricalFilterConfig:
         worker_id=int(os.getenv("WORKER_ID", "1")),
         num_downstream_workers=int(os.getenv("NUM_DOWNSTREAM_WORKERS", "1")),
         log_level=os.environ.get("LOG_LEVEL", "INFO"),
+        stage_name=os.environ.get("STAGE_NAME", "historical_filter"),
     )
 
 
@@ -100,6 +103,12 @@ class HistoricalAverageFilter:
         # en el flush. Por ahora se mantienen en memoria.
         self.candidates_by_client: Dict[str, List[Any]] = {}
 
+        self.eof_state_manager = WorkerStateManager(
+            base_dir="/app/state",
+            stage_name=f"{self.config.stage_name}_eof", 
+            worker_id=self.config.worker_id
+        )
+
     def start(self) -> None:
         self.output_mw = MessageMiddlewareExchangeRabbitMQ(
             self.config.mom_host, self.config.output_exchange
@@ -108,6 +117,7 @@ class HistoricalAverageFilter:
         self.eof_coordinator = EofCoordinator(
             expected_eofs=self.config.expected_eofs,
             on_flush=self._on_flush,
+            state_manager=self.eof_state_manager
         )
 
         # Tres routing keys:

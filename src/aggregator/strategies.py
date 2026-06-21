@@ -21,6 +21,16 @@ class AggregatorStrategy(ABC):
     @abstractmethod
     def clear_client_state(self, client: str) -> None:
         raise NotImplementedError()
+    
+    @abstractmethod
+    def get_client_state(self, client: str) -> Any:
+        """Returns the raw internal memory for a specific client."""
+        raise NotImplementedError()
+
+    @abstractmethod
+    def set_client_state(self, client: str, state: Any) -> None:
+        """Restores the raw internal memory for a specific client."""
+        raise NotImplementedError()
 
 
 class NoStrategy(AggregatorStrategy):
@@ -38,6 +48,12 @@ class NoStrategy(AggregatorStrategy):
         return []
 
     def clear_client_state(self, client: str) -> None:
+        pass
+
+    def get_client_state(self, client: str) -> Any:
+        pass
+
+    def set_client_state(self, client: str, state: Any) -> None:
         pass
 
 
@@ -74,6 +90,12 @@ class BankMaxAmountStrategy(AggregatorStrategy):
 
     def clear_client_state(self, client: str) -> None:
         self.max_per_bank_by_client.pop(client, None)
+
+    def get_client_state(self, client: str) -> Any:
+        return self.max_per_bank_by_client.get(client, {})
+
+    def set_client_state(self, client: str, state: Any) -> None:
+        if state: self.max_per_bank_by_client[client] = state
 
 
 class AccountPairCountStategy(AggregatorStrategy):
@@ -118,6 +140,12 @@ class AccountPairCountStategy(AggregatorStrategy):
                     }
                 )
         return results
+    
+    def get_client_state(self, client: str) -> Any:
+        return self.counts_by_client.get(client, {})
+
+    def set_client_state(self, client: str, state: Any) -> None:
+        if state: self.counts_by_client[client] = state
 
 
 class CountStrategy(AggregatorStrategy):
@@ -143,6 +171,13 @@ class CountStrategy(AggregatorStrategy):
 
     def clear_client_state(self, client: str) -> None:
         self._counts.pop(client, None)
+
+    def get_client_state(self, client: str) -> Any:
+        return self._counts.get(client, 0)
+
+    def set_client_state(self, client: str, state: Any) -> None:
+        if state:
+             self._counts[client] = state
 
 
 class PaymentFormatAverageStrategy(AggregatorStrategy):
@@ -193,6 +228,12 @@ class PaymentFormatAverageStrategy(AggregatorStrategy):
     def clear_client_state(self, client: str) -> None:
         self.stats_by_client.pop(client, None)
 
+    def get_client_state(self, client: str) -> Any:
+        return self.stats_by_client.get(client, {})
+
+    def set_client_state(self, client: str, state: Any) -> None:
+        if state: self.stats_by_client[client] = state
+
 
 class AccountStrategy(AggregatorStrategy):
     def __init__(self):
@@ -225,6 +266,12 @@ class AccountStrategy(AggregatorStrategy):
 
     def clear_client_state(self, client: str) -> None:
         self.accounts_by_client.pop(client, None)
+
+    def get_client_state(self, client: str) -> Any:
+        return self.accounts_by_client.get(client, set())
+
+    def set_client_state(self, client: str, state: Any) -> None:
+        if state: self.accounts_by_client[client] = state
 
 class ScatterAggregatorStrategy(AggregatorStrategy):
     def __init__(self):
@@ -266,3 +313,10 @@ class ScatterAggregatorStrategy(AggregatorStrategy):
 
     def clear_client_state(self, client: str) -> None:
         self.state_by_client.pop(client, None)
+    
+    def get_client_state(self, client: str) -> Any:
+        return self.state_by_client.get(client, {})
+
+    def set_client_state(self, client: str, state: Any) -> None:
+        if state:
+            self.state_by_client[client] = state

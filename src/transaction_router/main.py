@@ -121,7 +121,7 @@ class TransactionRouter:
             out_msg = serialize(
                 build_raw_transactions_message(
                     client=client_id,
-                    msg_id=str(uuid.uuid4()),
+                    msg_id=str(uuid.uuid4()), # TODO: cambiar msg id a incremental
                     batch=sub_batch,
                 )
             )

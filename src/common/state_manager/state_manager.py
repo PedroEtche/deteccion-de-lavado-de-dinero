@@ -6,12 +6,14 @@ from typing import Any, Dict, List, Tuple
 import glob
 import dataclasses
 
+
 def _custom_serializer(obj):
-        """Fallback serializer for json.dump to handle custom dataclasses."""
-        if dataclasses.is_dataclass(obj):
-            return dataclasses.asdict(obj)
-            
-        raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
+    """Fallback serializer for json.dump to handle custom dataclasses."""
+    if dataclasses.is_dataclass(obj):
+        return dataclasses.asdict(obj)
+
+    raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
+
 
 class WorkerStateManager:
     def __init__(self, base_dir: str, stage_name: str, worker_id: int):
@@ -21,17 +23,23 @@ class WorkerStateManager:
         os.makedirs(self.base_dir, exist_ok=True)
 
     def _get_snapshot_path(self, client_id: str) -> str:
-        return os.path.join(self.base_dir, f"{self.stage_name}_{self.worker_id}_client_{client_id}.json")
+        return os.path.join(
+            self.base_dir, f"{self.stage_name}_{self.worker_id}_client_{client_id}.json"
+        )
 
     def _get_wal_path(self, client_id: str) -> str:
-        return os.path.join(self.base_dir, f"{self.stage_name}_{self.worker_id}_client_{client_id}.jsonl")
+        return os.path.join(
+            self.base_dir,
+            f"{self.stage_name}_{self.worker_id}_client_{client_id}.jsonl",
+        )
 
     import dataclasses
 
     def append_batch(self, client_id: str, batch: Any) -> None:
         """Appends a batch to the client's WAL file. Each batch is a new line in JSON format."""
-        if not batch: return
-        
+        if not batch:
+            return
+
         wal_path = self._get_wal_path(client_id)
         try:
             with open(wal_path, "a", encoding="utf-8") as f:
@@ -45,37 +53,38 @@ class WorkerStateManager:
 
     def save_snapshot(self, client_id: str, client_state: Any) -> None:
         """Atomically saves a snapshot of the client's state and empties the WAL."""
-        if not client_state: return
-            
+        if not client_state:
+            return
+
         snapshot_path = self._get_snapshot_path(client_id)
         wal_path = self._get_wal_path(client_id)
-        
+
         fd, temp_path = tempfile.mkstemp(
-            dir=self.base_dir, 
-            prefix=f"tmp_snap_{self.stage_name}_{self.worker_id}_{client_id}_", 
-            suffix=".json"
+            dir=self.base_dir,
+            prefix=f"tmp_snap_{self.stage_name}_{self.worker_id}_{client_id}_",
+            suffix=".json",
         )
-        
+
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(client_state, f, default=_custom_serializer)
                 f.flush()
-                os.fsync(f.fileno()) 
+                os.fsync(f.fileno())
             os.replace(temp_path, snapshot_path)
-            open(wal_path, 'w').close() 
+            open(wal_path, "w").close()
             logging.info("Snapshot saved and WAL truncated for %s", client_id)
-            
+
         except Exception as e:
             logging.error("Failed to save snapshot for %s", client_id)
             if os.path.exists(temp_path):
                 os.remove(temp_path)
-            raise e 
+            raise e
 
     def recover_client(self, client_id: str) -> Tuple[Dict[str, Any], List[Any]]:
         """Recovers the client's state by loading the snapshot and the WAL."""
         snapshot_path = self._get_snapshot_path(client_id)
         wal_path = self._get_wal_path(client_id)
-        
+
         snapshot = {}
         historical_batches = []
 
@@ -94,7 +103,7 @@ class WorkerStateManager:
                             historical_batches.append(json.loads(line))
             except Exception as e:
                 logging.error("Corrupted WAL for %s: %s", client_id, e)
-                
+
         return snapshot, historical_batches
 
     def delete_client(self, client_id: str) -> None:
@@ -108,13 +117,17 @@ class WorkerStateManager:
     def get_all_client_ids(self) -> set:
         """Scans the base directory for snapshot and WAL files to extract all unique client IDs."""
         client_ids = set()
-        search_pattern = os.path.join(self.base_dir, f"{self.stage_name}_{self.worker_id}_client_*")
-        
+        search_pattern = os.path.join(
+            self.base_dir, f"{self.stage_name}_{self.worker_id}_client_*"
+        )
+
         for file_path in glob.glob(search_pattern):
             filename = os.path.basename(file_path)
             prefix = f"{self.stage_name}_{self.worker_id}_client_"
-            
-            client_id = filename.replace(prefix, "").replace(".jsonl", "").replace(".json", "")
+
+            client_id = (
+                filename.replace(prefix, "").replace(".jsonl", "").replace(".json", "")
+            )
             client_ids.add(client_id)
-            
+
         return client_ids

@@ -25,6 +25,7 @@ from .strategies import (
 
 CONFIG_PATH = "./config.yaml"
 
+
 @dataclass
 class GroupConfig:
     mom_host: str
@@ -38,10 +39,12 @@ class GroupConfig:
     strategy: GroupStrategy
     stage_name: str
 
+
 def _extract_strategy_type(raw_strategy: Any) -> str:
     if isinstance(raw_strategy, dict):
         return str(raw_strategy.get("type", "NoStrategy"))
     return str(raw_strategy or "NoStrategy")
+
 
 def _parse_strategy_config(raw_strategy: Any) -> GroupStrategy:
     strategy_type = _extract_strategy_type(raw_strategy)
@@ -61,6 +64,7 @@ def _parse_strategy_config(raw_strategy: Any) -> GroupStrategy:
 
     return NoStrategy()
 
+
 def _load_file_config() -> Dict[str, Any]:
     try:
         with open(CONFIG_PATH, "r", encoding="utf-8") as handle:
@@ -69,12 +73,13 @@ def _load_file_config() -> Dict[str, Any]:
     except FileNotFoundError:
         return {}
 
+
 def init_config() -> GroupConfig:
     data = _load_file_config()
     raw_strategy = data.get("strategy", "NoStrategy")
 
     return GroupConfig(
-       mom_host=data.get("mom_host", "rabbitmq"),
+        mom_host=data.get("mom_host", "rabbitmq"),
         input_exchange=data.get("input", ""),
         output_exchange=data.get("output", ""),
         log_level=os.environ.get("LOG_LEVEL", "INFO"),
@@ -85,6 +90,7 @@ def init_config() -> GroupConfig:
         routing_strategy=os.getenv("ROUTING_STRATEGY", "round_robin").lower(),
         stage_name=os.getenv("STAGE_NAME", "group"),
     )
+
 
 def log_config(config: GroupConfig) -> None:
     logging.info(
@@ -97,15 +103,19 @@ def log_config(config: GroupConfig) -> None:
         config.strategy,
     )
 
+
 class GroupWorker(BaseWorker):
     """
-    Stateless cross-batch grouping worker. 
+    Stateless cross-batch grouping worker.
     Uses strategies to calculate downstream routes.
     """
+
     def __init__(self, config: GroupConfig):
         super().__init__(config)
 
-    def process_data(self, client_id: str, msg_id: str, msg_type: str, payload: dict) -> None:
+    def process_data(
+        self, client_id: str, msg_id: str, msg_type: str, payload: dict
+    ) -> None:
         batch = payload.get("batch", [])
         logging.info("Processing batch of %d rows for client %s", len(batch), client_id)
         routed = self.strategy.group_and_route(batch)
@@ -117,16 +127,17 @@ class GroupWorker(BaseWorker):
 
         for route, mega_batch in batches.items():
             batch_msg = build_batch_message(
-                message_type="batch", 
+                message_type="batch",
                 client=client_id,
                 msg_id=str(uuid.uuid4()),
                 batch=mega_batch,
             )
-            
+
             self.send_downstream(client_id, batch_msg, shard_routing_key=route)
 
     def flush_state(self, client_id: str) -> None:
         pass
+
 
 def main() -> int:
     config = init_config()
@@ -142,9 +153,10 @@ def main() -> int:
 
     signal.signal(signal.SIGTERM, handle_sigterm)
     signal.signal(signal.SIGINT, handle_sigterm)
-    
+
     worker.start()
     return 0
+
 
 if __name__ == "__main__":
     raise SystemExit(main())

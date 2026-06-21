@@ -96,7 +96,14 @@ class MessageMiddlewareQueueRabbitMQ(MessageMiddlewareQueue):
 
 
 class MessageMiddlewareExchangeRabbitMQ(MessageMiddlewareExchange):
-    def __init__(self, host, exchange_name, routing_keys=None, queue_name=None, exchange_type="direct"):
+    def __init__(
+        self,
+        host,
+        exchange_name,
+        routing_keys=None,
+        queue_name=None,
+        exchange_type="direct",
+    ):
         try:
             self.connection = pika.BlockingConnection(
                 pika.ConnectionParameters(
@@ -105,7 +112,7 @@ class MessageMiddlewareExchangeRabbitMQ(MessageMiddlewareExchange):
             )
             self.channel = self.connection.channel()
             self.exchange_name = exchange_name
-            
+
             self.channel.exchange_declare(
                 exchange=exchange_name, exchange_type=exchange_type
             )

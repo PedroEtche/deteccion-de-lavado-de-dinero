@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from src.common.communication.internal import TransactionRow, Q2ResultRow
 from typing import Any, Dict, List
 
+
 class MergeStrategy(ABC):
     """Abstract strategy for filtering batches of messages.
 
@@ -14,9 +15,11 @@ class MergeStrategy(ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    def merge_batch(self, batch: List[Any], client_id: str,  msg_type: str) -> List[dict]:
+    def merge_batch(
+        self, batch: List[Any], client_id: str, msg_type: str
+    ) -> List[dict]:
         raise NotImplementedError()
-    
+
     @abstractmethod
     def get_client_state(self, client_id: str) -> Any:
         raise NotImplementedError()
@@ -32,9 +35,11 @@ class NoStrategy(MergeStrategy):
     def __str__(self) -> str:
         return "NoStrategy"
 
-    def merge_batch(self, batch: List[Any], client_id: str, msg_type: str) -> List[dict]:
+    def merge_batch(
+        self, batch: List[Any], client_id: str, msg_type: str
+    ) -> List[dict]:
         return batch
-    
+
     def clear_client_state(self, client_id: str) -> None:
         pass
 
@@ -57,7 +62,7 @@ class AccountsStrategy:
         if msg_type == "raw_accounts":
             if client_id not in self.accounts:
                 self.accounts[client_id] = {}
-                
+
             for row in batch:
                 bank_id = row.bank_id
                 self.accounts[client_id][bank_id] = row.bank_name
@@ -66,9 +71,9 @@ class AccountsStrategy:
 
         else:
             enriched_batch = []
-                
+
             client_accounts = self.accounts.get(client_id, {})
-            
+
             for row in batch:
                 bank_id = row["from_bank"]
                 bank_name = client_accounts.get(bank_id, "Unknown")
@@ -93,7 +98,7 @@ class AccountsStrategy:
     def get_client_state(self, client_id: str) -> Any:
         return (
             self.accounts.get(client_id, {}),
-            self.joined_transactions.get(client_id, [])
+            self.joined_transactions.get(client_id, []),
         )
 
     def set_client_state(self, client_id: str, state: Any) -> None:
@@ -114,7 +119,9 @@ class SelfMergeStrategy(MergeStrategy):
     def __str__(self) -> str:
         return "SelfMergeStrategy"
 
-    def merge_batch(self, batch: List[Any], client_id: str, msg_type: str) -> List[dict]:
+    def merge_batch(
+        self, batch: List[Any], client_id: str, msg_type: str
+    ) -> List[dict]:
         joined_txs = []
         if client_id not in self.inbound_txs:
             self.inbound_txs[client_id] = {}
@@ -155,7 +162,7 @@ class SelfMergeStrategy(MergeStrategy):
             and tx_1["from_account"] == tx_2["to_account"]
         ):
             return None
-        
+
         return TransactionRow(
             from_bank=tx_1.get("from_bank"),
             from_account=tx_1.get("from_account"),
@@ -170,7 +177,7 @@ class SelfMergeStrategy(MergeStrategy):
     def get_client_state(self, client_id: str) -> Any:
         return (
             self.inbound_txs.get(client_id, {}),
-            self.outbound_txs.get(client_id, {})
+            self.outbound_txs.get(client_id, {}),
         )
 
     def set_client_state(self, client_id: str, state: Any) -> None:

@@ -22,6 +22,7 @@ SNAPSHOT_BATCH = 1000
 
 CONFIG_PATH = "./config.yaml"
 
+
 @dataclass
 class MergeConfig:
     mom_host: str
@@ -35,6 +36,7 @@ class MergeConfig:
     strategy: MergeStrategy
     stage_name: str
 
+
 def _load_file_config() -> Dict[str, Any]:
     try:
         with open(CONFIG_PATH, "r", encoding="utf-8") as handle:
@@ -42,6 +44,7 @@ def _load_file_config() -> Dict[str, Any]:
             return data if isinstance(data, dict) else {}
     except FileNotFoundError:
         return {}
+
 
 def _parse_strategy_config(raw_strategy: Any) -> MergeStrategy:
     strategy_type = _read_strategy_type(raw_strategy)
@@ -54,17 +57,19 @@ def _parse_strategy_config(raw_strategy: Any) -> MergeStrategy:
 
     return NoStrategy()
 
+
 def _read_strategy_type(raw_strategy: Any) -> str:
     if isinstance(raw_strategy, dict):
         return str(raw_strategy.get("type", "NoStrategy"))
     return str(raw_strategy or "NoStrategy")
+
 
 def init_config() -> MergeConfig:
     data = _load_file_config()
     raw_strategy = data.get("strategy", "NoStrategy")
 
     return MergeConfig(
-       mom_host=data.get("mom_host", "rabbitmq"),
+        mom_host=data.get("mom_host", "rabbitmq"),
         input_exchange=data.get("input", ""),
         output_exchange=data.get("output", ""),
         log_level=os.environ.get("LOG_LEVEL", "INFO"),
@@ -75,6 +80,7 @@ def init_config() -> MergeConfig:
         routing_strategy=os.getenv("ROUTING_STRATEGY", "round_robin").lower(),
         stage_name=os.getenv("STAGE_NAME", "merge"),
     )
+
 
 def log_config(config: MergeConfig) -> None:
     logging.info(
@@ -88,11 +94,13 @@ def log_config(config: MergeConfig) -> None:
         config.strategy,
     )
 
+
 class MergeWorker(BaseWorker):
     """
     Stateful Merge. Uses a strategy to accumulate data in memory.
     Flushes state only when expected_eofs is reached.
     """
+
     def __init__(self, config: MergeConfig):
         super().__init__(config)
 
@@ -101,30 +109,32 @@ class MergeWorker(BaseWorker):
         self.state_manager = WorkerStateManager(
             base_dir="/app/state",
             stage_name=config.stage_name,
-            worker_id=config.worker_id
+            worker_id=config.worker_id,
         )
 
         client_ids = self.state_manager.get_all_client_ids()
-        
+
         for client_id in client_ids:
             logging.info("Recovering state for client %s", client_id)
             self._recover_client_state(client_id)
 
     def _recover_client_state(self, client_id: str) -> None:
         snapshot, wal_batches = self.state_manager.recover_client(client_id)
-        
+
         if snapshot:
             self.strategy.set_client_state(client_id, snapshot)
 
         for batch in wal_batches:
             self.strategy.merge_batch(batch, client_id, msg_type="batch")
-        
+
         self.received_batches_per_client[client_id] = len(wal_batches)
         logging.info("Recovered client %s", client_id)
 
-    def process_data(self, client_id: str, msg_id: str, msg_type: str, payload: dict) -> None:
+    def process_data(
+        self, client_id: str, msg_id: str, msg_type: str, payload: dict
+    ) -> None:
         batch = payload.get("batch", [])
-        
+
         count = self.received_batches_per_client.get(client_id, 0) + 1
         self.received_batches_per_client[client_id] = count
 
@@ -145,13 +155,16 @@ class MergeWorker(BaseWorker):
 
             current_state = self.strategy.get_client_state(client_id)
             self.state_manager.save_snapshot(client_id, current_state)
-            
+
             self.received_batches_per_client[client_id] = 0
 
     def flush_state(self, client_id: str) -> None:
-        logging.info("All EOFs received. Flushing joiner state for client %s", client_id)    
+        logging.info(
+            "All EOFs received. Flushing joiner state for client %s", client_id
+        )
         self.strategy.clear_client_state(client_id)
         self.state_manager.delete_client(client_id)
+
 
 def main() -> int:
     config = init_config()
@@ -170,6 +183,7 @@ def main() -> int:
 
     worker.start()
     return 0
+
 
 if __name__ == "__main__":
     raise SystemExit(main())

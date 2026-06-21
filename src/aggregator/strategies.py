@@ -4,6 +4,7 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 
+
 class AggregatorStrategy(ABC):
     """Abstract strategy for aggregating batches of messages."""
 
@@ -24,7 +25,7 @@ class AggregatorStrategy(ABC):
     @abstractmethod
     def clear_client_state(self, client: str) -> None:
         raise NotImplementedError()
-    
+
     @abstractmethod
     def get_client_state(self, client: str) -> Any:
         """Returns the raw internal memory for a specific client."""
@@ -98,7 +99,8 @@ class BankMaxAmountStrategy(AggregatorStrategy):
         return self.max_per_bank_by_client.get(client, {})
 
     def set_client_state(self, client: str, state: Any) -> None:
-        if state: self.max_per_bank_by_client[client] = state
+        if state:
+            self.max_per_bank_by_client[client] = state
 
 
 class AccountPairCountStategy(AggregatorStrategy):
@@ -120,9 +122,14 @@ class AccountPairCountStategy(AggregatorStrategy):
             count_from_batch = tx.get("count", 1)
 
             if key not in counts:
-                counts[key] = {"from_bank": tx["from_bank"], "from_account": tx["from_account"],
-                               "to_bank": tx["to_bank"], "to_account": tx["to_account"], "count": 0}
-            
+                counts[key] = {
+                    "from_bank": tx["from_bank"],
+                    "from_account": tx["from_account"],
+                    "to_bank": tx["to_bank"],
+                    "to_account": tx["to_account"],
+                    "count": 0,
+                }
+
             counts[key]["count"] += count_from_batch
 
         return []
@@ -140,14 +147,15 @@ class AccountPairCountStategy(AggregatorStrategy):
         for key, data in counts.items():
             if data["count"] > 5:
                 results.append(data)
-                
+
         return results
-      
+
     def get_client_state(self, client: str) -> Any:
         return self.counts_by_client.get(client, {})
 
     def set_client_state(self, client: str, state: Any) -> None:
-        if state: self.counts_by_client[client] = state
+        if state:
+            self.counts_by_client[client] = state
 
 
 class CountStrategy(AggregatorStrategy):
@@ -179,7 +187,7 @@ class CountStrategy(AggregatorStrategy):
 
     def set_client_state(self, client: str, state: Any) -> None:
         if state:
-             self._counts[client] = state
+            self._counts[client] = state
 
 
 class PaymentFormatAverageStrategy(AggregatorStrategy):
@@ -234,7 +242,8 @@ class PaymentFormatAverageStrategy(AggregatorStrategy):
         return self.stats_by_client.get(client, {})
 
     def set_client_state(self, client: str, state: Any) -> None:
-        if state: self.stats_by_client[client] = state
+        if state:
+            self.stats_by_client[client] = state
 
 
 class AccountStrategy(AggregatorStrategy):
@@ -274,9 +283,11 @@ class AccountStrategy(AggregatorStrategy):
         return list(client_set)
 
     def set_client_state(self, client: str, state: Any) -> None:
-        if not state: return
+        if not state:
+            return
 
         self.accounts_by_client[client] = set(tuple(item) for item in state)
+
 
 class ScatterAggregatorStrategy(AggregatorStrategy):
     def __init__(self):
@@ -294,12 +305,12 @@ class ScatterAggregatorStrategy(AggregatorStrategy):
         client_state = self.state_by_client.setdefault(client, {})
 
         for tx in batch:
-            origin = f"{tx["from_bank"]}_{tx["from_account"]}"
-            dest = f"{tx["to_bank"]}_{tx["to_account"]}"
+            origin = f"{tx['from_bank']}_{tx['from_account']}"
+            dest = f"{tx['to_bank']}_{tx['to_account']}"
             data = client_state.setdefault(origin, {"dests": set(), "txs": []})
             data["dests"].add(dest)
             data["txs"].append(tx)
-            
+
         return []
 
     def get_result_for_client(self, client: str) -> List[Any]:
@@ -318,7 +329,7 @@ class ScatterAggregatorStrategy(AggregatorStrategy):
 
     def clear_client_state(self, client: str) -> None:
         self.state_by_client.pop(client, None)
-    
+
     def get_client_state(self, client: str) -> Any:
         client_state = self.state_by_client.get(client, {})
 
@@ -331,15 +342,13 @@ class ScatterAggregatorStrategy(AggregatorStrategy):
                 }
 
         return json_state
-    
+
     def set_client_state(self, client: str, state: Any) -> None:
-        if not state: return
+        if not state:
+            return
 
         client_state = {}
         for origin, data in state.items():
-            client_state[origin] = {
-                "dests": set(data["dests"]),
-                "txs": data["txs"]
-            }
+            client_state[origin] = {"dests": set(data["dests"]), "txs": data["txs"]}
 
         self.state_by_client[client] = client_state

@@ -71,7 +71,9 @@ def init_config() -> FilterConfig:
     data = _load_file_config()
     # `outputs:` (lista) habilita fan-out a varias ramas; `output:` (single)
     # se sigue soportando y equivale a una lista de 1.
-    outputs = data.get("outputs") or ([data.get("output")] if data.get("output") else [])
+    outputs = data.get("outputs") or (
+        [data.get("output")] if data.get("output") else []
+    )
     return FilterConfig(
         mom_host=data.get("mom_host", "rabbitmq"),
         input_exchange=data.get("input", ""),

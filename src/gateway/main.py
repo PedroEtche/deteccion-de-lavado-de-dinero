@@ -6,8 +6,6 @@ import threading
 import uuid
 from dataclasses import dataclass
 
-import yaml
-
 from src.common.communication.tcp import TCPSocket
 from src.common.middleware import (
     MessageMiddlewareQueueRabbitMQ,
@@ -22,8 +20,6 @@ from src.common.communication.internal import (
     deserialize,
     serialize,
 )
-
-CONFIG_PATH = "./config.yaml"
 
 
 @dataclass
@@ -44,56 +40,24 @@ class GatewayConfig:
     expected_results: int
 
 
-def _load_file_config():
-    try:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as handle:
-            data = yaml.safe_load(handle) or {}
-            return data if isinstance(data, dict) else {}
-    except FileNotFoundError:
-        return {}
-
-
 def init_config():
-    file_config = _load_file_config()
     return GatewayConfig(
-        host=os.getenv("SERVER_HOST", file_config.get("host", "0.0.0.0")),
-        port=int(os.getenv("SERVER_PORT", file_config.get("port", 5678))),
-        mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
+        host=os.getenv("SERVER_HOST", "0.0.0.0"),
+        port=int(os.getenv("SERVER_PORT", 5678)),
+        mom_host=os.getenv("MOM_HOST", ""),
         transactions_usd_exchange=os.getenv(
-            "TRANSACTIONS_USD_EXCHANGE",
-            file_config.get("TRANSACTIONS_USD_EXCHANGE", "transactions_usd_exchange"),
+            "TRANSACTIONS_USD_EXCHANGE", "transactions_usd_exchange"
         ),
         transactions_date_exchange=os.getenv(
-            "TRANSACTIONS_DATE_EXCHANGE",
-            file_config.get("TRANSACTIONS_DATE_EXCHANGE", "transactions_date_exchange"),
+            "TRANSACTIONS_DATE_EXCHANGE", "transactions_date_exchange"
         ),
-        accounts_exchange=os.getenv(
-            "ACCOUNTS_EXCHANGE",
-            file_config.get("accounts_exchange", "accounts_exchange"),
-        ),
-        result_exchange=os.getenv(
-            "RESULT_EXCHANGE",
-            file_config.get("result_exchange", "result_exchange"),
-        ),
-        log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
-        transactions_usd_workers=int(
-            os.getenv(
-                "TRANSACTIONS_USD_WORKERS",
-                file_config.get("transactions_usd_workers", 1),
-            )
-        ),
-        transactions_date_workers=int(
-            os.getenv(
-                "TRANSACTIONS_DATE_WORKERS",
-                file_config.get("transactions_date_workers", 1),
-            )
-        ),
-        accounts_workers=int(
-            os.getenv("ACCOUNTS_WORKERS", file_config.get("accounts_workers", 1))
-        ),
-        expected_results=int(
-            os.getenv("EXPECTED_RESULTS", file_config.get("expected_results", 1))
-        ),
+        accounts_exchange=os.getenv("ACCOUNTS_EXCHANGE", "accounts_exchange"),
+        result_exchange=os.getenv("RESULT_EXCHANGE", "result_exchange"),
+        log_level=os.getenv("LOG_LEVEL", "INFO"),
+        transactions_usd_workers=int(os.getenv("TRANSACTIONS_USD_WORKERS", 1)),
+        transactions_date_workers=int(os.getenv("TRANSACTIONS_DATE_WORKERS", 1)),
+        accounts_workers=int(os.getenv("ACCOUNTS_WORKERS", 1)),
+        expected_results=int(os.getenv("EXPECTED_RESULTS", 1)),
     )
 
 
@@ -155,8 +119,8 @@ class Gateway:
             self.mom_host, self.accounts_exchange_name, exchange_type="direct"
         )
         self.result_mw = MessageMiddlewareExchangeRabbitMQ(
-            host=self.mom_host, 
-            exchange_name=self.result_exchange_name, 
+            host=self.mom_host,
+            exchange_name=self.result_exchange_name,
             routing_keys=["worker_1"],
             queue_name="gateway_result_queue",
         )
@@ -351,20 +315,17 @@ class Gateway:
     def handle_client_response(self):
         self.result_mw.start_consuming(self._dispatch_result)
 
-    @staticmethod
-    def handle_sigterm(server_socket, client_list, sigterm_received, signum, frame):
-        """Static method because it doesn't need 'self' state, it only acts on passed arguments."""
-        try:
-            server_socket.shutdown(socket.SHUT_RDWR)
-        except OSError:
-            pass  # Ignore if socket is already closed
-
-        for [_, client_socket] in client_list:
+    def stop(self):
+        """Graceful shutdown: dejamos de aceptar clientes y desbloqueamos el
+        accept() cerrando el socket de escucha. El loop de run() sale solo y
+        su finally se encarga de liberar el resto de los recursos."""
+        logging.info("Stopping Gateway...")
+        self.running = False
+        if self.server_socket:
             try:
-                client_socket.shutdown(socket.SHUT_RDWR)
+                self.server_socket.shutdown(socket.SHUT_RDWR)
             except OSError:
-                pass
-        sigterm_received.value = 1
+                pass  # El socket ya estaba cerrado o sin conexion
 
     def run(self):
         logging.info("Starting Gateway...")
@@ -432,4 +393,3 @@ def main():
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

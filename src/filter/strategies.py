@@ -190,9 +190,14 @@ class CurrencyConversionStrategy(FilterStrategy):
             self._rate_cache[date_str] = self._rate_fetcher(date_str)
         return self._rate_cache[date_str]
 
+
 class CountFieldComparisonStrategy(FilterStrategy):
     def __init__(self, operator: str, threshold: int) -> None:
-        logging.info("Initializing CountFieldComparisonStrategy with operator '%s' and threshold %d", operator, threshold)
+        logging.info(
+            "Initializing CountFieldComparisonStrategy with operator '%s' and threshold %d",
+            operator,
+            threshold,
+        )
         if operator not in _AMOUNT_OPS:
             raise ValueError(
                 f"Unknown operator. List of valid ones: {list(_AMOUNT_OPS)}"
@@ -201,17 +206,19 @@ class CountFieldComparisonStrategy(FilterStrategy):
         self.threshold = int(threshold)
 
     def __str__(self) -> str:
-        return f"CountFieldComparisonStrategy(count {self._op.__name__} {self.threshold})"
+        return (
+            f"CountFieldComparisonStrategy(count {self._op.__name__} {self.threshold})"
+        )
 
     def filter_batch(self, batch: List[Any]) -> List[Any]:
         filtered_batch = []
-        
+
         for row in batch:
             row_count = getattr(row, "count", None)
             if row_count is None and isinstance(row, dict):
                 row_count = row.get("count", 0)
-                
+
             if self._op(int(row_count), self.threshold):
                 filtered_batch.append(row)
-                
+
         return filtered_batch

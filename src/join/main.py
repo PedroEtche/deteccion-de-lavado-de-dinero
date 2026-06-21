@@ -109,24 +109,24 @@ class JoinWorker(BaseWorker):
         self.state_manager = WorkerStateManager(
             base_dir="/app/state",
             stage_name=config.stage_name,
-            worker_id=config.worker_id
+            worker_id=config.worker_id,
         )
 
         client_ids = self.state_manager.get_all_client_ids()
-        
+
         for client_id in client_ids:
             logging.info("Recovering state for client %s", client_id)
             self._recover_client_state(client_id)
 
     def _recover_client_state(self, client_id: str) -> None:
         snapshot, wal_batches = self.state_manager.recover_client(client_id)
-        
+
         if snapshot:
             self.strategy.set_client_state(client_id, snapshot)
 
         for batch in wal_batches:
             self.strategy.join_batch(batch, client_id)
-        
+
         self.received_batches_per_client[client_id] = len(wal_batches)
         logging.info("Recovered client %s", client_id)
 
@@ -139,12 +139,12 @@ class JoinWorker(BaseWorker):
         self.received_batches_per_client[client_id] = count
 
         self.state_manager.append_batch(client_id, batch)
-        
+
         self.strategy.join_batch(batch, client_id)
 
         if count % SNAPSHOT_BATCH == 0:
             logging.info("Triggering checkpoint snapshot for client %s", client_id)
-            
+
             current_state = self.strategy.get_client_state(client_id)
             if current_state is not None:
                 self.state_manager.save_snapshot(client_id, current_state)

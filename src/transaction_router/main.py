@@ -69,10 +69,9 @@ class TransactionRouter:
 
         self.eof_state_manager = WorkerStateManager(
             base_dir="/app/state",
-            stage_name=f"{self.config.stage_name}_eof", 
-            worker_id=self.config.worker_id
+            stage_name=f"{self.config.stage_name}_eof",
+            worker_id=self.config.worker_id,
         )
-
 
     def start(self) -> None:
         for route in self.config.routes:
@@ -84,7 +83,7 @@ class TransactionRouter:
         self.eof_coordinator = EofCoordinator(
             expected_eofs=self.config.expected_eofs,
             on_flush=self._on_flush,
-            state_manager=self.eof_state_manager
+            state_manager=self.eof_state_manager,
         )
 
         routing_keys = [f"worker_{self.config.worker_id}", "eof_broadcast"]
@@ -132,7 +131,7 @@ class TransactionRouter:
             out_msg = serialize(
                 build_raw_transactions_message(
                     client=client_id,
-                    msg_id=str(uuid.uuid4()), # TODO: cambiar msg id a incremental
+                    msg_id=str(uuid.uuid4()),  # TODO: cambiar msg id a incremental
                     batch=sub_batch,
                 )
             )
@@ -153,9 +152,7 @@ class TransactionRouter:
         )
         for route in self.config.routes:
             route.exchange.send(eof_msg, routing_key="eof_broadcast")
-            logging.info(
-                "EOF broadcast to %s for client %s", route.output, client_id
-            )
+            logging.info("EOF broadcast to %s for client %s", route.output, client_id)
 
     def stop(self) -> None:
         if self.input_mw:
@@ -168,9 +165,7 @@ class TransactionRouter:
 
 def main() -> int:
     config = init_config()
-    logging.basicConfig(
-        level=getattr(logging, config.log_level.upper(), logging.INFO)
-    )
+    logging.basicConfig(level=getattr(logging, config.log_level.upper(), logging.INFO))
     log_config(config)
     logging.getLogger("pika").setLevel(logging.WARNING)
 

@@ -1,17 +1,15 @@
 from typing import Callable
 import logging
 
+
 class EofCoordinator:
     """
-    Counts incoming EOFs for a specific client. 
+    Counts incoming EOFs for a specific client.
     Once expected_eofs is reached, it triggers the flush callback.
     """
 
     def __init__(
-        self,
-        expected_eofs: int,
-        on_flush: Callable[[str], None],
-        state_manager
+        self, expected_eofs: int, on_flush: Callable[[str], None], state_manager
     ) -> None:
         if expected_eofs <= 0:
             raise ValueError("expected_eofs must be positive")
@@ -45,7 +43,6 @@ class EofCoordinator:
             self.eofs_by_client.pop(client_id, None)
             self.state_manager.delete_client(client_id)
 
-        
 
 # import logging
 # import threading

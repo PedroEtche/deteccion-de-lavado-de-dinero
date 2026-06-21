@@ -10,6 +10,7 @@ El override, por cada servicio `client*`:
   - pisa TRANSACTIONS_PATH y ACCOUNTS_PATH para apuntar a
     {dataset}_Trans.csv y {dataset}_accounts.csv.
 """
+
 import sys
 import yaml
 
@@ -35,4 +36,6 @@ for c in clients:
         },
     }
 
-yaml.safe_dump({"services": services}, sys.stdout, default_flow_style=False, sort_keys=False)
+yaml.safe_dump(
+    {"services": services}, sys.stdout, default_flow_style=False, sort_keys=False
+)

@@ -27,15 +27,15 @@ services:
     environment:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
-    - TRANSACTIONS_USD_EXCHANGE=transactions_usd_exchange
-    - TRANSACTIONS_DATE_EXCHANGE=transactions_date_exchange
-    - ACCOUNTS_EXCHANGE=merge_max_by_account_exchange
+    - TRANSACTIONS_USD_EXCHANGE=transactions_usd_exchange      # -> Filtro USD
+    - TRANSACTIONS_DATE_EXCHANGE=transactions_date_exchange    # -> router Q5 (todas las monedas)
+    - ACCOUNTS_EXCHANGE=merge_max_by_account_exchange          # -> merge de Q2
     - RESULT_EXCHANGE=gateway_results_exchange
     - SERVER_PORT=5678
-    - TRANSACTIONS_USD_WORKERS=2
-    - TRANSACTIONS_DATE_WORKERS=2
+    - TRANSACTIONS_USD_WORKERS=1
+    - TRANSACTIONS_DATE_WORKERS=1
     - ACCOUNTS_WORKERS=1
-    - EXPECTED_RESULTS=4
+    - EXPECTED_RESULTS=5    # Q1+Q2+Q3+Q4+Q5;
 
   filtro_usd_1:
     build:
@@ -51,6 +51,7 @@ services:
     - WORKER_ID=1
     - EOF_EXPECTED=1
     - NUM_DOWNSTREAM_WORKERS=2
+    - STAGE_NAME=filtro_usd
 
   filtro_usd_2:
     build:
@@ -66,6 +67,7 @@ services:
     - WORKER_ID=2
     - EOF_EXPECTED=1
     - NUM_DOWNSTREAM_WORKERS=2
+    - STAGE_NAME=filtro_usd
 
   q1_filter_lt50_1:
     build:
@@ -81,6 +83,7 @@ services:
     - WORKER_ID=1
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=1
+    - STAGE_NAME=q1_filter_lt50
 
   q1_filter_lt50_2:
     build:
@@ -96,6 +99,7 @@ services:
     - WORKER_ID=2
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=1
+    - STAGE_NAME=q1_filter_lt50
 
   q1_join:
     build:
@@ -112,6 +116,7 @@ services:
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=1
     - QUERY_RESULT_NUMBER=1
+    - STAGE_NAME=q1_join
 
   q2_group_1:
     build:
@@ -128,6 +133,7 @@ services:
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=2
     - ROUTING_STRATEGY=sharded
+    - STAGE_NAME=q2_group_bank_max
 
   q2_group_2:
     build:
@@ -144,6 +150,7 @@ services:
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=2
     - ROUTING_STRATEGY=sharded
+    - STAGE_NAME=q2_group_bank_max
 
   q2_aggregator_1:
     build:
@@ -160,6 +167,7 @@ services:
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=1
     - ROUTING_STRATEGY=round_robin
+    - STAGE_NAME=q2_aggregator
 
   q2_aggregator_2:
     build:
@@ -176,6 +184,7 @@ services:
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=1
     - ROUTING_STRATEGY=round_robin
+    - STAGE_NAME=q2_aggregator
 
   q2_merge:
     build:
@@ -191,6 +200,7 @@ services:
     - WORKER_ID=1
     - EOF_EXPECTED=3
     - NUM_DOWNSTREAM_WORKERS=1
+    - STAGE_NAME=q2_merge
 
   q2_join:
     build:
@@ -207,34 +217,37 @@ services:
     - EOF_EXPECTED=1
     - NUM_DOWNSTREAM_WORKERS=1
     - QUERY_RESULT_NUMBER=2
+    - STAGE_NAME=q2_join
 
-  q3_router_1:
+  q3_q4_router_1:
     build:
       context: .
       dockerfile: src/transaction_router/Dockerfile
-    container_name: q3_router_1
+    container_name: q3_q4_router_1
     depends_on:
       rabbitmq:
         condition: service_healthy
     volumes:
-    - ./src/transaction_router/config/q3_dates_scaled.yaml:/app/config.yaml:ro
+    - ./src/transaction_router/config/q3_q4_dates.yaml:/app/config.yaml:ro
     environment:
+    - EOF_EXPECTED=2        # filtro_usd
     - WORKER_ID=1
-    - EOF_EXPECTED=2
+    - STAGE_NAME=q3_q4_router
 
-  q3_router_2:
+  q3_q4_router_2:
     build:
       context: .
       dockerfile: src/transaction_router/Dockerfile
-    container_name: q3_router_2
+    container_name: q3_q4_router_2
     depends_on:
       rabbitmq:
         condition: service_healthy
     volumes:
-    - ./src/transaction_router/config/q3_dates_scaled.yaml:/app/config.yaml:ro
+    - ./src/transaction_router/config/q3_q4_dates.yaml:/app/config.yaml:ro
     environment:
+    - EOF_EXPECTED=2        # filtro_usd
     - WORKER_ID=2
-    - EOF_EXPECTED=2
+    - STAGE_NAME=q3_q4_router
 
   q3_group_1:
     build:
@@ -251,6 +264,7 @@ services:
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=2
     - ROUTING_STRATEGY=sharded
+    - STAGE_NAME=q3_group
 
   q3_group_2:
     build:
@@ -267,6 +281,7 @@ services:
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=2
     - ROUTING_STRATEGY=sharded
+    - STAGE_NAME=q3_group
 
   q3_aggregator_1:
     build:
@@ -283,6 +298,7 @@ services:
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=1
     - ROUTING_STRATEGY=round_robin
+    - STAGE_NAME=q3_aggregator
 
   q3_aggregator_2:
     build:
@@ -299,6 +315,7 @@ services:
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=1
     - ROUTING_STRATEGY=round_robin
+    - STAGE_NAME=q3_aggregator
 
   q3_averages_join:
     build:
@@ -315,6 +332,7 @@ services:
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=1
     - ROUTING_STRATEGY=broadcast
+    - STAGE_NAME=q3_averages_join
 
   q3_historical_filter_1:
     build:
@@ -330,6 +348,7 @@ services:
     - WORKER_ID=1
     - EOF_EXPECTED=3
     - NUM_DOWNSTREAM_WORKERS=1
+    - STAGE_NAME=q3_historical_filter
 
   q3_historical_filter_2:
     build:
@@ -345,6 +364,7 @@ services:
     - WORKER_ID=2
     - EOF_EXPECTED=3
     - NUM_DOWNSTREAM_WORKERS=1
+    - STAGE_NAME=q3_historical_filter
 
   q3_result_join:
     build:
@@ -361,6 +381,252 @@ services:
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=1
     - QUERY_RESULT_NUMBER=3
+    - STAGE_NAME=q3_result_join
+
+  group_scatter_1:
+    build:
+      context: .
+      dockerfile: src/group/Dockerfile
+    container_name: group_scatter_1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/group/config/q4_scatter_group.yaml:/app/config.yaml:ro
+    - ./persisted_state:/app/state
+    environment:
+    - EOF_EXPECTED=2
+    - WORKER_ID=1
+    - NUM_DOWNSTREAM_WORKERS=2
+    - ROUTING_STRATEGY=sharded
+    - STAGE_NAME=group_scatter
+
+  group_scatter_2:
+    build:
+      context: .
+      dockerfile: src/group/Dockerfile
+    container_name: group_scatter_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/group/config/q4_scatter_group.yaml:/app/config.yaml:ro
+    - ./persisted_state:/app/state
+    environment:
+    - EOF_EXPECTED=2
+    - WORKER_ID=2
+    - NUM_DOWNSTREAM_WORKERS=2
+    - ROUTING_STRATEGY=sharded
+    - STAGE_NAME=group_scatter
+
+  aggregator_scatter_group_1:
+    build:
+      context: .
+      dockerfile: src/aggregator/Dockerfile
+    container_name: aggregator_scatter_group_1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/aggregator/config/q4_scatter_aggregator.yaml:/app/config.yaml:ro
+    - ./persisted_state:/app/state
+    environment:
+    - EOF_EXPECTED=2
+    - WORKER_ID=1
+    - NUM_DOWNSTREAM_WORKERS=2
+    - ROUTING_STRATEGY=sharded
+    - STAGE_NAME=scatter_aggregator
+
+  aggregator_scatter_group_2:
+    build:
+      context: .
+      dockerfile: src/aggregator/Dockerfile
+    container_name: aggregator_scatter_group_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/aggregator/config/q4_scatter_aggregator.yaml:/app/config.yaml:ro
+    - ./persisted_state:/app/state
+    environment:
+    - EOF_EXPECTED=2
+    - WORKER_ID=2
+    - NUM_DOWNSTREAM_WORKERS=2
+    - ROUTING_STRATEGY=sharded
+    - STAGE_NAME=scatter_aggregator
+
+  merge_with_self_1:
+    build:
+      context: .
+      dockerfile: src/merge/Dockerfile
+    container_name: merge_with_self_1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/merge/config/selfmerge.yaml:/app/config.yaml:ro
+    - ./persisted_state:/app/state
+    environment:
+    - EOF_EXPECTED=2
+    - WORKER_ID=1
+    - NUM_DOWNSTREAM_WORKERS=2
+    - STAGE_NAME=self_merge
+
+  merge_with_self_2:
+    build:
+      context: .
+      dockerfile: src/merge/Dockerfile
+    container_name: merge_with_self_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/merge/config/selfmerge.yaml:/app/config.yaml:ro
+    - ./persisted_state:/app/state
+    environment:
+    - EOF_EXPECTED=2
+    - WORKER_ID=2
+    - NUM_DOWNSTREAM_WORKERS=2
+    - STAGE_NAME=self_merge
+
+  group_account_pair_1:
+    build:
+      context: .
+      dockerfile: src/group/Dockerfile
+    container_name: group_account_pair_1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/group/config/account_pair_count.yaml:/app/config.yaml:ro
+    - ./persisted_state:/app/state
+    environment:
+    - EOF_EXPECTED=2
+    - WORKER_ID=1
+    - NUM_DOWNSTREAM_WORKERS=2
+    - STAGE_NAME=group_account_pair
+    
+  aggreator_account_pair_0:
+    build:
+      context: .
+      dockerfile: src/aggregator/Dockerfile
+    container_name: aggregator_account_pair_0 
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/aggregator/config/account_pairs_aggregator.yaml:/app/config.yaml:ro
+    - ./persisted_state:/app/state
+    environment:
+    - EOF_EXPECTED=1
+    - WORKER_ID=1
+    - NUM_DOWNSTREAM_WORKERS=1
+    - STAGE_NAME=aggregator_account_pair
+
+  group_account_pair_2:
+    build:
+      context: .
+      dockerfile: src/group/Dockerfile
+    container_name: group_account_pair_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/group/config/account_pair_count.yaml:/app/config.yaml:ro
+    - ./persisted_state:/app/state
+    environment:
+    - EOF_EXPECTED=2
+    - WORKER_ID=2
+    - NUM_DOWNSTREAM_WORKERS=2
+    - STAGE_NAME=group_account_pair
+
+  group_by_accounts_1:
+    build:
+      context: .
+      dockerfile: src/group/Dockerfile
+    container_name: group_by_accounts_1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/group/config/group_by_accounts.yaml:/app/config.yaml:ro
+    - ./persisted_state:/app/state
+    environment:
+    - EOF_EXPECTED=2
+    - WORKER_ID=1
+    - NUM_DOWNSTREAM_WORKERS=2
+    - ROUTING_STRATEGY=sharded
+    - STAGE_NAME=group_accounts
+
+  group_by_accounts_2:
+    build:
+      context: .
+      dockerfile: src/group/Dockerfile
+    container_name: group_by_accounts_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/group/config/group_by_accounts.yaml:/app/config.yaml:ro
+    - ./persisted_state:/app/state
+    environment:
+    - EOF_EXPECTED=2
+    - WORKER_ID=2
+    - NUM_DOWNSTREAM_WORKERS=2
+    - ROUTING_STRATEGY=sharded
+    - STAGE_NAME=group_accounts
+
+  aggregator_accounts_1:
+    build:
+      context: .
+      dockerfile: src/aggregator/Dockerfile
+    container_name: aggregator_accounts_1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/aggregator/config/q4_aggregator_accounts.yaml:/app/config.yaml:ro
+    - ./persisted_state:/app/state
+    environment:
+    - EOF_EXPECTED=2
+    - WORKER_ID=1
+    - NUM_DOWNSTREAM_WORKERS=1
+    - STAGE_NAME=aggregator_accounts
+
+  aggregator_accounts_2:
+    build:
+      context: .
+      dockerfile: src/aggregator/Dockerfile
+    container_name: aggregator_accounts_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/aggregator/config/q4_aggregator_accounts.yaml:/app/config.yaml:ro
+    - ./persisted_state:/app/state
+    environment:
+    - EOF_EXPECTED=2
+    - WORKER_ID=2
+    - NUM_DOWNSTREAM_WORKERS=1
+    - STAGE_NAME=aggregator_accounts
+
+  q4_join_0:
+    build:
+      context: .
+      dockerfile: src/join/Dockerfile
+    container_name: q4_join_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/join/config/q4_result.yaml:/app/config.yaml:ro
+    - ./persisted_state:/app/state
+    environment:
+    - EOF_EXPECTED=2
+    - WORKER_ID=1
+    - NUM_DOWNSTREAM_WORKERS=1
+    - QUERY_RESULT_NUMBER=4
+    - STAGE_NAME=join_query_result
 
   q5_router_1:
     build:
@@ -375,6 +641,7 @@ services:
     environment:
     - WORKER_ID=1
     - EOF_EXPECTED=1
+    - STAGE_NAME=q5_router
 
   q5_router_2:
     build:
@@ -389,6 +656,7 @@ services:
     environment:
     - WORKER_ID=2
     - EOF_EXPECTED=1
+    - STAGE_NAME=q5_router
 
   q5_converter_1:
     build:
@@ -404,6 +672,7 @@ services:
     - WORKER_ID=1
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=1
+    - STAGE_NAME=q5_converter
 
   q5_converter_2:
     build:
@@ -419,6 +688,7 @@ services:
     - WORKER_ID=2
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=1
+    - STAGE_NAME=q5_converter
 
   q5_join:
     build:
@@ -435,6 +705,7 @@ services:
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=1
     - QUERY_RESULT_NUMBER=5
+    - STAGE_NAME=q5_join
 
   client_0:
     build:

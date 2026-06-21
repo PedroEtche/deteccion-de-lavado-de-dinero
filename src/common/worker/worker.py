@@ -11,6 +11,7 @@ from src.common.communication.internal import (
 )
 from src.common.eof import EofCoordinator
 from src.common.state_manager import WorkerStateManager
+from src.common.duplicate_handler import DuplicateHandler
 
 class BaseWorker(ABC):
     """
@@ -28,6 +29,8 @@ class BaseWorker(ABC):
             stage_name=f"{self.config.stage_name}_eof", 
             worker_id=self.config.worker_id
         )
+
+        self.duplicate_handler = DuplicateHandler()
 
     def start(self) -> None:
         logging.info(f"Starting {self.__class__.__name__}...")
@@ -79,7 +82,15 @@ class BaseWorker(ABC):
                 self.eof_coordinator.handle_eof(client_id)
             else:
                 logging.info("Received message of type %s for client %s", msg_type, client_id)
+
+                if self.duplicate_handler.is_duplicate(client_id, decoded.get("msg_id", "")):
+                    logging.info("Duplicate message detected for client %s with msg_id %s. Acknowledging without processing.", client_id, decoded.get("msg_id"))
+                    ack()
+                    return
+                
+                self.duplicate_handler.mark_seen(client_id, decoded.get("msg_id", ""))
                 self.process_data(client_id, decoded["msg_id"], msg_type, decoded["payload"])
+    
             ack()
         except Exception:
             logging.exception("Error processing message")
@@ -117,7 +128,8 @@ class BaseWorker(ABC):
         self.flush_state(client_id)
 
         logging.info("Broadcasting EOF downstream for client %s", client_id)
-        
+        self.duplicate_handler.clear_client(client_id)
+
         eof_msg = serialize(build_eof_message(client=client_id, msg_id=str(uuid.uuid4())))
         for exchange in self.output_exchanges:
             exchange.send(eof_msg, routing_key="eof_broadcast")

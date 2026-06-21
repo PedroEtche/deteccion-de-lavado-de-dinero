@@ -9,6 +9,7 @@ import yaml
 
 from src.common.worker import BaseWorker
 from src.common.communication.internal import build_batch_message
+from src.common.state_manager import WorkerStateManager
 
 from .strategies import (
     AccountPairCountStategy,
@@ -34,6 +35,7 @@ class AggregatorConfig:
     num_downstream_workers: int
     routing_strategy: str
     strategy: AggregatorStrategy
+    stage_name: str
 
 def _extract_strategy_type(raw_strategy) -> str:
     if isinstance(raw_strategy, dict):
@@ -79,7 +81,8 @@ def init_config() -> AggregatorConfig:
         expected_eofs=int(os.getenv("EOF_EXPECTED", "1")),
         worker_id=int(os.getenv("WORKER_ID", "1")),
         num_downstream_workers=int(os.getenv("NUM_DOWNSTREAM_WORKERS", "1")),
-        routing_strategy=os.getenv("ROUTING_STRATEGY", "round_robin").lower()
+        routing_strategy=os.getenv("ROUTING_STRATEGY", "round_robin").lower(),
+        stage_name=os.getenv("STAGE_NAME", "aggregator")
     )
 
 def log_config(config: AggregatorConfig) -> None:
@@ -102,9 +105,20 @@ class AggregatorWorker(BaseWorker):
     def __init__(self, config: AggregatorConfig) -> None:
         super().__init__(config)
 
+        self.state_manager = WorkerStateManager(
+            base_dir="./state",
+            stage_name=config.stage_name,
+            worker_id=config.worker_id
+        )
+
+        # aca tendriamos que recontruir el estado 
+        # self.strategy.state_by_client = self.state_manager.load_all()
+
     def process_data(self, client_id: str, msg_id: str, msg_type: str, payload: dict) -> None:
         batch = payload.get("batch", [])
+
         self.strategy.aggregate_batch(batch, client_id)
+        self.state_manager.save_client(client_id, self.strategy.get_client_state(client_id))
 
     def flush_state(self, client_id: str) -> None:
         logging.info("All EOFs received. Flushing aggregated result for client %s", client_id)
@@ -147,6 +161,8 @@ class AggregatorWorker(BaseWorker):
             self.send_downstream(client_id, batch_msg)
 
         self.strategy.clear_client_state(client_id)
+        # limpiar archivo de cliente
+        self.state_manager.delete_client(client_id)
 
 def main() -> int:
     config = init_config()

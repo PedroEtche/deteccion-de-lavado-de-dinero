@@ -28,3 +28,12 @@ routes:
       - type: date_range
         from: 2022-09-06
         to: 2022-09-15
+  
+  - name: q4_transactions
+    output: q4_group_input_exchange
+    num_downstream_workers: 1
+    routing_strategy: round_robin
+    filters:
+      - type: date_range
+        from: 2022-09-01
+        to: 2022-09-06

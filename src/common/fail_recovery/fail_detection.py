@@ -39,7 +39,6 @@ class Node:
         self,
         node_id: str,
         peers: list[tuple[str, str, int]],
-        container_name: str,
         peer_containers: dict[str, str],
     ):
         """
@@ -47,7 +46,6 @@ class Node:
         peer_containers: {node_id: docker_container_name} used to restart peers.
         """
         self.node_id = node_id
-        self._container_name = container_name
         self._peer_containers = peer_containers
 
         # Keep the hostnames and resolve them lazily on each connection (_send).

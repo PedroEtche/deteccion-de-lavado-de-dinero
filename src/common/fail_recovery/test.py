@@ -25,7 +25,6 @@ def main():
     node = Node(
         node_id=node_id,
         peers=peers,
-        container_name=f"node{node_id}",
         peer_containers=peer_containers,
     )
     try:

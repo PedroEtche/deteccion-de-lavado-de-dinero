@@ -95,7 +95,10 @@ def main():
     client_files = sorted(glob.glob(pattern))
 
     if not client_files:
-        print(f"\n{RED}FAIL{RESET}  no client result files found at {pattern}\n", file=sys.stderr)
+        print(
+            f"\n{RED}FAIL{RESET}  no client result files found at {pattern}\n",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     overall_ok = True

@@ -9,12 +9,15 @@ from src.common.middleware import MessageMiddlewareExchangeRabbitMQ
 class Route:
     """One destination pipeline. The router emits a sub-batch to `output`
     with the txs that pass all `filters`."""
+
     name: str
     output: str
     num_downstream_workers: int
     routing_strategy: str
     filters: List[Dict[str, Any]]
-    exchange: Optional[MessageMiddlewareExchangeRabbitMQ] = field(default=None, init=False, repr=False)
+    exchange: Optional[MessageMiddlewareExchangeRabbitMQ] = field(
+        default=None, init=False, repr=False
+    )
     next_worker: int = field(default=1, init=False, repr=False)
 
     def matches(self, tx) -> bool:

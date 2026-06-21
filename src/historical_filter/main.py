@@ -15,6 +15,7 @@ from src.common.communication.internal import (
 from src.common.eof import EofCoordinator
 from src.common.middleware import MessageMiddlewareExchangeRabbitMQ
 from src.common.utils import load_yaml_config
+from src.common.state_manager import WorkerStateManager
 
 CONFIG_PATH = "./config.yaml"
 
@@ -37,6 +38,7 @@ class HistoricalFilterConfig:
     worker_id: int
     num_downstream_workers: int
     log_level: str
+    stage_name: str
 
 
 def init_config() -> HistoricalFilterConfig:
@@ -50,6 +52,7 @@ def init_config() -> HistoricalFilterConfig:
         worker_id=int(os.getenv("WORKER_ID", "1")),
         num_downstream_workers=int(os.getenv("NUM_DOWNSTREAM_WORKERS", "1")),
         log_level=os.environ.get("LOG_LEVEL", "INFO"),
+        stage_name=os.environ.get("STAGE_NAME", "historical_filter"),
     )
 
 
@@ -100,6 +103,12 @@ class HistoricalAverageFilter:
         # en el flush. Por ahora se mantienen en memoria.
         self.candidates_by_client: Dict[str, List[Any]] = {}
 
+        self.eof_state_manager = WorkerStateManager(
+            base_dir="/app/state",
+            stage_name=f"{self.config.stage_name}_eof",
+            worker_id=self.config.worker_id,
+        )
+
     def start(self) -> None:
         self.output_mw = MessageMiddlewareExchangeRabbitMQ(
             self.config.mom_host, self.config.output_exchange
@@ -108,6 +117,7 @@ class HistoricalAverageFilter:
         self.eof_coordinator = EofCoordinator(
             expected_eofs=self.config.expected_eofs,
             on_flush=self._on_flush,
+            state_manager=self.eof_state_manager,
         )
 
         # Tres routing keys:
@@ -156,7 +166,9 @@ class HistoricalAverageFilter:
         elif msg_type == CANDIDATES_MSG_TYPE:
             # TODO: en vez de acumular en memoria, persistir a disco aca.
             self.candidates_by_client.setdefault(client_id, []).extend(batch)
-            logging.info("Buffered %d candidate txs for client %s", len(batch), client_id)
+            logging.info(
+                "Buffered %d candidate txs for client %s", len(batch), client_id
+            )
 
         else:
             logging.warning("Unexpected msg_type %s for client %s", msg_type, client_id)
@@ -177,7 +189,7 @@ class HistoricalAverageFilter:
             if (tx.amount_paid or 0.0) < threshold:
                 # Proyeccion al resultado de Q3. El orden de columnas del CSV lo
                 # define el orden de campos de Q3ResultRow.
-                result.append( # TODO cambiar a que sea un batch, la generacion de Q3ResultRow la hace el join
+                result.append(  # TODO cambiar a que sea un batch, la generacion de Q3ResultRow la hace el join
                     Q3ResultRow(
                         from_bank=tx.from_bank,
                         from_account=tx.from_account,
@@ -211,7 +223,9 @@ class HistoricalAverageFilter:
             ) + 1
             self.output_mw.send(out_msg, routing_key=routing_key)
 
-        eof_msg = serialize(build_eof_message(client=client_id, msg_id=str(uuid.uuid4())))
+        eof_msg = serialize(
+            build_eof_message(client=client_id, msg_id=str(uuid.uuid4()))
+        )
         self.output_mw.send(eof_msg, routing_key="eof_broadcast")
 
     def stop(self) -> None:

@@ -10,35 +10,49 @@ from src.common.communication.internal import (
     serialize,
 )
 from src.common.eof import EofCoordinator
+from src.common.state_manager import WorkerStateManager
+from src.common.duplicate_handler import DuplicateHandler
+
 
 class BaseWorker(ABC):
     """
     Handles all RabbitMQ infrastructure, round-robin routing, and EOF coordination.
     Subclasses only need to implement `process_data` and `flush_state`.
     """
+
     def __init__(self, config):
         self.config = config
         self.current_downstream_worker = 1
         self._running = False
-        self.strategy = config.strategy    
+        self.strategy = config.strategy
+
+        self.eof_state_manager = WorkerStateManager(
+            base_dir="/app/state",
+            stage_name=f"{self.config.stage_name}_eof",
+            worker_id=self.config.worker_id,
+        )
+
+        self.duplicate_handler = DuplicateHandler()
 
     def start(self) -> None:
         logging.info(f"Starting {self.__class__.__name__}...")
         self._running = True
-        
+
         self.eof_coordinator = EofCoordinator(
             expected_eofs=self.config.expected_eofs,
             on_flush=self._internal_on_flush,
+            state_manager=self.eof_state_manager,
         )
-        
-        routing_keys = [
-            f"worker_{self.config.worker_id}",
-            "eof_broadcast"
-        ]
+
+        routing_keys = [f"worker_{self.config.worker_id}", "eof_broadcast"]
+
+        queue_name = f"{self.config.stage_name}_worker_{self.config.worker_id}"
+
         self.input_exchange = MessageMiddlewareExchangeRabbitMQ(
-            host=self.config.mom_host, 
-            exchange_name=self.config.input_exchange, 
-            routing_keys=routing_keys
+            host=self.config.mom_host,
+            exchange_name=self.config.input_exchange,
+            routing_keys=routing_keys,
+            queue_name=queue_name,
         )
 
         # Multi-output: un worker puede fanout-ear el mismo batch a varias ramas
@@ -66,23 +80,49 @@ class BaseWorker(ABC):
                 logging.info("Received EOF from upstream for client %s", client_id)
                 self.eof_coordinator.handle_eof(client_id)
             else:
-                logging.info("Received message of type %s for client %s", msg_type, client_id)
-                self.process_data(client_id, decoded["msg_id"], msg_type, decoded["payload"])
+                logging.info(
+                    "Received message of type %s for client %s", msg_type, client_id
+                )
+
+                if self.duplicate_handler.is_duplicate(
+                    client_id, decoded.get("msg_id", "")
+                ):
+                    logging.info(
+                        "Duplicate message detected for client %s with msg_id %s. Acknowledging without processing.",
+                        client_id,
+                        decoded.get("msg_id"),
+                    )
+                    ack()
+                    return
+
+                self.duplicate_handler.mark_seen(client_id, decoded.get("msg_id", ""))
+                self.process_data(
+                    client_id, decoded["msg_id"], msg_type, decoded["payload"]
+                )
+
             ack()
         except Exception:
             logging.exception("Error processing message")
             nack()
 
-    def send_downstream(self, client_id: str, message: dict, shard_routing_key: str = None) -> None:
+    def send_downstream(
+        self, client_id: str, message: dict, shard_routing_key: str = None
+    ) -> None:
         """Serializes and routes a fully built message to the next stage."""
         if not message:
             return
-        logging.info("Routing message downstream for client %s with routing strategy %s", client_id, self.config.routing_strategy)
+        logging.info(
+            "Routing message downstream for client %s with routing strategy %s",
+            client_id,
+            self.config.routing_strategy,
+        )
         out_msg = serialize(message)
 
         if self.config.routing_strategy == "round_robin":
             routing_key = f"worker_{self.current_downstream_worker}"
-            self.current_downstream_worker = (self.current_downstream_worker % self.config.num_downstream_workers) + 1
+            self.current_downstream_worker = (
+                self.current_downstream_worker % self.config.num_downstream_workers
+            ) + 1
 
         elif self.config.routing_strategy == "sharded":
             routing_key = shard_routing_key
@@ -93,7 +133,9 @@ class BaseWorker(ABC):
             routing_key = "data_broadcast"
 
         else:
-            raise ValueError(f"Unknown routing strategy: {self.config.routing_strategy}")
+            raise ValueError(
+                f"Unknown routing strategy: {self.config.routing_strategy}"
+            )
 
         # Fanout a cada rama downstream (una sola si no es multi-output).
         for exchange in self.output_exchanges:
@@ -105,8 +147,11 @@ class BaseWorker(ABC):
         self.flush_state(client_id)
 
         logging.info("Broadcasting EOF downstream for client %s", client_id)
-        
-        eof_msg = serialize(build_eof_message(client=client_id, msg_id=str(uuid.uuid4())))
+        self.duplicate_handler.clear_client(client_id)
+
+        eof_msg = serialize(
+            build_eof_message(client=client_id, msg_id=str(uuid.uuid4()))
+        )
         for exchange in self.output_exchanges:
             exchange.send(eof_msg, routing_key="eof_broadcast")
 
@@ -117,7 +162,7 @@ class BaseWorker(ABC):
         self.input_exchange.close()
         for exchange in self.output_exchanges:
             exchange.close()
-    
+
     def get_sharded_route(self, shard_key: str) -> str:
         """Helper for subclasses that need to pre-batch data by physical route."""
         hash_val = zlib.crc32(shard_key.encode("utf-8"))
@@ -125,7 +170,9 @@ class BaseWorker(ABC):
         return f"worker_{target_worker}"
 
     @abstractmethod
-    def process_data(self, client_id: str, msg_id: str, msg_type: str, payload: dict) -> None:
+    def process_data(
+        self, client_id: str, msg_id: str, msg_type: str, payload: dict
+    ) -> None:
         """Process incoming data."""
         pass
 

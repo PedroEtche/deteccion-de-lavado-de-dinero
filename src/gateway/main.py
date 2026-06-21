@@ -6,10 +6,11 @@ import threading
 import uuid
 from dataclasses import dataclass
 
-import yaml
-
 from src.common.communication.tcp import TCPSocket
-from src.common.middleware import MessageMiddlewareQueueRabbitMQ, MessageMiddlewareExchangeRabbitMQ
+from src.common.middleware import (
+    MessageMiddlewareQueueRabbitMQ,
+    MessageMiddlewareExchangeRabbitMQ,
+)
 from src.common.communication.internal import (
     AccountRow,
     TransactionRow,
@@ -19,8 +20,6 @@ from src.common.communication.internal import (
     deserialize,
     serialize,
 )
-
-CONFIG_PATH = "./config.yaml"
 
 
 @dataclass
@@ -41,54 +40,24 @@ class GatewayConfig:
     expected_results: int
 
 
-def _load_file_config():
-    try:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as handle:
-            data = yaml.safe_load(handle) or {}
-            return data if isinstance(data, dict) else {}
-    except FileNotFoundError:
-        return {}
-
-
 def init_config():
-    file_config = _load_file_config()
     return GatewayConfig(
-        host=os.getenv("SERVER_HOST", file_config.get("host", "0.0.0.0")),
-        port=int(os.getenv("SERVER_PORT", file_config.get("port", 5678))),
-        mom_host=os.getenv("MOM_HOST", file_config.get("mom_host", "")),
+        host=os.getenv("SERVER_HOST", "0.0.0.0"),
+        port=int(os.getenv("SERVER_PORT", 5678)),
+        mom_host=os.getenv("MOM_HOST", ""),
         transactions_usd_exchange=os.getenv(
-            "TRANSACTIONS_USD_EXCHANGE",
-            file_config.get("TRANSACTIONS_USD_EXCHANGE", "transactions_usd_exchange"),
+            "TRANSACTIONS_USD_EXCHANGE", "transactions_usd_exchange"
         ),
         transactions_date_exchange=os.getenv(
-            "TRANSACTIONS_DATE_EXCHANGE",
-            file_config.get("TRANSACTIONS_DATE_EXCHANGE", "transactions_date_exchange"),
+            "TRANSACTIONS_DATE_EXCHANGE", "transactions_date_exchange"
         ),
-        accounts_exchange=os.getenv(
-            "ACCOUNTS_EXCHANGE",
-            file_config.get("accounts_exchange", "accounts_exchange"),
-        ),
-        result_exchange=os.getenv(
-            "RESULT_EXCHANGE",
-            file_config.get("result_exchange", "result_exchange"),
-        ),
-        log_level=os.getenv("LOG_LEVEL", file_config.get("log_level", "INFO")),
-        transactions_usd_workers=int(os.getenv(
-            "TRANSACTIONS_USD_WORKERS", 
-            file_config.get("transactions_usd_workers", 1)
-        )),
-        transactions_date_workers=int(os.getenv(
-            "TRANSACTIONS_DATE_WORKERS", 
-            file_config.get("transactions_date_workers", 1)
-        )),
-        accounts_workers=int(os.getenv(
-            "ACCOUNTS_WORKERS",
-            file_config.get("accounts_workers", 1)
-        )),
-        expected_results=int(os.getenv(
-            "EXPECTED_RESULTS",
-            file_config.get("expected_results", 1)
-        )),
+        accounts_exchange=os.getenv("ACCOUNTS_EXCHANGE", "accounts_exchange"),
+        result_exchange=os.getenv("RESULT_EXCHANGE", "result_exchange"),
+        log_level=os.getenv("LOG_LEVEL", "INFO"),
+        transactions_usd_workers=int(os.getenv("TRANSACTIONS_USD_WORKERS", 1)),
+        transactions_date_workers=int(os.getenv("TRANSACTIONS_DATE_WORKERS", 1)),
+        accounts_workers=int(os.getenv("ACCOUNTS_WORKERS", 1)),
+        expected_results=int(os.getenv("EXPECTED_RESULTS", 1)),
     )
 
 
@@ -109,7 +78,7 @@ class Gateway:
         self.server_host = gateway_config.host
         self.server_port = gateway_config.port
         self.mom_host = gateway_config.mom_host
-        
+
         self.transactions_usd_exchange_name = gateway_config.transactions_usd_exchange
         self.transactions_date_exchange_name = gateway_config.transactions_date_exchange
         self.accounts_exchange_name = gateway_config.accounts_exchange
@@ -150,9 +119,9 @@ class Gateway:
             self.mom_host, self.accounts_exchange_name, exchange_type="direct"
         )
         self.result_mw = MessageMiddlewareExchangeRabbitMQ(
-            host=self.mom_host, 
-            exchange_name=self.result_exchange_name, 
-            routing_keys=["worker_1", "eof_broadcast"],
+            host=self.mom_host,
+            exchange_name=self.result_exchange_name,
+            routing_keys=["worker_1"],
             queue_name="gateway_result_queue",
         )
 
@@ -165,6 +134,7 @@ class Gateway:
             return
 
         client_id = decoded.get("client")
+        msg_id = decoded.get("msg_id")
 
         with self._registry_lock:
             entry = self._client_registry.get(client_id)
@@ -185,32 +155,38 @@ class Gateway:
 
         ack()
 
-        if decoded.get("type") == "eof":
+        if decoded.get("eof"):
             # Cada query que corre manda 1 EOF de resultado al terminar. Con
             # varias queries a la vez hay que esperarlas a todas antes de
             # cerrar el cliente; si no, cortariamos al terminar la primera.
             entry["eofs"] = entry.get("eofs", 0) + 1
             logging.info(
                 "Received EOF %d/%d on result queue for client %s",
-                entry["eofs"], self.expected_results, client_id,
+                entry["eofs"],
+                self.expected_results,
+                client_id,
             )
             if entry["eofs"] >= self.expected_results:
                 entry["done"].set()
 
     def send_accounts_data(self, serialized_message: bytes):
-        """Sends data to accounts workers using Round-Robin strategy."""
+        """Broadcasts data to accounts workers."""
         with self._send_lock:
-            logging.info("Routing accounts message to workers with Round-Robin strategy")
-            self.accounts_mw.send(
-                serialized_message,
-                routing_key=f"worker_{self.accounts_current_worker}",
+            logging.info(
+                "Broadcasting accounts message to %d workers", self.accounts_workers
             )
-        self.accounts_current_worker = (self.accounts_current_worker % self.accounts_workers) + 1
+            for worker_id in range(1, self.accounts_workers + 1):
+                self.accounts_mw.send(
+                    serialized_message,
+                    routing_key=f"worker_{worker_id}",
+                )
 
     def send_transactions_data(self, serialized_message: bytes):
         """Sends data via Round-Robin to a specific worker."""
         with self._send_lock:
-            logging.info("Routing transactions message to workers with Round-Robin strategy")
+            logging.info(
+                "Routing transactions message to workers with Round-Robin strategy"
+            )
             self.transactions_date_mw.send(
                 serialized_message,
                 routing_key=f"worker_{self.transactions_date_current_worker}",
@@ -220,13 +196,17 @@ class Gateway:
                 routing_key=f"worker_{self.transactions_usd_current_worker}",
             )
 
-        self.transactions_date_current_worker = (self.transactions_date_current_worker % self.transactions_date_workers) + 1
-        self.transactions_usd_current_worker = (self.transactions_usd_current_worker % self.transactions_usd_workers) + 1
+        self.transactions_date_current_worker = (
+            self.transactions_date_current_worker % self.transactions_date_workers
+        ) + 1
+        self.transactions_usd_current_worker = (
+            self.transactions_usd_current_worker % self.transactions_usd_workers
+        ) + 1
 
     def send_eof(self, eof_message: bytes):
         """Broadcasts EOF to all workers listening to the exchange."""
         routing_key = "eof_broadcast"
-        
+
         with self._send_lock:
             self.transactions_usd_mw.send(eof_message, routing_key=routing_key)
             self.transactions_date_mw.send(eof_message, routing_key=routing_key)
@@ -256,7 +236,9 @@ class Gateway:
 
                 message = deserialize(raw_bytes)
                 msg_type = message.get("type")
-                logging.info("Received message of type %s from client %s", msg_type, client_id)
+                logging.info(
+                    "Received message of type %s from client %s", msg_type, client_id
+                )
 
                 if msg_type == "raw_transactions":
                     txs = message.get("payload", {}).get("batch", [])
@@ -272,7 +254,11 @@ class Gateway:
 
                 elif msg_type == "raw_accounts":
                     accounts = message.get("payload", {}).get("batch", [])
-                    logging.info("sending accounts batch of %d rows for client %s", len(accounts), client_id)
+                    logging.info(
+                        "sending accounts batch of %d rows for client %s",
+                        len(accounts),
+                        client_id,
+                    )
                     serialized_message = serialize(
                         build_raw_accounts_message(
                             client=client_id,
@@ -289,7 +275,7 @@ class Gateway:
             eof_message = serialize(
                 build_eof_message(client=client_id, msg_id=str(uuid.uuid4()))
             )
-            
+
             self.send_eof(eof_message)
 
             done.wait()
@@ -312,7 +298,12 @@ class Gateway:
                 self.server_socket.close()
             except OSError:
                 pass
-        for mw in (self.transactions_date_mw, self.transactions_usd_mw, self.accounts_mw, self.result_mw):
+        for mw in (
+            self.transactions_date_mw,
+            self.transactions_usd_mw,
+            self.accounts_mw,
+            self.result_mw,
+        ):
             if mw:
                 try:
                     mw.close()
@@ -324,20 +315,17 @@ class Gateway:
     def handle_client_response(self):
         self.result_mw.start_consuming(self._dispatch_result)
 
-    @staticmethod
-    def handle_sigterm(server_socket, client_list, sigterm_received, signum, frame):
-        """Static method because it doesn't need 'self' state, it only acts on passed arguments."""
-        try:
-            server_socket.shutdown(socket.SHUT_RDWR)
-        except OSError:
-            pass  # Ignore if socket is already closed
-
-        for [_, client_socket] in client_list:
+    def stop(self):
+        """Graceful shutdown: dejamos de aceptar clientes y desbloqueamos el
+        accept() cerrando el socket de escucha. El loop de run() sale solo y
+        su finally se encarga de liberar el resto de los recursos."""
+        logging.info("Stopping Gateway...")
+        self.running = False
+        if self.server_socket:
             try:
-                client_socket.shutdown(socket.SHUT_RDWR)
+                self.server_socket.shutdown(socket.SHUT_RDWR)
             except OSError:
-                pass
-        sigterm_received.value = 1
+                pass  # El socket ya estaba cerrado o sin conexion
 
     def run(self):
         logging.info("Starting Gateway...")

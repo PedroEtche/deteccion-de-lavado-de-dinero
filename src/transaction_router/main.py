@@ -14,6 +14,7 @@ from src.common.communication.internal import (
 from src.common.eof import EofCoordinator
 from src.common.middleware import MessageMiddlewareExchangeRabbitMQ
 from src.common.utils import load_yaml_config
+from src.common.state_manager import WorkerStateManager
 
 from .routes import Route, build_routes
 
@@ -28,6 +29,7 @@ class RouterConfig:
     expected_eofs: int
     worker_id: int
     log_level: str
+    stage_name: str
 
 
 def init_config() -> RouterConfig:
@@ -39,6 +41,7 @@ def init_config() -> RouterConfig:
         expected_eofs=int(os.getenv("EOF_EXPECTED", "1")),
         worker_id=int(os.getenv("WORKER_ID", "1")),
         log_level=os.environ.get("LOG_LEVEL", "INFO"),
+        stage_name=os.environ.get("STAGE_NAME", "transaction_router"),
     )
 
 
@@ -64,6 +67,12 @@ class TransactionRouter:
         self.config = config
         self.input_mw = None
 
+        self.eof_state_manager = WorkerStateManager(
+            base_dir="/app/state",
+            stage_name=f"{self.config.stage_name}_eof",
+            worker_id=self.config.worker_id,
+        )
+
     def start(self) -> None:
         for route in self.config.routes:
             route.exchange = MessageMiddlewareExchangeRabbitMQ(
@@ -74,6 +83,7 @@ class TransactionRouter:
         self.eof_coordinator = EofCoordinator(
             expected_eofs=self.config.expected_eofs,
             on_flush=self._on_flush,
+            state_manager=self.eof_state_manager,
         )
 
         routing_keys = [f"worker_{self.config.worker_id}", "eof_broadcast"]
@@ -121,7 +131,7 @@ class TransactionRouter:
             out_msg = serialize(
                 build_raw_transactions_message(
                     client=client_id,
-                    msg_id=str(uuid.uuid4()), # TODO: cambiar msg id a incremental
+                    msg_id=str(uuid.uuid4()),  # TODO: cambiar msg id a incremental
                     batch=sub_batch,
                 )
             )
@@ -142,9 +152,7 @@ class TransactionRouter:
         )
         for route in self.config.routes:
             route.exchange.send(eof_msg, routing_key="eof_broadcast")
-            logging.info(
-                "EOF broadcast to %s for client %s", route.output, client_id
-            )
+            logging.info("EOF broadcast to %s for client %s", route.output, client_id)
 
     def stop(self) -> None:
         if self.input_mw:
@@ -157,9 +165,7 @@ class TransactionRouter:
 
 def main() -> int:
     config = init_config()
-    logging.basicConfig(
-        level=getattr(logging, config.log_level.upper(), logging.INFO)
-    )
+    logging.basicConfig(level=getattr(logging, config.log_level.upper(), logging.INFO))
     log_config(config)
     logging.getLogger("pika").setLevel(logging.WARNING)
 

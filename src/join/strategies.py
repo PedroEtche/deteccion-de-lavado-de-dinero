@@ -12,6 +12,7 @@ from src.common.communication.internal import (
     Q5ResultRow,
 )
 
+
 class JoinStrategy(ABC):
     """Abstract strategy that owns all join state.
 
@@ -48,12 +49,14 @@ class JoinStrategy(ABC):
         (or ``None`` if there is nothing), clearing that client's state."""
         raise NotImplementedError()
 
-    # Default no-op. Strategies que necesiten enriquecer con datos de accounts
-    # (ej. BankMaxAmountStrategy para Q2) hacen override.
-    def add_accounts(self, batch: List[Any], client: str) -> None:
-        pass
+    @abstractmethod
+    def get_client_state(self, client: str) -> Any:
+        """Returns the raw internal memory for a specific client. Return None if stateless."""
+        raise NotImplementedError()
 
-    def build_eof_message(self, client, msg_id=None):
+    @abstractmethod
+    def set_client_state(self, client: str, state: Any) -> None:
+        """Restores the raw internal memory for a specific client."""
         raise NotImplementedError()
 
 
@@ -62,15 +65,18 @@ class NoStrategy(JoinStrategy):
 
     def join_batch(self, batch: List[Any], client: str) -> None:
         return None
-        # if batch:
-        #     self._emit(client, build_q1_result(batch=batch, eof=False, client=client))
 
     def flush(self, client: str) -> Optional[dict]:
         return None
 
     def build_eof_message(self, client, msg_id=None):
         pass
-        # return build_q1_result(batch=[], eof=True, client=client)
+
+    def get_client_state(self, client: str) -> Any:
+        return None  # Stateless! Don't write to disk.
+
+    def set_client_state(self, client: str, state: Any) -> None:
+        pass
 
 
 class QueryResultStrategy(JoinStrategy):
@@ -94,15 +100,17 @@ class QueryResultStrategy(JoinStrategy):
         processed_batch = batch
         if self.row_class:
             processed_batch = []
-            
+
             valid_keys = {f.name for f in dataclasses.fields(self.row_class)}
-            
+
             for item in batch:
                 if isinstance(item, dict):
                     safe_kwargs = {k: v for k, v in item.items() if k in valid_keys}
                 else:
-                    safe_kwargs = {k: getattr(item, k) for k in valid_keys if hasattr(item, k)}
-                
+                    safe_kwargs = {
+                        k: getattr(item, k) for k in valid_keys if hasattr(item, k)
+                    }
+
                 processed_batch.append(self.row_class(**safe_kwargs))
 
         self._emit(
@@ -122,6 +130,46 @@ class QueryResultStrategy(JoinStrategy):
         return build_results_for_query(
             query_number=self.query_number, batch=[], eof=True, client=client
         )
+
+    def get_client_state(self, client: str) -> Any:
+        return None  # Stateless! Don't write to disk.
+
+    def set_client_state(self, client: str, state: Any) -> None:
+        pass
+
+
+class CountStrategy(JoinStrategy):
+    """Stateful: accumulates how many rows arrive per client and emits the total
+    on flush. Used to count how many rows passed an upstream filter."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.query_number = 5
+        self.count_by_client: Dict[str, int] = {}
+
+    def join_batch(self, batch: List[Any], client: str) -> None:
+        self.count_by_client[client] = self.count_by_client.get(client, 0) + len(batch)
+
+    def flush(self, client: str) -> Optional[dict]:
+        count = self.count_by_client.pop(client, 0)
+        return build_results_for_query(
+            query_number=self.query_number,
+            batch=[Q5ResultRow(count=count)],
+            eof=True,
+            client=client,
+        )
+
+    def build_eof_message(self, client, msg_id=None):
+        return build_results_for_query(
+            query_number=self.query_number, batch=[], eof=True, client=client
+        )
+
+    def get_client_state(self, client: str) -> Any:
+        return self.count_by_client.get(client, 0)
+
+    def set_client_state(self, client: str, state: Any) -> None:
+        if state is not None:
+            self.count_by_client[client] = state
 
 
 class AveragesUnionStrategy(JoinStrategy):
@@ -154,145 +202,9 @@ class AveragesUnionStrategy(JoinStrategy):
         # payload especial aca.
         return None
 
+    def get_client_state(self, client: str) -> Any:
+        return self.averages_by_client.get(client, [])
 
-class CountStrategy(JoinStrategy):
-    """Stateful: accumulates how many rows arrive per client and emits the total
-    on flush. Used to count how many rows passed an upstream filter."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.query_number = 5
-        self.count_by_client: Dict[str, int] = {}
-
-    def join_batch(self, batch: List[Any], client: str) -> None:
-        self.count_by_client[client] = self.count_by_client.get(client, 0) + len(batch)
-
-    def flush(self, client: str) -> Optional[dict]:
-        count = self.count_by_client.pop(client, 0)
-        return build_results_for_query(
-            query_number=self.query_number, batch=[Q5ResultRow(count=count)], eof=True, client=client
-        )
-
-    def build_eof_message(self, client, msg_id=None):
-        return build_results_for_query(
-            query_number=self.query_number, batch=[], eof=True, client=client
-        )
-
-
-# class UnionStrategy(JoinStrategy):
-#     """Buffers every row per client and emits the union on flush."""
-#
-#     def __init__(self) -> None:
-#         super().__init__()
-#         self.batch_by_client: Dict[str, List[Any]] = {}
-#
-#     def join_batch(self, batch: List[Any], client: str) -> None:
-#         self.batch_by_client.setdefault(client, []).extend(batch)
-#
-#     def flush(self, client: str) -> Optional[dict]:
-#         rows = self.batch_by_client.pop(client, [])
-#         if not rows:
-#             return None
-#         return build_batch_message(
-#             "batch", batch=rows, client=client, msg_id=str(uuid.uuid4())
-#         )
-#
-#     def build_eof_message(self, client, msg_id=None):
-#         return build_q1_result(batch=[], eof=True, client=client)
-#
-#
-# class CountStrategy(JoinStrategy):
-#     """Counts rows per client and emits the total on flush."""
-#
-#     def __init__(self) -> None:
-#         super().__init__()
-#         self.count_by_client: Dict[str, int] = {}
-#
-#     def join_batch(self, batch: List[Any], client: str) -> None:
-#         self.count_by_client[client] = self.count_by_client.get(client, 0) + len(batch)
-#
-#     def flush(self, client: str) -> Optional[dict]:
-#         count = self.count_by_client.pop(client, 0)
-#         return build_batch_message(
-#             "batch", batch=[count], client=client, msg_id=str(uuid.uuid4())
-#         )
-#
-#     def build_eof_message(self, client, msg_id=None):
-#         return build_q1_result(batch=[], eof=True, client=client)
-#
-#
-# class BankMaxAmountStrategy(JoinStrategy):
-#     """Tracks the max transaction per bank per client, enriching with bank
-#     names received via :meth:`add_accounts`; emits the enriched result on flush."""
-#
-#     def __init__(self) -> None:
-#         super().__init__()
-#         self.max_per_bank_by_client: Dict[str, Dict[str, Dict[str, Any]]] = {}
-#         # bank_id -> bank_name, por cliente. Poblado desde el accounts_queue.
-#         self.bank_names_by_client: Dict[str, Dict[Any, str]] = {}
-#
-#     def add_accounts(self, batch: List[Any], client: str) -> None:
-#         bank_names = self.bank_names_by_client.setdefault(client, {})
-#         for account in batch:
-#             bank_id = getattr(account, "bank_id", None)
-#             bank_name = getattr(account, "bank_name", None)
-#             if bank_id is not None and bank_name is not None:
-#                 bank_names[bank_id] = bank_name
-#
-#     def join_batch(self, batch: List[Any], client: str) -> None:
-#         max_per_bank = self.max_per_bank_by_client.setdefault(client, {})
-#         for tx in batch:
-#             bank = tx["from_bank"]
-#             amount = tx["amount_paid"] or 0.0
-#             current = max_per_bank.get(bank)
-#
-#             if current is None or amount > current["amount_paid"]:
-#                 max_per_bank[bank] = {
-#                     "from_bank": tx["from_bank"],
-#                     "from_account": tx["from_account"],
-#                     "amount_paid": amount,
-#                 }
-#
-#     def flush(self, client: str) -> Optional[dict]:
-#         entries = self.max_per_bank_by_client.pop(client, {})
-#         bank_names = self.bank_names_by_client.pop(client, {})
-#         if not entries:
-#             return None
-#
-#         results = []
-#         for entry in entries.values():
-#             results.append(
-#                 {
-#                     "bank_name": bank_names.get(entry["from_bank"], entry["from_bank"]),
-#                     "from_account": entry["from_account"],
-#                     "amount_paid": entry["amount_paid"],
-#                 }
-#             )
-#         return build_batch_message(
-#             "batch", batch=results, client=client, msg_id=str(uuid.uuid4())
-#         )
-#
-#     def build_eof_message(self, client, msg_id=None):
-#         return build_q1_result(batch=[], eof=True, client=client)
-#
-#
-# class AccountStrategy(JoinStrategy):
-#     """Buffers raw account records per client; emits them on flush."""
-#
-#     def __init__(self) -> None:
-#         super().__init__()
-#         self.accounts_by_client: Dict[str, List[Dict[str, str]]] = {}
-#
-#     def join_batch(self, batch: List[Any], client: str) -> None:
-#         self.accounts_by_client.setdefault(client, []).extend(batch)
-#
-#     def flush(self, client: str) -> Optional[dict]:
-#         accounts = self.accounts_by_client.pop(client, [])
-#         if not accounts:
-#             return None
-#         return build_batch_message(
-#             "batch", batch=accounts, client=client, msg_id=str(uuid.uuid4())
-#         )
-#
-#     def build_eof_message(self, client, msg_id=None):
-#         return build_q1_result(batch=[], eof=True, client=client)
+    def set_client_state(self, client: str, state: Any) -> None:
+        if state:
+            self.averages_by_client[client] = state

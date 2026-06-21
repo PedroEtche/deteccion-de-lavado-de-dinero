@@ -109,16 +109,17 @@ class Payload:
         return cls(**data)
 
 
-
 # @dataclass
 # class Q1ResultRow(Payload):
-    
+
+
 @dataclass
 class Q2ResultRow(Payload):
     from_bank: str | None = None
     from_account: str | None = None
     bank_name: str | None = None
     amount_paid: float | None = None
+
 
 # usamos dataclass para la result row para que las columnas esten
 # en el orden que queremos en el csv fixed de resultados
@@ -129,14 +130,17 @@ class Q3ResultRow(Payload):
     payment_format: str | None = None
     amount_paid: float | None = None
 
+
 @dataclass
 class Q4ResultRow(Payload):
     bank: str | None = None
     account: str | None = None
 
+
 @dataclass
 class Q5ResultRow(Payload):
     count: int = 0
+
 
 @dataclass
 class AccountRow(Payload):
@@ -282,6 +286,7 @@ def build_eof_message(*, client, msg_id):
     """Wrapper for building EOF message"""
     return build_message("eof", client=client, msg_id=msg_id)
 
+
 """
 def build_q1_result(*, batch, eof, client):
     if not isinstance(batch, list):
@@ -293,6 +298,7 @@ def build_q1_result(*, batch, eof, client):
     msg["eof"] = eof
     return msg
 """
+
 
 def build_results_for_query(query_number: int, batch: list, eof: bool, client: str):
     """Wrapper for building query result messages based on query number"""
@@ -345,15 +351,18 @@ def deserialize(message):
         ]
     elif msg_type == "q2_result":
         decoded["payload"]["batch"] = [
-            Q2ResultRow.from_dict(row) if isinstance(row, dict) else row for row in batch
+            Q2ResultRow.from_dict(row) if isinstance(row, dict) else row
+            for row in batch
         ]
     elif msg_type == "q3_result":
         decoded["payload"]["batch"] = [
-            Q3ResultRow.from_dict(row) if isinstance(row, dict) else row for row in batch
+            Q3ResultRow.from_dict(row) if isinstance(row, dict) else row
+            for row in batch
         ]
     elif msg_type == "q5_result":
         decoded["payload"]["batch"] = [
-            Q5ResultRow.from_dict(row) if isinstance(row, dict) else row for row in batch
+            Q5ResultRow.from_dict(row) if isinstance(row, dict) else row
+            for row in batch
         ]
 
     return decoded

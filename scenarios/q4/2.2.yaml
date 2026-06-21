@@ -68,21 +68,20 @@ services:
     - NUM_DOWNSTREAM_WORKERS=3
     - STAGE_NAME=filter_usd
 
-
-  # filter_by_datetime_0:
-  #   build:
-  #     context: .
-  #     dockerfile: src/filter/Dockerfile
-  #   container_name: filter_by_datetime_0
-  #   depends_on:
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   volumes:
-  #   - ./src/filter/config/datetime_config.yaml:/app/config.yaml:ro
-  #   environment:
-  #   - EOF_EXPECTED=1
-  #   - WORKER_ID=1
-  #   - NUM_DOWNSTREAM_WORKERS=1
+  q3_date_router_0:
+    build:
+      context: .
+      dockerfile: src/transaction_router/Dockerfile
+    container_name: q3_date_router_0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/transaction_router/config/q4_dates.yaml:/app/config.yaml:ro
+    environment:
+    - EOF_EXPECTED=2       # 1 filtro USD upstream
+    - WORKER_ID=1
+    - STAGE_NAME=date_router
 
   group_scatter_0:
     build:
@@ -96,7 +95,7 @@ services:
     - ./src/group/config/q4_scatter_group.yaml:/app/config.yaml:ro
     - ./persisted_state:/app/state
     environment:
-    - EOF_EXPECTED=2
+    - EOF_EXPECTED=1
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=2
     - ROUTING_STRATEGY=sharded
@@ -114,7 +113,7 @@ services:
     - ./src/group/config/q4_scatter_group.yaml:/app/config.yaml:ro
     - ./persisted_state:/app/state
     environment:
-    - EOF_EXPECTED=2
+    - EOF_EXPECTED=1
     - WORKER_ID=2
     - NUM_DOWNSTREAM_WORKERS=2
     - ROUTING_STRATEGY=sharded
@@ -132,7 +131,7 @@ services:
     - ./src/group/config/q4_scatter_group.yaml:/app/config.yaml:ro
     - ./persisted_state:/app/state
     environment:
-    - EOF_EXPECTED=2
+    - EOF_EXPECTED=1
     - WORKER_ID=3
     - NUM_DOWNSTREAM_WORKERS=2
     - ROUTING_STRATEGY=sharded
@@ -338,14 +337,35 @@ services:
     depends_on:
     - gateway
     volumes:
-    - ./data/q4_trans.csv:/data/small_trans.csv
-    - ./data/small_accounts.csv:/data/small_accounts.csv
+    - ./data/LI-Small_Trans.csv:/data/small_trans.csv
+    - ./data/accounts.csv:/data/small_accounts.csv
     - ./results/clients/client_0:/results/clients/client_0
     environment:
     - PYTHONUNBUFFERED=1
     - SERVER_HOST=gateway
     - SERVER_PORT=5678
     - OUTPUT_PATH=/results/clients/client_0/
+    - ACCOUNTS_PATH=/data/small_accounts.csv
+    - TRANSACTIONS_PATH=/data/small_trans.csv
+    - BATCH_SIZE=500
+
+  client_1:
+    build:
+      context: .
+      dockerfile: src/client/Dockerfile
+    command: ["sh", "-c", "sleep 10 && python -m src.client.main"]
+    container_name: client_1
+    depends_on:
+    - gateway
+    volumes:
+    - ./data/q4_trans.csv:/data/small_trans.csv
+    - ./data/small_accounts.csv:/data/small_accounts.csv
+    - ./results/clients/client_1:/results/clients/client_1
+    environment:
+    - PYTHONUNBUFFERED=1
+    - SERVER_HOST=gateway
+    - SERVER_PORT=5678
+    - OUTPUT_PATH=/results/clients/client_1/
     - ACCOUNTS_PATH=/data/small_accounts.csv
     - TRANSACTIONS_PATH=/data/small_trans.csv
     - BATCH_SIZE=500

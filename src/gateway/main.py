@@ -8,12 +8,9 @@ from dataclasses import dataclass
 
 from src.common.communication.tcp import TCPSocket
 from src.common.middleware import (
-    MessageMiddlewareQueueRabbitMQ,
     MessageMiddlewareExchangeRabbitMQ,
 )
 from src.common.communication.internal import (
-    AccountRow,
-    TransactionRow,
     build_eof_message,
     build_raw_accounts_message,
     build_raw_transactions_message,

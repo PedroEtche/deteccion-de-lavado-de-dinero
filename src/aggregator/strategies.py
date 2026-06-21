@@ -1,5 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Set
+import logging
+
+logging.basicConfig(level=logging.INFO)
 
 class AggregatorStrategy(ABC):
     """Abstract strategy for aggregating batches of messages."""
@@ -100,7 +103,7 @@ class BankMaxAmountStrategy(AggregatorStrategy):
 
 class AccountPairCountStategy(AggregatorStrategy):
     def __init__(self):
-        self.counts_by_client: Dict[str, Dict[tuple, int]] = {}
+        self.counts_by_client: Dict[str, Dict[str, Dict[str, Any]]] = {}
 
     def __str__(self) -> str:
         return "AccountPairCountStategy"
@@ -113,9 +116,14 @@ class AccountPairCountStategy(AggregatorStrategy):
 
         counts = self.counts_by_client.setdefault(client, {})
         for tx in batch:
-            key = (tx["from_bank"], tx["from_account"], tx["to_bank"], tx["to_account"])
-            count_from_batch = tx["count"] if "count" in tx else 1
-            counts[key] = counts.get(key, 0) + count_from_batch
+            key = f"{tx['from_bank']}_{tx['from_account']}_{tx['to_bank']}_{tx['to_account']}"
+            count_from_batch = tx.get("count", 1)
+
+            if key not in counts:
+                counts[key] = {"from_bank": tx["from_bank"], "from_account": tx["from_account"],
+                               "to_bank": tx["to_bank"], "to_account": tx["to_account"], "count": 0}
+            
+            counts[key]["count"] += count_from_batch
 
         return []
 
@@ -126,21 +134,15 @@ class AccountPairCountStategy(AggregatorStrategy):
     def clear_client_state(self, client: str) -> None:
         self.counts_by_client.pop(client, None)
 
-    def _build_results(self, counts: Dict[tuple, int]) -> List[Any]:
+    def _build_results(self, counts: Dict[str, Dict[str, Any]]) -> List[Any]:
         results = []
-        for (from_bank, from_account, to_bank, to_account), count in counts.items():
-            if count > 5:
-                results.append(
-                    {
-                        "from_bank": from_bank,
-                        "from_account": from_account,
-                        "to_bank": to_bank,
-                        "to_account": to_account,
-                        "count": count,
-                    }
-                )
+
+        for key, data in counts.items():
+            if data["count"] > 5:
+                results.append(data)
+                
         return results
-    
+      
     def get_client_state(self, client: str) -> Any:
         return self.counts_by_client.get(client, {})
 
@@ -268,10 +270,13 @@ class AccountStrategy(AggregatorStrategy):
         self.accounts_by_client.pop(client, None)
 
     def get_client_state(self, client: str) -> Any:
-        return self.accounts_by_client.get(client, set())
+        client_set = self.accounts_by_client.get(client, set())
+        return list(client_set)
 
     def set_client_state(self, client: str, state: Any) -> None:
-        if state: self.accounts_by_client[client] = state
+        if not state: return
+
+        self.accounts_by_client[client] = set(tuple(item) for item in state)
 
 class ScatterAggregatorStrategy(AggregatorStrategy):
     def __init__(self):
@@ -289,12 +294,12 @@ class ScatterAggregatorStrategy(AggregatorStrategy):
         client_state = self.state_by_client.setdefault(client, {})
 
         for tx in batch:
-            origin = (tx["from_bank"], tx["from_account"])
-            dest = (tx["to_bank"], tx["to_account"])
+            origin = f"{tx["from_bank"]}_{tx["from_account"]}"
+            dest = f"{tx["to_bank"]}_{tx["to_account"]}"
             data = client_state.setdefault(origin, {"dests": set(), "txs": []})
             data["dests"].add(dest)
             data["txs"].append(tx)
-
+            
         return []
 
     def get_result_for_client(self, client: str) -> List[Any]:
@@ -315,8 +320,26 @@ class ScatterAggregatorStrategy(AggregatorStrategy):
         self.state_by_client.pop(client, None)
     
     def get_client_state(self, client: str) -> Any:
-        return self.state_by_client.get(client, {})
+        client_state = self.state_by_client.get(client, {})
 
+        json_state = {}
+        for origin, data in client_state.items():
+            if data["txs"]:
+                json_state[origin] = {
+                    "dests": list(data["dests"]),
+                    "txs": data["txs"],
+                }
+
+        return json_state
+    
     def set_client_state(self, client: str, state: Any) -> None:
-        if state:
-            self.state_by_client[client] = state
+        if not state: return
+
+        client_state = {}
+        for origin, data in state.items():
+            client_state[origin] = {
+                "dests": set(data["dests"]),
+                "txs": data["txs"]
+            }
+
+        self.state_by_client[client] = client_state

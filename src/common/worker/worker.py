@@ -10,6 +10,7 @@ from src.common.communication.internal import (
     serialize,
 )
 from src.common.eof import EofCoordinator
+from src.common.state_manager import WorkerStateManager
 
 class BaseWorker(ABC):
     """
@@ -22,6 +23,12 @@ class BaseWorker(ABC):
         self._running = False
         self.strategy = config.strategy    
 
+        self.eof_state_manager = WorkerStateManager(
+            base_dir="/app/state",
+            stage_name=f"{self.config.stage_name}_eof", 
+            worker_id=self.config.worker_id
+        )
+
     def start(self) -> None:
         logging.info(f"Starting {self.__class__.__name__}...")
         self._running = True
@@ -29,16 +36,21 @@ class BaseWorker(ABC):
         self.eof_coordinator = EofCoordinator(
             expected_eofs=self.config.expected_eofs,
             on_flush=self._internal_on_flush,
+            state_manager=self.eof_state_manager
         )
         
         routing_keys = [
             f"worker_{self.config.worker_id}",
             "eof_broadcast"
         ]
+
+        queue_name = f"{self.config.stage_name}_worker_{self.config.worker_id}"
+
         self.input_exchange = MessageMiddlewareExchangeRabbitMQ(
             host=self.config.mom_host, 
             exchange_name=self.config.input_exchange, 
-            routing_keys=routing_keys
+            routing_keys=routing_keys,
+            queue_name=queue_name
         )
 
         # Multi-output: un worker puede fanout-ear el mismo batch a varias ramas

@@ -1,0 +1,13 @@
+mom_host: rabbitmq
+
+input: usd_filtered_exchange
+
+routes:
+  - name: q4_dates
+    output: q4_group_input_exchange
+    num_downstream_workers: 3
+    routing_strategy: round_robin
+    filters:
+      - type: date_range
+        from: 2022-09-01
+        to: 2022-09-06

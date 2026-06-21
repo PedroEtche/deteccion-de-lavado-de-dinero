@@ -7,10 +7,8 @@ from typing import Any, Dict, List
 
 import yaml
 
-from src.common.communication.internal import (
-    serialize,
-)
 from src.common.worker import BaseWorker
+from src.common.state_manager import WorkerStateManager
 
 from .strategies import (
     AveragesUnionStrategy,
@@ -19,6 +17,8 @@ from .strategies import (
     NoStrategy,
     QueryResultStrategy,
 )
+
+SNAPSHOT_BATCH = 1000
 
 CONFIG_PATH = "./config.yaml"
 
@@ -34,8 +34,7 @@ class JoinConfig:
     worker_id: int
     num_downstream_workers: int
     routing_strategy: str
-    role: str
-    replication_exchange: str
+    stage_name: str
 
 
 def _load_file_config() -> Dict[str, Any]:
@@ -84,8 +83,7 @@ def init_config() -> JoinConfig:
         worker_id=int(os.getenv("WORKER_ID", "1")),
         num_downstream_workers=int(os.getenv("NUM_DOWNSTREAM_WORKERS", "1")),
         routing_strategy=os.getenv("ROUTING_STRATEGY", "round_robin").lower(),
-        role=os.getenv("ROLE", "master"),
-        replication_exchange=os.getenv("REPLICATION_EXCHANGE", ""),
+        stage_name=os.getenv("STAGE_NAME", "join"),
     )
 
 
@@ -104,21 +102,59 @@ class JoinWorker(BaseWorker):
     def __init__(self, config: JoinConfig):
         super().__init__(config)
         self.strategy = config.strategy
-
         self.strategy.register_join_callback(self.send_downstream)
+
+        self.received_batches_per_client = {}
+
+        self.state_manager = WorkerStateManager(
+            base_dir="/app/state",
+            stage_name=config.stage_name,
+            worker_id=config.worker_id
+        )
+
+        client_ids = self.state_manager.get_all_client_ids()
+        
+        for client_id in client_ids:
+            logging.info("Recovering state for client %s", client_id)
+            self._recover_client_state(client_id)
+
+    def _recover_client_state(self, client_id: str) -> None:
+        snapshot, wal_batches = self.state_manager.recover_client(client_id)
+        
+        if snapshot:
+            self.strategy.set_client_state(client_id, snapshot)
+
+        for batch in wal_batches:
+            self.strategy.join_batch(batch, client_id)
+        
+        self.received_batches_per_client[client_id] = len(wal_batches)
+        logging.info("Recovered client %s", client_id)
 
     def process_data(
         self, client_id: str, msg_id: str, msg_type: str, payload: dict
     ) -> None:
         batch = payload.get("batch", [])
 
-        logging.info("Batch arrived of len: %d", len(batch))
+        count = self.received_batches_per_client.get(client_id, 0) + 1
+        self.received_batches_per_client[client_id] = count
+
+        self.state_manager.append_batch(client_id, batch)
+        
         self.strategy.join_batch(batch, client_id)
+
+        if count % SNAPSHOT_BATCH == 0:
+            logging.info("Triggering checkpoint snapshot for client %s", client_id)
+            
+            current_state = self.strategy.get_client_state(client_id)
+            if current_state is not None:
+                self.state_manager.save_snapshot(client_id, current_state)
+                self.received_batches_per_client[client_id] = 0
 
     def flush_state(self, client_id: str) -> None:
         final_msg = self.strategy.flush(client_id)
-        logging.info("Flushing final joined result for client %s: %s", client_id, final_msg)
         self.send_downstream(client_id, final_msg)
+
+        self.state_manager.delete_client(client_id)
 
 
 def main() -> int:

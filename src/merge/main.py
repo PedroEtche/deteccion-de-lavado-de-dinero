@@ -9,6 +9,7 @@ import yaml
 
 from src.common.worker import BaseWorker
 from src.common.communication.internal import build_batch_message
+from src.common.state_manager import WorkerStateManager
 
 from .strategies import (
     MergeStrategy,
@@ -16,6 +17,8 @@ from .strategies import (
     AccountsStrategy,
     SelfMergeStrategy,
 )
+
+SNAPSHOT_BATCH = 1000
 
 CONFIG_PATH = "./config.yaml"
 
@@ -30,6 +33,7 @@ class MergeConfig:
     num_downstream_workers: int
     routing_strategy: str
     strategy: MergeStrategy
+    stage_name: str
 
 def _load_file_config() -> Dict[str, Any]:
     try:
@@ -68,7 +72,8 @@ def init_config() -> MergeConfig:
         expected_eofs=int(os.getenv("EOF_EXPECTED", "1")),
         worker_id=int(os.getenv("WORKER_ID", "1")),
         num_downstream_workers=int(os.getenv("NUM_DOWNSTREAM_WORKERS", "1")),
-        routing_strategy=os.getenv("ROUTING_STRATEGY", "round_robin").lower()
+        routing_strategy=os.getenv("ROUTING_STRATEGY", "round_robin").lower(),
+        stage_name=os.getenv("STAGE_NAME", "merge"),
     )
 
 def log_config(config: MergeConfig) -> None:
@@ -91,28 +96,62 @@ class MergeWorker(BaseWorker):
     def __init__(self, config: MergeConfig):
         super().__init__(config)
 
+        self.received_batches_per_client = {}
+
+        self.state_manager = WorkerStateManager(
+            base_dir="/app/state",
+            stage_name=config.stage_name,
+            worker_id=config.worker_id
+        )
+
+        client_ids = self.state_manager.get_all_client_ids()
+        
+        for client_id in client_ids:
+            logging.info("Recovering state for client %s", client_id)
+            self._recover_client_state(client_id)
+
+    def _recover_client_state(self, client_id: str) -> None:
+        snapshot, wal_batches = self.state_manager.recover_client(client_id)
+        
+        if snapshot:
+            self.strategy.set_client_state(client_id, snapshot)
+
+        for batch in wal_batches:
+            self.strategy.merge_batch(batch, client_id, msg_type="batch")
+        
+        self.received_batches_per_client[client_id] = len(wal_batches)
+        logging.info("Recovered client %s", client_id)
+
     def process_data(self, client_id: str, msg_id: str, msg_type: str, payload: dict) -> None:
         batch = payload.get("batch", [])
-        logging.info("Processing batch of %d rows for client %s with strategy %s", len(batch), client_id, str(self.strategy))
-        merged_batch = self.strategy.merge_batch(batch, client_id, msg_type)
+        
+        count = self.received_batches_per_client.get(client_id, 0) + 1
+        self.received_batches_per_client[client_id] = count
 
-        # revisar para poner un callback aca
-        logging.info("Merged batch for client %s with strategy %s: %s", client_id, str(self.strategy), merged_batch)
+        self.state_manager.append_batch(client_id, batch)
+
+        merged_batch = self.strategy.merge_batch(batch, client_id, msg_type)
         if merged_batch:
             batch_msg = build_batch_message(
-                message_type="grouped_data",
+                message_type="batch",
                 client=client_id,
                 msg_id=str(uuid.uuid4()),
                 batch=merged_batch,
             )
             self.send_downstream(client_id, batch_msg)
 
-    def flush_state(self, client_id: str) -> None:
-        logging.info("All EOFs received. Flushing joiner state for client %s", client_id)
-        
-        self.strategy.clear_client_state(client_id)
+        if count % SNAPSHOT_BATCH == 0:
+            logging.info("Triggering checkpoint snapshot for client %s", client_id)
 
-        # aca ver que no este faltando flushear algo    
+            current_state = self.strategy.get_client_state(client_id)
+            self.state_manager.save_snapshot(client_id, current_state)
+            
+            self.received_batches_per_client[client_id] = 0
+
+    def flush_state(self, client_id: str) -> None:
+        logging.info("All EOFs received. Flushing joiner state for client %s", client_id)    
+        self.strategy.clear_client_state(client_id)
+        self.state_manager.delete_client(client_id)
 
 def main() -> int:
     config = init_config()
@@ -129,7 +168,6 @@ def main() -> int:
     signal.signal(signal.SIGTERM, handle_sigterm)
     signal.signal(signal.SIGINT, handle_sigterm)
 
-    # Start blocks and consumes
     worker.start()
     return 0
 

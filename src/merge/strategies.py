@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 from src.common.communication.internal import TransactionRow, Q2ResultRow
 from typing import Any, Dict, List
-import logging
 
 class MergeStrategy(ABC):
     """Abstract strategy for filtering batches of messages.
@@ -17,6 +16,14 @@ class MergeStrategy(ABC):
     @abstractmethod
     def merge_batch(self, batch: List[Any], client_id: str,  msg_type: str) -> List[dict]:
         raise NotImplementedError()
+    
+    @abstractmethod
+    def get_client_state(self, client_id: str) -> Any:
+        raise NotImplementedError()
+
+    @abstractmethod
+    def set_client_state(self, client_id: str, state: Any) -> None:
+        raise NotImplementedError()
 
 
 class NoStrategy(MergeStrategy):
@@ -31,6 +38,12 @@ class NoStrategy(MergeStrategy):
     def clear_client_state(self, client_id: str) -> None:
         pass
 
+    def get_client_state(self, client_id: str) -> Any:
+        return None
+
+    def set_client_state(self, client_id: str, state: Any) -> None:
+        pass
+
 
 class AccountsStrategy:
     def __init__(self) -> None:
@@ -42,7 +55,6 @@ class AccountsStrategy:
 
     def merge_batch(self, batch: dict, client_id: str, msg_type: str) -> List[dict]:
         if msg_type == "raw_accounts":
-            logging.info("Processing raw_accounts batch for client")
             if client_id not in self.accounts:
                 self.accounts[client_id] = {}
                 
@@ -78,6 +90,17 @@ class AccountsStrategy:
         self.accounts.pop(client_id, None)
         self.joined_transactions.pop(client_id, None)
 
+    def get_client_state(self, client_id: str) -> Any:
+        return (
+            self.accounts.get(client_id, {}),
+            self.joined_transactions.get(client_id, [])
+        )
+
+    def set_client_state(self, client_id: str, state: Any) -> None:
+        if state:
+            self.accounts[client_id] = state[0]
+            self.joined_transactions[client_id] = state[1]
+
 
 class SelfMergeStrategy(MergeStrategy):
     """
@@ -85,16 +108,14 @@ class SelfMergeStrategy(MergeStrategy):
     """
 
     def __init__(self) -> None:
-        self.inbound_txs: Dict[str, Dict[tuple, List[Dict]]] = {}
-        self.outbound_txs: Dict[str, Dict[tuple, List[Dict]]] = {}
+        self.inbound_txs: Dict[str, Dict[str, List[Dict]]] = {}
+        self.outbound_txs: Dict[str, Dict[str, List[Dict]]] = {}
 
     def __str__(self) -> str:
         return "SelfMergeStrategy"
 
     def merge_batch(self, batch: List[Any], client_id: str, msg_type: str) -> List[dict]:
         joined_txs = []
-        logging.info("Merging batch for client %s with %d transactions", client_id, len(batch))
-        logging.info("Batch content for client %s: %s", client_id, batch)
         if client_id not in self.inbound_txs:
             self.inbound_txs[client_id] = {}
             self.outbound_txs[client_id] = {}
@@ -103,8 +124,8 @@ class SelfMergeStrategy(MergeStrategy):
         client_outbound = self.outbound_txs[client_id]
 
         for tx in batch:
-            origin_key = (tx["from_bank"], tx["from_account"])
-            dest_key = (tx["to_bank"], tx["to_account"])
+            origin_key = f"{tx['from_bank']}_{tx['from_account']}"
+            dest_key = f"{tx['to_bank']}_{tx['to_account']}"
 
             if origin_key in client_inbound:
                 for inbound_tx in client_inbound[origin_key]:
@@ -126,11 +147,9 @@ class SelfMergeStrategy(MergeStrategy):
                 client_inbound[dest_key] = []
             client_inbound[dest_key].append(tx)
 
-        logging.info("Finished merging batch for client %s, found %d joined transactions", client_id, len(joined_txs))
         return joined_txs
 
     def _create_merged_record(self, tx_1: dict, tx_2: dict):
-        logging.info("Merging records: %s and %s", tx_1, tx_2)
         if (
             tx_1["from_bank"] == tx_2["to_bank"]
             and tx_1["from_account"] == tx_2["to_account"]
@@ -147,3 +166,14 @@ class SelfMergeStrategy(MergeStrategy):
     def clear_client_state(self, client_id: str) -> None:
         self.inbound_txs.pop(client_id, None)
         self.outbound_txs.pop(client_id, None)
+
+    def get_client_state(self, client_id: str) -> Any:
+        return (
+            self.inbound_txs.get(client_id, {}),
+            self.outbound_txs.get(client_id, {})
+        )
+
+    def set_client_state(self, client_id: str, state: Any) -> None:
+        if state:
+            self.inbound_txs[client_id] = state[0]
+            self.outbound_txs[client_id] = state[1]

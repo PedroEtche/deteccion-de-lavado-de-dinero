@@ -22,6 +22,8 @@ from .strategies import (
     ScatterAggregatorStrategy,
 )
 
+SNAPSHOT_BATCH = 1000
+
 CONFIG_PATH = "./config.yaml"
 
 @dataclass
@@ -105,26 +107,59 @@ class AggregatorWorker(BaseWorker):
     def __init__(self, config: AggregatorConfig) -> None:
         super().__init__(config)
 
+        self.received_batches_per_client = {}
+
         self.state_manager = WorkerStateManager(
-            base_dir="./state",
+            base_dir="/app/state",
             stage_name=config.stage_name,
             worker_id=config.worker_id
         )
 
-        # aca tendriamos que recontruir el estado 
-        # self.strategy.state_by_client = self.state_manager.load_all()
+        client_ids = self.state_manager.get_all_client_ids()
+        
+        for client_id in client_ids:
+            logging.info("Recovering state for client %s", client_id)
+            self._recover_client_state(client_id)
+
+    def _recover_client_state(self, client_id: str) -> None:
+        snapshot, wal_batches = self.state_manager.recover_client(client_id)
+        
+        if snapshot:
+            self.strategy.set_client_state(client_id, snapshot)
+
+        for batch in wal_batches:
+            self.strategy.aggregate_batch(batch, client_id)
+        
+        self.received_batches_per_client[client_id] = len(wal_batches)
+        logging.info("Recovered client %s", client_id)
 
     def process_data(self, client_id: str, msg_id: str, msg_type: str, payload: dict) -> None:
         batch = payload.get("batch", [])
 
+        count = self.received_batches_per_client.get(client_id, 0) + 1
+        self.received_batches_per_client[client_id] = count
+
+        self.state_manager.append_batch(client_id, batch)
+        
+        logging.info("Processing batch of %d rows for client %s", len(batch), client_id)
         self.strategy.aggregate_batch(batch, client_id)
         self.state_manager.save_client(client_id, self.strategy.get_client_state(client_id))
+
+        if count % SNAPSHOT_BATCH == 0:
+            logging.info("Triggering checkpoint snapshot for client %s", client_id)
+
+            current_state = self.strategy.get_client_state(client_id)
+            self.state_manager.save_snapshot(client_id, current_state)
+            
+            self.received_batches_per_client[client_id] = 0
 
     def flush_state(self, client_id: str) -> None:
         logging.info("All EOFs received. Flushing aggregated result for client %s", client_id)
         routed_batches = self.strategy.get_result_for_client(client_id)
         if not routed_batches:
+            logging.info("No data to flush for client %s", client_id)
             self.strategy.clear_client_state(client_id)
+            self.state_manager.delete_client(client_id)
             return
 
         if self.config.routing_strategy == "sharded":
@@ -136,7 +171,7 @@ class AggregatorWorker(BaseWorker):
                 if routing_key not in physical_groups:
                     physical_groups[routing_key] = []
                 physical_groups[routing_key].extend(batch)
-
+            logging.info("routed: %s", physical_groups)
             for routing_key, combined_batch in physical_groups.items():
                 batch_msg = build_batch_message(
                     message_type="batch",
@@ -161,7 +196,6 @@ class AggregatorWorker(BaseWorker):
             self.send_downstream(client_id, batch_msg)
 
         self.strategy.clear_client_state(client_id)
-        # limpiar archivo de cliente
         self.state_manager.delete_client(client_id)
 
 def main() -> int:

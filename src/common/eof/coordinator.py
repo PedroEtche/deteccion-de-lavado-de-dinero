@@ -1,5 +1,5 @@
-import threading
 from typing import Callable
+import logging
 
 class EofCoordinator:
     """
@@ -11,25 +11,39 @@ class EofCoordinator:
         self,
         expected_eofs: int,
         on_flush: Callable[[str], None],
+        state_manager
     ) -> None:
         if expected_eofs <= 0:
             raise ValueError("expected_eofs must be positive")
 
         self._expected = expected_eofs
         self._on_flush = on_flush
-        self._counts: dict[str, int] = {}
-        self._lock = threading.Lock()
+        self.state_manager = state_manager
+
+        self.eofs_by_client = {}
+
+        client_ids = self.state_manager.get_all_client_ids()
+
+        for client_id in client_ids:
+            snapshot, _ = self.state_manager.recover_client(client_id)
+            logging.info("Recovered EOF count for client %s: %s", client_id, snapshot)
+            self.eofs_by_client[client_id] = snapshot
+            # aca ver si hace falta ver condicion de expected
 
     def handle_eof(self, client_id: str) -> int:
         """
         Called by the worker when it receives an EOF directly from upstream.
         """
-        with self._lock:
-            self._counts[client_id] = self._counts.get(client_id, 0) + 1
-            
-            if self._counts[client_id] >= self._expected:
-                self._on_flush(client_id)
-                self._counts.pop(client_id, None)
+        client_eofs = self.eofs_by_client.get(client_id, 0)
+        client_eofs += 1
+
+        self.eofs_by_client[client_id] = client_eofs
+        self.state_manager.save_snapshot(client_id, client_eofs)
+
+        if client_eofs >= self._expected:
+            self._on_flush(client_id)
+            self.eofs_by_client.pop(client_id, None)
+            self.state_manager.delete_client(client_id)
 
         
 

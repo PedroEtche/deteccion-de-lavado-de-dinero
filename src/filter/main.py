@@ -6,14 +6,14 @@ from typing import Any, Dict, List
 
 import yaml
 
-from src.common.worker import BaseWorker
 from src.common.communication.internal import build_raw_transactions_message
+from src.common.worker import BaseWorker
 
 from .strategies import (
     AmountComparisonStrategy,
+    CountFieldComparisonStrategy,
     CurrencyConversionStrategy,
     CurrencyStrategy,
-    CountFieldComparisonStrategy,
     FilterStrategy,
     NoStrategy,
 )
@@ -26,6 +26,7 @@ class FilterConfig:
     mom_host: str
     input_exchange: str
     output_exchange: str
+    output_exchanges: List[str]
     log_level: str
     strategy: FilterStrategy
     expected_eofs: int
@@ -68,10 +69,14 @@ def _build_strategy(strategy_data: List[Dict[str, Any]]) -> FilterStrategy:
 
 def init_config() -> FilterConfig:
     data = _load_file_config()
+    # `outputs:` (lista) habilita fan-out a varias ramas; `output:` (single)
+    # se sigue soportando y equivale a una lista de 1.
+    outputs = data.get("outputs") or ([data.get("output")] if data.get("output") else [])
     return FilterConfig(
         mom_host=data.get("mom_host", "rabbitmq"),
         input_exchange=data.get("input", ""),
-        output_exchange=data.get("output", ""),
+        output_exchange=outputs[0] if outputs else "",
+        output_exchanges=outputs,
         log_level=os.environ.get("LOG_LEVEL", "INFO"),
         strategy=_build_strategy(data.get("strategy", [])),
         expected_eofs=int(os.getenv("EOF_EXPECTED", "1")),
@@ -99,7 +104,9 @@ class FilterWorker(BaseWorker):
         super().__init__(config)
         self.strategy = config.strategy
 
-    def process_data(self, client_id: str, msg_id: str, msg_type: str, payload: dict) -> None:
+    def process_data(
+        self, client_id: str, msg_id: str, msg_type: str, payload: dict
+    ) -> None:
         batch = payload.get("batch", [])
 
         filtered_batch = self.strategy.filter_batch(batch)

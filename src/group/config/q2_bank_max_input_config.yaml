@@ -1,0 +1,8 @@
+mom_host: rabbitmq
+
+# Q2: recibe USD ya filtradas (rama del fan-out) y agrupa el max por banco.
+input: q2_input_exchange
+output: grouped_max_by_bank_exchange
+
+strategy:
+  type: bank_max_amount

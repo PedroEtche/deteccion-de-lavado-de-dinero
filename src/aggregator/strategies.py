@@ -142,6 +142,7 @@ class AccountPairCountStategy(AggregatorStrategy):
                 results.append(data)
                 
         return results
+      
     def get_client_state(self, client: str) -> Any:
         return self.counts_by_client.get(client, {})
 

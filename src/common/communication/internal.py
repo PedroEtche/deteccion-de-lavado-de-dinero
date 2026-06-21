@@ -343,6 +343,10 @@ def deserialize(message):
         decoded["payload"]["batch"] = [
             AccountRow.from_dict(row) if isinstance(row, dict) else row for row in batch
         ]
+    elif msg_type == "q2_result":
+        decoded["payload"]["batch"] = [
+            Q2ResultRow.from_dict(row) if isinstance(row, dict) else row for row in batch
+        ]
     elif msg_type == "q3_result":
         decoded["payload"]["batch"] = [
             Q3ResultRow.from_dict(row) if isinstance(row, dict) else row for row in batch

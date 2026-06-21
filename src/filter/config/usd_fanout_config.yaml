@@ -1,0 +1,15 @@
+mom_host: rabbitmq
+
+# Filtro USD compartido (Trx Fan Out -> Filtro USD del diagrama).
+# Recibe las transacciones del gateway, deja pasar solo USD, y fanout-ea
+# una copia a cada rama: Q1, Q2 y el router por fecha de Q3/Q4.
+input: transactions_usd_exchange
+
+outputs:
+  - q1_input_exchange
+  - q2_input_exchange
+  - q3_usd_filtered_exchange
+
+strategy:
+  - type: currency
+  - value: US Dollar

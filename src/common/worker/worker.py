@@ -53,10 +53,18 @@ class BaseWorker(ABC):
             queue_name=queue_name
         )
 
-        self.output_exchange = MessageMiddlewareExchangeRabbitMQ(
-            self.config.mom_host, 
+        # Multi-output: un worker puede fanout-ear el mismo batch a varias ramas
+        # (ej. Filtro USD -> Q1, Q2, router_fecha). Si la config solo trae un
+        # `output_exchange`, se comporta igual que antes (lista de 1).
+        output_names = getattr(self.config, "output_exchanges", None) or [
             self.config.output_exchange
-            )
+        ]
+        self.output_exchanges = [
+            MessageMiddlewareExchangeRabbitMQ(self.config.mom_host, name)
+            for name in output_names
+        ]
+        # Compat: codigo que todavia referencia self.output_exchange usa la 1ra.
+        self.output_exchange = self.output_exchanges[0]
 
         self.input_exchange.start_consuming(self._on_message)
 
@@ -99,7 +107,10 @@ class BaseWorker(ABC):
         else:
             raise ValueError(f"Unknown routing strategy: {self.config.routing_strategy}")
 
-        self.output_exchange.send(out_msg, routing_key=routing_key)
+        # Fanout a cada rama downstream (una sola si no es multi-output).
+        for exchange in self.output_exchanges:
+            # TODO: hacer roundrobin a cada output exchange - Ver que no se este mandando a todos los workers de cada stage
+            exchange.send(out_msg, routing_key=routing_key)
 
     def _internal_on_flush(self, client_id: str) -> None:
         """Triggered by EofCoordinator. Flushes subclass state, then broadcasts EOF."""
@@ -108,14 +119,16 @@ class BaseWorker(ABC):
         logging.info("Broadcasting EOF downstream for client %s", client_id)
         
         eof_msg = serialize(build_eof_message(client=client_id, msg_id=str(uuid.uuid4())))
-        self.output_exchange.send(eof_msg, routing_key="eof_broadcast")
+        for exchange in self.output_exchanges:
+            exchange.send(eof_msg, routing_key="eof_broadcast")
 
     def stop(self) -> None:
         self._running = False
 
         self.input_exchange.stop_consuming()
         self.input_exchange.close()
-        self.output_exchange.close()
+        for exchange in self.output_exchanges:
+            exchange.close()
     
     def get_sharded_route(self, shard_key: str) -> str:
         """Helper for subclasses that need to pre-batch data by physical route."""

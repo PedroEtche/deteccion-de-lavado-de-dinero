@@ -1,0 +1,101 @@
+services:
+  node1:
+    build: .
+    container_name: node1
+    command: ["python", "-u", "test.py"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - NODE_ID=1
+      - N_NODES=10
+
+  node2:
+    build: .
+    container_name: node2
+    command: ["python", "-u", "test.py"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - NODE_ID=2
+      - N_NODES=10
+
+  node3:
+    build: .
+    container_name: node3
+    command: ["python", "-u", "test.py"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - NODE_ID=3
+      - N_NODES=10
+
+  node4:
+    build: .
+    container_name: node4
+    command: ["python", "-u", "test.py"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - NODE_ID=4
+      - N_NODES=10
+
+  node5:
+    build: .
+    container_name: node5
+    command: ["python", "-u", "test.py"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - NODE_ID=5
+      - N_NODES=10
+
+  node6:
+    build: .
+    container_name: node6
+    command: ["python", "-u", "test.py"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - NODE_ID=6
+      - N_NODES=10
+
+  node7:
+    build: .
+    container_name: node7
+    command: ["python", "-u", "test.py"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - NODE_ID=7
+      - N_NODES=10
+
+  node8:
+    build: .
+    container_name: node8
+    command: ["python", "-u", "test.py"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - NODE_ID=8
+      - N_NODES=10
+
+  node9:
+    build: .
+    container_name: node9
+    command: ["python", "-u", "test.py"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - NODE_ID=9
+      - N_NODES=10
+
+  node10:
+    build: .
+    container_name: node10
+    command: ["python", "-u", "test.py"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - NODE_ID=10
+      - N_NODES=10
+

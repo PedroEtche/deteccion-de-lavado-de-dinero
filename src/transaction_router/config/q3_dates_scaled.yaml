@@ -1,0 +1,22 @@
+# Router por fecha Q3, escalado: cada route reparte a 2 instancias downstream.
+mom_host: rabbitmq
+
+input: q3_usd_filtered_exchange
+
+routes:
+  - name: q3_historic
+    output: q3_group_input_exchange
+    num_downstream_workers: 2
+    routing_strategy: round_robin
+    filters:
+      - type: date_range
+        from: 2022-09-01
+        to: 2022-09-05
+  - name: q3_candidates
+    output: q3_histavg_input_exchange
+    num_downstream_workers: 2
+    routing_strategy: round_robin
+    filters:
+      - type: date_range
+        from: 2022-09-06
+        to: 2022-09-15

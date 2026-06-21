@@ -13,7 +13,7 @@ def _custom_serializer(obj):
             
         raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
 
-class WorkerStateManager:    
+class WorkerStateManager:
     def __init__(self, base_dir: str, stage_name: str, worker_id: int):
         self.base_dir = base_dir
         self.stage_name = stage_name

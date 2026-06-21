@@ -143,6 +143,7 @@ class AggregatorWorker(BaseWorker):
         
         logging.info("Processing batch of %d rows for client %s", len(batch), client_id)
         self.strategy.aggregate_batch(batch, client_id)
+        self.state_manager.save_client(client_id, self.strategy.get_client_state(client_id))
 
         if count % SNAPSHOT_BATCH == 0:
             logging.info("Triggering checkpoint snapshot for client %s", client_id)

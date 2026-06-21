@@ -154,17 +154,30 @@ class Client:
                 persist_rows(output_file, batch)
 
             elif query_type == "q5_result":
-                output_file = output_path + "q5.txt"
-                with open(output_file, "a") as txtfile:
-                    for row in decoded["payload"]["batch"]:
-                        txtfile.write(str(row.count))
+                output_file = output_path + "q5.csv"
+                batch = decoded["payload"]["batch"]
+                persist_rows(output_file, batch)
+
+            elif query_type == "eof":
+                # El gateway reenvia el eof interno que usa para contar
+                # resultados; el cliente no necesita hacer nada con el.
+                continue
 
             else:
                 logging.info("Unexpected Message: %s", decoded)
                 continue
 
-        sock.shutdown("rd")
-        sock.close()
+        # Cleanup: el server pudo haber cerrado el socket primero, asi que
+        # shutdown/close pueden fallar con ENOTCONN. Se ignora para que no
+        # salte un mensaje de error.
+        try:
+            sock.shutdown("rd")
+        except OSError:
+            pass
+        try:
+            sock.close()
+        except OSError:
+            pass
 
 
 def main() -> int:

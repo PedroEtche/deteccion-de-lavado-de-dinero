@@ -155,9 +155,9 @@ class Gateway:
             self.mom_host, self.accounts_exchange_name, exchange_type="direct"
         )
         self.result_mw = MessageMiddlewareExchangeRabbitMQ(
-            host=self.mom_host,
-            exchange_name=self.result_exchange_name,
-            routing_keys=["worker_1", "eof_broadcast"],
+            host=self.mom_host, 
+            exchange_name=self.result_exchange_name, 
+            routing_keys=["worker_1"],
             queue_name="gateway_result_queue",
         )
 
@@ -170,6 +170,7 @@ class Gateway:
             return
 
         client_id = decoded.get("client")
+        msg_id = decoded.get("msg_id")
 
         with self._registry_lock:
             entry = self._client_registry.get(client_id)
@@ -190,8 +191,7 @@ class Gateway:
 
         ack()
 
-        # TODO: Nunca llegan EOF, solo llegan q*_result
-        if decoded.get("type") == "eof":
+        if decoded.get("eof"):
             # Cada query que corre manda 1 EOF de resultado al terminar. Con
             # varias queries a la vez hay que esperarlas a todas antes de
             # cerrar el cliente; si no, cortariamos al terminar la primera.

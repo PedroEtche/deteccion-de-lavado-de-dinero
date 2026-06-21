@@ -4,6 +4,7 @@ import uuid
 import zlib
 
 from src.common.middleware import MessageMiddlewareExchangeRabbitMQ
+from src.common.middleware.middleware_rabbitmq import CONSUMER_HEARTBEAT
 from src.common.communication.internal import (
     build_eof_message,
     deserialize,
@@ -53,6 +54,7 @@ class BaseWorker(ABC):
             exchange_name=self.config.input_exchange,
             routing_keys=routing_keys,
             queue_name=queue_name,
+            heartbeat=CONSUMER_HEARTBEAT,  # consumer: RabbitMQ detecta caidas y re-encola
         )
 
         # Multi-output: un worker puede fanout-ear el mismo batch a varias ramas

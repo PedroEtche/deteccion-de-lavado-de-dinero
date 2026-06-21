@@ -13,6 +13,7 @@ from src.common.communication.internal import (
 )
 from src.common.eof import EofCoordinator
 from src.common.middleware import MessageMiddlewareExchangeRabbitMQ
+from src.common.middleware.middleware_rabbitmq import CONSUMER_HEARTBEAT
 from src.common.utils import load_yaml_config
 from src.common.state_manager import WorkerStateManager
 
@@ -91,6 +92,7 @@ class TransactionRouter:
             host=self.config.mom_host,
             exchange_name=self.config.input_exchange,
             routing_keys=routing_keys,
+            heartbeat=CONSUMER_HEARTBEAT,  # consumer: RabbitMQ detecta caidas y re-encola
         )
 
         logging.info(

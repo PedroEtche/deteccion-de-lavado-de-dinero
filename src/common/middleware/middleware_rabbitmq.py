@@ -9,13 +9,20 @@ from .middleware import (
     MessageMiddlewareMessageError,
 )
 
+# Heartbeat (segundos) para conexiones que CONSUMEN: permite que RabbitMQ
+# detecte un worker caido (ej. SIGKILL) y re-encole su mensaje sin ackear.
+# Las conexiones que solo publican usan heartbeat=0 (default): no necesitan
+# esa deteccion y asi el broker no las corta si quedan ociosas mucho tiempo
+# (ej. un worker que bufferea y recien publica en el flush).
+CONSUMER_HEARTBEAT = 60
+
 
 class MessageMiddlewareQueueRabbitMQ(MessageMiddlewareQueue):
-    def __init__(self, host, queue_name):
+    def __init__(self, host, queue_name, heartbeat=0):
         try:
             self.connection = pika.BlockingConnection(
                 pika.ConnectionParameters(
-                    host=host, heartbeat=600, blocked_connection_timeout=300
+                    host=host, heartbeat=heartbeat, blocked_connection_timeout=300
                 )
             )
             self.channel = self.connection.channel()
@@ -96,18 +103,11 @@ class MessageMiddlewareQueueRabbitMQ(MessageMiddlewareQueue):
 
 
 class MessageMiddlewareExchangeRabbitMQ(MessageMiddlewareExchange):
-    def __init__(
-        self,
-        host,
-        exchange_name,
-        routing_keys=None,
-        queue_name=None,
-        exchange_type="direct",
-    ):
+    def __init__(self, host, exchange_name, routing_keys=None, queue_name=None, exchange_type="direct", heartbeat=0):
         try:
             self.connection = pika.BlockingConnection(
                 pika.ConnectionParameters(
-                    host=host, heartbeat=600, blocked_connection_timeout=300
+                    host=host, heartbeat=heartbeat, blocked_connection_timeout=300
                 )
             )
             self.channel = self.connection.channel()

@@ -716,8 +716,8 @@ services:
     depends_on:
     - gateway
     volumes:
-    - ./data/LI-Small_Trans.csv:/data/small_trans.csv
-    - ./data/LI-Small_accounts.csv:/data/small_accounts.csv
+    - ./data/LI-Medium_Trans.csv:/data/small_trans.csv
+    - ./data/LI-Medium_accounts.csv:/data/small_accounts.csv
     - ./results/clients/client_0:/results/clients/client_0
     environment:
     - PYTHONUNBUFFERED=1
@@ -726,7 +726,7 @@ services:
     - OUTPUT_PATH=/results/clients/client_0/
     - ACCOUNTS_PATH=/data/small_accounts.csv
     - TRANSACTIONS_PATH=/data/small_trans.csv
-    - BATCH_SIZE=10000
+    - BATCH_SIZE=500
 
   client_1:
     build:
@@ -737,8 +737,8 @@ services:
     depends_on:
     - gateway
     volumes:
-    - ./data/LI-Small_Trans.csv:/data/small_trans.csv
-    - ./data/LI-Small_accounts.csv:/data/small_accounts.csv
+    - ./data/LI-Medium_Trans.csv:/data/small_trans.csv
+    - ./data/LI-Medium_accounts.csv:/data/small_accounts.csv
     - ./results/clients/client_1:/results/clients/client_1
     environment:
     - PYTHONUNBUFFERED=1
@@ -747,7 +747,7 @@ services:
     - OUTPUT_PATH=/results/clients/client_1/
     - ACCOUNTS_PATH=/data/small_accounts.csv
     - TRANSACTIONS_PATH=/data/small_trans.csv
-    - BATCH_SIZE=10000
+    - BATCH_SIZE=500
 
   client_2:
     build:
@@ -758,8 +758,8 @@ services:
     depends_on:
     - gateway
     volumes:
-    - ./data/LI-Small_Trans.csv:/data/small_trans.csv
-    - ./data/LI-Small_accounts.csv:/data/small_accounts.csv
+    - ./data/LI-Medium_Trans.csv:/data/small_trans.csv
+    - ./data/LI-Medium_accounts.csv:/data/small_accounts.csv
     - ./results/clients/client_2:/results/clients/client_2
     environment:
     - PYTHONUNBUFFERED=1
@@ -768,4 +768,4 @@ services:
     - OUTPUT_PATH=/results/clients/client_2/
     - ACCOUNTS_PATH=/data/small_accounts.csv
     - TRANSACTIONS_PATH=/data/small_trans.csv
-    - BATCH_SIZE=10000
+    - BATCH_SIZE=500

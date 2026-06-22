@@ -115,9 +115,11 @@ class FilterWorker(BaseWorker):
         logging.info("Filtered batch: %d in -> %d out", len(batch), len(filtered_batch))
 
         if filtered_batch:
+            # msg_id lo asigna send_downstream (contador monotonico del sender);
+            # no se reusa el msg_id entrante.
             out_msg = build_raw_transactions_message(
                 client=client_id,
-                msg_id=msg_id,
+                msg_id=None,
                 batch=filtered_batch,
             )
             self.send_downstream(client_id, out_msg)

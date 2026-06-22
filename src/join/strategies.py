@@ -1,4 +1,3 @@
-import uuid
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional
 import dataclasses
@@ -193,9 +192,8 @@ class AveragesUnionStrategy(JoinStrategy):
         averages = self.averages_by_client.pop(client, [])
         if not averages:
             return None
-        return build_batch_message(
-            "batch", batch=averages, client=client, msg_id=str(uuid.uuid4())
-        )
+        # msg_id lo asigna send_downstream (contador monotonico del sender).
+        return build_batch_message("batch", batch=averages, client=client)
 
     def build_eof_message(self, client, msg_id=None):
         # El EOF lo broadcastea BaseWorker por "eof_broadcast"; no hace falta

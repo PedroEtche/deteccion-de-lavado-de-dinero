@@ -1,3 +1,4 @@
+import itertools
 import logging
 import os
 import signal
@@ -75,6 +76,11 @@ class Gateway:
         self.server_host = gateway_config.host
         self.server_port = gateway_config.port
         self.mom_host = gateway_config.mom_host
+        self.sender_id = "gateway"
+        # Contador monotonico del sender (msg_id entero creciente desde 0).
+        # itertools.count: su next() es atomico bajo el GIL, asi que es seguro
+        # frente a los multiples threads de cliente que emiten al pipeline.
+        self._msg_counter = itertools.count(0)
 
         self.transactions_usd_exchange_name = gateway_config.transactions_usd_exchange
         self.transactions_date_exchange_name = gateway_config.transactions_date_exchange
@@ -242,8 +248,9 @@ class Gateway:
                     serialized_message = serialize(
                         build_raw_transactions_message(
                             client=client_id,
-                            msg_id=str(uuid.uuid4()),
+                            msg_id=next(self._msg_counter),
                             batch=txs,
+                            sender=self.sender_id,
                         )
                     )
 
@@ -259,8 +266,9 @@ class Gateway:
                     serialized_message = serialize(
                         build_raw_accounts_message(
                             client=client_id,
-                            msg_id=str(uuid.uuid4()),
+                            msg_id=next(self._msg_counter),
                             batch=accounts,
+                            sender=self.sender_id,
                         )
                     )
                     self.send_accounts_data(serialized_message)
@@ -270,7 +278,9 @@ class Gateway:
                 client_id,
             )
             eof_message = serialize(
-                build_eof_message(client=client_id, msg_id=str(uuid.uuid4()))
+                build_eof_message(
+                    client=client_id, msg_id=next(self._msg_counter), sender=self.sender_id
+                )
             )
 
             self.send_eof(eof_message)

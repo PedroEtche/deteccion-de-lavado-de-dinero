@@ -94,11 +94,21 @@ class Client:
     def start(self, accounts_path, transactions_path, batch_size):
         logging.info("Sending data")
         try:
-            send_csv(self.server_socket, accounts_path, batch_size, STREAM_ACCOUNTS)
             send_csv(
-                self.server_socket, transactions_path, batch_size, STREAM_TRANSACTIONS
+                self.server_socket,
+                accounts_path,
+                batch_size,
+                STREAM_ACCOUNTS,
+                sender="client",
             )
-            send_eof(self.server_socket)
+            send_csv(
+                self.server_socket,
+                transactions_path,
+                batch_size,
+                STREAM_TRANSACTIONS,
+                sender="client",
+            )
+            send_eof(self.server_socket, sender="client")
             logging.info("Datasets sent; waiting for results")
         finally:
             # Cerramos solo la escritura: el server sabe que no hay mas datos,

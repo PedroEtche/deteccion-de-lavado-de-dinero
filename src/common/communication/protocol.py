@@ -40,11 +40,13 @@ STREAM_TRANSACTIONS = 1
 STREAM_ACCOUNTS = 2
 
 
-def send_csv(sock, csv_path, batch_size, stream):
+def send_csv(sock, csv_path, batch_size, stream, *, sender):
     """
     Lee un CSV, lo convierte a TransactionRow/AccountRow según `stream`
     y lo envía en batches usando el protocolo de internal.py.
 
+    - sender: identificador estable del emisor (ej. "client"); obligatorio
+              porque serialize() lo exige en todo mensaje que sale al cable.
     - client: identificador del cliente (requerido por build_raw_* )
     - msg_id_fn: callable sin args que genera un msg_id por batch.
                  Por defecto usa uuid.uuid4().
@@ -71,16 +73,16 @@ def send_csv(sock, csv_path, batch_size, stream):
             row = _map_row(raw_row, field_map, row_cls)
             batch.append(row)
             if len(batch) >= batch_size:
-                _send_batch(sock, batch, build_fn)
+                _send_batch(sock, batch, build_fn, sender)
                 batch = []
 
         if batch:
-            _send_batch(sock, batch, build_fn)
+            _send_batch(sock, batch, build_fn, sender)
 
 
-def send_eof(sock, *, client=None, msg_id=None):
+def send_eof(sock, *, client=None, msg_id=None, sender):
     """Envía un mensaje EOF al otro extremo."""
-    msg = build_eof_message(client=client, msg_id=msg_id)
+    msg = build_eof_message(client=client, msg_id=msg_id, sender=sender)
     sock.send_bytes(serialize(msg))
 
 
@@ -128,6 +130,6 @@ def _map_row(raw_row, field_map, row_cls):
     return row_cls(**kwargs)
 
 
-def _send_batch(sock, batch, build_fn):
-    msg = build_fn(client=None, msg_id=None, batch=batch)
+def _send_batch(sock, batch, build_fn, sender):
+    msg = build_fn(client=None, msg_id=None, batch=batch, sender=sender)
     sock.send_bytes(serialize(msg))

@@ -18,7 +18,6 @@ class Route:
     exchange: Optional[MessageMiddlewareExchangeRabbitMQ] = field(
         default=None, init=False, repr=False
     )
-    next_worker: int = field(default=1, init=False, repr=False)
 
     def matches(self, tx) -> bool:
         """tx is a TransactionRow instance (see src/common/communication/internal.py)."""
@@ -27,11 +26,11 @@ class Route:
                 return False
         return True
 
-    def next_routing_key(self) -> str:
-        """Round-robin: rota worker_1 .. worker_N en cada llamada."""
-        key = f"worker_{self.next_worker}"
-        self.next_worker = (self.next_worker % self.num_downstream_workers) + 1
-        return key
+    def routing_key_for(self, msg_id: int) -> str:
+        """Round-robin determinista: el worker destino sale de msg_id % N.
+        Mismo msg_id -> mismo worker, asi una reentrega cae siempre igual."""
+        target = (msg_id % self.num_downstream_workers) + 1
+        return f"worker_{target}"
 
 
 def _filter_matches(tx, f: Dict[str, Any]) -> bool:

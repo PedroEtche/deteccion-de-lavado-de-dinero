@@ -1,7 +1,6 @@
 import logging
 import os
 import signal
-import uuid
 from dataclasses import dataclass
 from typing import List
 
@@ -67,6 +66,14 @@ class TransactionRouter:
     def __init__(self, config: RouterConfig):
         self.config = config
         self.input_mw = None
+        self.sender_id = f"{config.stage_name}_{config.worker_id}"
+        # Contador monotonico por sender (msg_id entero creciente desde 0).
+        self.msg_counter = 0
+
+    def _next_msg_id(self) -> int:
+        msg_id = self.msg_counter
+        self.msg_counter += 1
+        return msg_id
 
         self.eof_state_manager = WorkerStateManager(
             base_dir="/app/state",
@@ -130,14 +137,16 @@ class TransactionRouter:
                     f"Unsupported routing strategy: {route.routing_strategy}"
                 )
 
+            msg_id = self._next_msg_id()
             out_msg = serialize(
                 build_raw_transactions_message(
                     client=client_id,
-                    msg_id=str(uuid.uuid4()),  # TODO: cambiar msg id a incremental
+                    msg_id=msg_id,
                     batch=sub_batch,
+                    sender=self.sender_id,
                 )
             )
-            routing_key = route.next_routing_key()
+            routing_key = route.routing_key_for(msg_id)
             route.exchange.send(out_msg, routing_key=routing_key)
             logging.info(
                 "Route %s: sent %d txs to %s (key=%s)",
@@ -150,7 +159,9 @@ class TransactionRouter:
     # en flush mando eofs
     def _on_flush(self, client_id: str) -> None:
         eof_msg = serialize(
-            build_eof_message(client=client_id, msg_id=str(uuid.uuid4()))
+            build_eof_message(
+                client=client_id, msg_id=self._next_msg_id(), sender=self.sender_id
+            )
         )
         for route in self.config.routes:
             route.exchange.send(eof_msg, routing_key="eof_broadcast")

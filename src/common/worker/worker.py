@@ -1,6 +1,5 @@
 import logging
 from abc import ABC, abstractmethod
-import uuid
 import zlib
 
 from src.common.middleware import MessageMiddlewareExchangeRabbitMQ
@@ -23,9 +22,17 @@ class BaseWorker(ABC):
 
     def __init__(self, config):
         self.config = config
-        self.current_downstream_worker = 1
         self._running = False
         self.strategy = config.strategy
+
+        # Identidad estable del emisor (no un uuid random): viaja en cada mensaje
+        # saliente para que el receptor pueda deduplicar por (sender, msg_id).
+        self.sender_id = f"{config.stage_name}_{config.worker_id}"
+
+        # Contador monotonico por sender: cada mensaje saliente (datos y EOF)
+        # lleva un msg_id entero creciente arrancando en 0. Es la base del dedup
+        # por (sender, msg_id).
+        self.msg_counter = 0
 
         self.eof_state_manager = WorkerStateManager(
             base_dir="/app/state",
@@ -77,6 +84,18 @@ class BaseWorker(ABC):
             decoded = deserialize(message)
             msg_type = decoded.get("type")
             client_id = decoded.get("client")
+            sender = decoded.get("sender")
+            msg_id = decoded.get("msg_id")
+
+            if self.duplicate_handler.is_duplicate(client_id, sender, msg_id):
+                logging.info(
+                    "Duplicate message from sender %s for client %s with msg_id %s. Acknowledging without processing.",
+                    sender,
+                    client_id,
+                    msg_id,
+                )
+                ack()
+                return
 
             if msg_type == "eof":
                 logging.info("Received EOF from upstream for client %s", client_id)
@@ -86,21 +105,8 @@ class BaseWorker(ABC):
                     "Received message of type %s for client %s", msg_type, client_id
                 )
 
-                if self.duplicate_handler.is_duplicate(
-                    client_id, decoded.get("msg_id", "")
-                ):
-                    logging.info(
-                        "Duplicate message detected for client %s with msg_id %s. Acknowledging without processing.",
-                        client_id,
-                        decoded.get("msg_id"),
-                    )
-                    ack()
-                    return
-
-                self.duplicate_handler.mark_seen(client_id, decoded.get("msg_id", ""))
-                self.process_data(
-                    client_id, decoded["msg_id"], msg_type, decoded["payload"]
-                )
+                self.duplicate_handler.mark_seen(client_id, sender, msg_id)
+                self.process_data(client_id, msg_id, msg_type, decoded["payload"])
 
             ack()
         except Exception:
@@ -118,13 +124,17 @@ class BaseWorker(ABC):
             client_id,
             self.config.routing_strategy,
         )
+        msg_id = self._next_msg_id()
+        message["sender"] = self.sender_id
+        message["msg_id"] = msg_id
         out_msg = serialize(message)
 
         if self.config.routing_strategy == "round_robin":
-            routing_key = f"worker_{self.current_downstream_worker}"
-            self.current_downstream_worker = (
-                self.current_downstream_worker % self.config.num_downstream_workers
-            ) + 1
+            # Round-robin determinista: el worker destino sale de msg_id % N.
+            # Como msg_id es un contador monotonico, el reparto es exacto y, ante
+            # una reentrega, el mismo mensaje cae siempre en el mismo worker.
+            target_worker = (msg_id % self.config.num_downstream_workers) + 1
+            routing_key = f"worker_{target_worker}"
 
         elif self.config.routing_strategy == "sharded":
             routing_key = shard_routing_key
@@ -151,9 +161,10 @@ class BaseWorker(ABC):
         logging.info("Broadcasting EOF downstream for client %s", client_id)
         self.duplicate_handler.clear_client(client_id)
 
-        eof_msg = serialize(
-            build_eof_message(client=client_id, msg_id=str(uuid.uuid4()))
+        eof_message = build_eof_message(
+            client=client_id, msg_id=self._next_msg_id(), sender=self.sender_id
         )
+        eof_msg = serialize(eof_message)
         for exchange in self.output_exchanges:
             exchange.send(eof_msg, routing_key="eof_broadcast")
 
@@ -164,6 +175,12 @@ class BaseWorker(ABC):
         self.input_exchange.close()
         for exchange in self.output_exchanges:
             exchange.close()
+
+    def _next_msg_id(self) -> int:
+        """Devuelve el proximo msg_id monotonico de este sender y avanza el contador."""
+        msg_id = self.msg_counter
+        self.msg_counter += 1
+        return msg_id
 
     def get_sharded_route(self, shard_key: str) -> str:
         """Helper for subclasses that need to pre-batch data by physical route."""

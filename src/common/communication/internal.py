@@ -202,9 +202,17 @@ class MessageDecodeError(ProtocolError):
     pass
 
 
-def _validate_message(message):
+def _validate_message(message, require_sender=False):
     if not isinstance(message, dict):
         raise MessageValidationError("message must be a dictionary")
+
+    # `sender` es obligatorio para que el receptor
+    # pueda deduplicar por (sender, msg_id). No se exige al construir el mensaje
+    # porque algunos emisores inyectan el sender recien antes de serializar.
+    if require_sender:
+        sender = message.get("sender")
+        if not isinstance(sender, str) or not sender.strip():
+            raise MessageValidationError("message['sender'] must be a non-empty string")
 
     # INFO: Dejo esto comentador porque agregue nuevos tipos de mensaje (respuestas de queries) que no tiene un field de client y/o msg_id
     # for field_name in ("type", "client", "msg_id"):
@@ -233,9 +241,11 @@ def _validate_message(message):
         schema["payload_validator"](message["payload"])
 
 
-def build_message(message_type, client=None, msg_id=None, payload=None):
+def build_message(message_type, client=None, msg_id=None, payload=None, sender=None):
     message = {"type": message_type}
 
+    if sender is not None:
+        message["sender"] = sender
     if client is not None:
         message["client"] = client
     if msg_id is not None:
@@ -247,13 +257,15 @@ def build_message(message_type, client=None, msg_id=None, payload=None):
     return message
 
 
-def build_batch_message(message_type, batch, client=None, msg_id=None):
+def build_batch_message(message_type, batch, client=None, msg_id=None, sender=None):
     payload = {"batch_size": len(batch), "batch": batch}
 
-    return build_message(message_type, client=client, msg_id=msg_id, payload=payload)
+    return build_message(
+        message_type, client=client, msg_id=msg_id, payload=payload, sender=sender
+    )
 
 
-def build_raw_transactions_message(*, client, msg_id, batch):
+def build_raw_transactions_message(*, client, msg_id, batch, sender=None):
     """Wrapper for building raw transactions message"""
     if not isinstance(batch, list):
         raise MessageValidationError("message must be a list")
@@ -264,10 +276,11 @@ def build_raw_transactions_message(*, client, msg_id, batch):
         client=client,
         msg_id=msg_id,
         batch=batch,
+        sender=sender,
     )
 
 
-def build_raw_accounts_message(*, client, msg_id, batch):
+def build_raw_accounts_message(*, client, msg_id, batch, sender=None):
     """Wrapper for building raw accounts message"""
     if not isinstance(batch, list):
         raise MessageValidationError("message must be a list")
@@ -279,25 +292,13 @@ def build_raw_accounts_message(*, client, msg_id, batch):
         client=client,
         msg_id=msg_id,
         batch=batch,
+        sender=sender,
     )
 
 
-def build_eof_message(*, client, msg_id):
+def build_eof_message(*, client, msg_id, sender=None):
     """Wrapper for building EOF message"""
-    return build_message("eof", client=client, msg_id=msg_id)
-
-
-"""
-def build_q1_result(*, batch, eof, client):
-    if not isinstance(batch, list):
-        raise MessageValidationError("message must be a list")
-    if not all(isinstance(row, TransactionRow) for row in batch):
-        raise MessageValidationError("message must be a list of TransactionRow objects")
-
-    msg = build_batch_message("q1_result", batch=batch, client=client)
-    msg["eof"] = eof
-    return msg
-"""
+    return build_message("eof", client=client, msg_id=msg_id, sender=sender)
 
 
 def build_results_for_query(query_number: int, batch: list, eof: bool, client: str):
@@ -313,7 +314,7 @@ def build_results_for_query(query_number: int, batch: list, eof: bool, client: s
 
 
 def serialize(message):
-    _validate_message(message)
+    _validate_message(message, require_sender=True)
     return json.dumps(
         message, ensure_ascii=False, separators=(",", ":"), cls=_MessageEncoder
     ).encode("utf-8")
@@ -371,14 +372,22 @@ def deserialize(message):
 """
 Add new message/usage guide:
 1. register_message_type("your_type", payload_required=True, required_fields=[...], payload_validator=...)
-2. build_message("your_type", client=..., msg_id=..., payload=...)
+2. build_message("your_type", client=..., msg_id=..., payload=..., sender=...)
 3. call serialize()/deserialize() as usual
+
+Campo `sender` (obligatorio en el cable):
+    Todo mensaje que se serializa para mandarse a otra entidad DEBE incluir
+    `sender`: un identificador estable del emisor (ej. "filter_2", "gateway",
+    "client"). serialize() lo exige. Se usa para deduplicar por (sender, msg_id)
+    en el receptor. Puede pasarse a build_*(... sender=...) o inyectarse en el
+    dict antes de serializar.
 
 
 Base messages examples:
 
 message = {
     type: "raw_transactions",
+    sender: "gateway",
     client: uuid,
     msg_id: uuid,
     payload: {

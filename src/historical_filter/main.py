@@ -1,7 +1,6 @@
 import logging
 import os
 import signal
-import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
@@ -92,7 +91,9 @@ class HistoricalAverageFilter:
         self.config = config
         self.input_mw = None
         self.output_mw = None
-        self.current_downstream_worker = 1
+        self.sender_id = f"{config.stage_name}_{config.worker_id}"
+        # Contador monotonico por sender (msg_id entero creciente desde 0).
+        self.msg_counter = 0
 
         # Estado por cliente.
         # thresholds_by_client[client][payment_format] = promedio / divisor
@@ -109,6 +110,11 @@ class HistoricalAverageFilter:
             stage_name=f"{self.config.stage_name}_eof",
             worker_id=self.config.worker_id,
         )
+
+    def _next_msg_id(self) -> int:
+        msg_id = self.msg_counter
+        self.msg_counter += 1
+        return msg_id
 
     def start(self) -> None:
         self.output_mw = MessageMiddlewareExchangeRabbitMQ(
@@ -211,22 +217,25 @@ class HistoricalAverageFilter:
             # msg_type "batch": tipo generico ya usado entre workers (group,
             # aggregator). No dispara conversion a TransactionRow en el join,
             # que lo reenvuelve como q3_result (QueryResultStrategy 3).
+            msg_id = self._next_msg_id()
             out_msg = serialize(
                 build_batch_message(
                     "batch",
                     client=client_id,
-                    msg_id=str(uuid.uuid4()),
+                    msg_id=msg_id,
                     batch=result,
+                    sender=self.sender_id,
                 )
             )
-            routing_key = f"worker_{self.current_downstream_worker}"
-            self.current_downstream_worker = (
-                self.current_downstream_worker % self.config.num_downstream_workers
-            ) + 1
+            # Round-robin determinista: worker destino = msg_id % N.
+            target_worker = (msg_id % self.config.num_downstream_workers) + 1
+            routing_key = f"worker_{target_worker}"
             self.output_mw.send(out_msg, routing_key=routing_key)
 
         eof_msg = serialize(
-            build_eof_message(client=client_id, msg_id=str(uuid.uuid4()))
+            build_eof_message(
+                client=client_id, msg_id=self._next_msg_id(), sender=self.sender_id
+            )
         )
         self.output_mw.send(eof_msg, routing_key="eof_broadcast")
 

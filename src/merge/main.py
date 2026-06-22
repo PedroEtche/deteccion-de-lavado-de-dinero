@@ -1,7 +1,6 @@
 import logging
 import os
 import signal
-import uuid
 from dataclasses import dataclass
 from typing import Any, Dict
 
@@ -145,7 +144,6 @@ class MergeWorker(BaseWorker):
             batch_msg = build_batch_message(
                 message_type="batch",
                 client=client_id,
-                msg_id=str(uuid.uuid4()),
                 batch=merged_batch,
             )
             self.send_downstream(client_id, batch_msg)

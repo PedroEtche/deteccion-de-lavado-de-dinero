@@ -1,7 +1,6 @@
 import logging
 import os
 import signal
-import uuid
 from dataclasses import dataclass
 from typing import Any, Dict
 
@@ -187,7 +186,6 @@ class AggregatorWorker(BaseWorker):
                 batch_msg = build_batch_message(
                     message_type="batch",
                     client=client_id,
-                    msg_id=str(uuid.uuid4()),
                     batch=combined_batch,
                 )
                 self.send_downstream(
@@ -203,7 +201,6 @@ class AggregatorWorker(BaseWorker):
             batch_msg = build_batch_message(
                 message_type="batch",
                 client=client_id,
-                msg_id=str(uuid.uuid4()),
                 batch=flat_batch,
             )
             self.send_downstream(client_id, batch_msg)

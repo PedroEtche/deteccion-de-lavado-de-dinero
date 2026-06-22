@@ -7,7 +7,6 @@ from typing import Any, Dict
 import yaml
 
 from src.common.worker import BaseWorker
-from src.common.communication.internal import build_batch_message
 from src.common.state_manager import WorkerStateManager
 
 from .strategies import (
@@ -140,11 +139,7 @@ class AggregatorWorker(BaseWorker):
         self.received_batches_per_client[client_id] = len(wal_batches)
         logging.info("Recovered client %s", client_id)
 
-    def process_data(
-        self, client_id: str, msg_id: str, msg_type: str, payload: dict
-    ) -> None:
-        batch = payload.get("batch", [])
-
+    def process_batch(self, client_id: str, batch: list, msg_type: str) -> None:
         count = self.received_batches_per_client.get(client_id, 0) + 1
         self.received_batches_per_client[client_id] = count
 
@@ -168,42 +163,9 @@ class AggregatorWorker(BaseWorker):
         routed_batches = self.strategy.get_result_for_client(client_id)
         if not routed_batches:
             logging.info("No data to flush for client %s", client_id)
-            self.strategy.clear_client_state(client_id)
-            self.state_manager.delete_client(client_id)
-            return
-
-        if self.config.routing_strategy == "sharded":
-            physical_groups: dict[str, list] = {}
-
-            for logical_key, batch in routed_batches:
-                routing_key = self.get_sharded_route(str(logical_key))
-
-                if routing_key not in physical_groups:
-                    physical_groups[routing_key] = []
-                physical_groups[routing_key].extend(batch)
-            logging.info("routed: %s", physical_groups)
-            for routing_key, combined_batch in physical_groups.items():
-                batch_msg = build_batch_message(
-                    message_type="batch",
-                    client=client_id,
-                    batch=combined_batch,
-                )
-                self.send_downstream(
-                    client_id, batch_msg, shard_routing_key=routing_key
-                )
-
         else:
-            logging.info("routed: %s", routed_batches)
-            flat_batch = []
-            for _, batch in routed_batches:
-                flat_batch.extend(batch)
-
-            batch_msg = build_batch_message(
-                message_type="batch",
-                client=client_id,
-                batch=flat_batch,
-            )
-            self.send_downstream(client_id, batch_msg)
+            # send_groups decide round_robin/broadcast vs sharded segun la config.
+            self.send_groups(client_id, routed_batches)
 
         self.strategy.clear_client_state(client_id)
         self.state_manager.delete_client(client_id)

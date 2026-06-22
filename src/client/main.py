@@ -159,6 +159,7 @@ class Client:
 
 
 def main() -> int:
+    execution_time = time.time()
     logging.basicConfig(level=logging.INFO)
     for i in range(1, 6):
         # Create 5 output files
@@ -170,6 +171,9 @@ def main() -> int:
     client = Client(SERVER_HOST, SERVER_PORT, OUTPUT_PATH)
     client.start(ACCOUNTS_PATH, TRANSACTIONS_PATH, BATCH_SIZE)
 
+    execution_time = time.time() - execution_time
+    minutes, seconds = divmod(execution_time, 60)
+    logging.info("Client FINISH in: %d minutes and %f seconds", minutes, seconds)
     return 0
 
 

@@ -2,7 +2,7 @@ import logging
 import os
 import signal
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Dict
 
 from src.common.communication.internal import (
     Q3ResultRow,
@@ -95,21 +95,39 @@ class HistoricalAverageFilter:
         # Contador monotonico por sender (msg_id entero creciente desde 0).
         self.msg_counter = 0
 
-        # Estado por cliente.
-        # thresholds_by_client[client][payment_format] = promedio / divisor
+        # Umbrales por cliente (chico): thresholds_by_client[client][fmt] =
+        # promedio / divisor. Vive en memoria pero se espeja a un snapshot en
+        # disco para poder recuperarlo tras una caida.
         self.thresholds_by_client: Dict[str, Dict[str, float]] = {}
-        # TODO: candidates_by_client crece sin limite mientras esperamos los
-        # promedios del otro stream. Con el dataset completo esto puede
-        # quedarse sin memoria. Hay que persistir las candidatas a disco
-        # (append a un archivo por cliente) a medida que llegan, y releerlas
-        # en el flush. Por ahora se mantienen en memoria.
-        self.candidates_by_client: Dict[str, List[Any]] = {}
 
         self.eof_state_manager = WorkerStateManager(
             base_dir="/app/state",
             stage_name=f"{self.config.stage_name}_eof",
             worker_id=self.config.worker_id,
         )
+        # Candidatas [9/6-9/15]: se vuelcan al WAL en disco a medida que llegan
+        # (no se acumulan en memoria) y se releen en streaming en el flush.
+        self.candidates_state = WorkerStateManager(
+            base_dir="/app/state",
+            stage_name=f"{self.config.stage_name}_candidates",
+            worker_id=self.config.worker_id,
+        )
+        # Umbrales: se snapshotean (no comparten manager con las candidatas
+        # porque save_snapshot trunca el WAL).
+        self.thresholds_state = WorkerStateManager(
+            base_dir="/app/state",
+            stage_name=f"{self.config.stage_name}_thresholds",
+            worker_id=self.config.worker_id,
+        )
+
+        # Recuperacion al arranque: restaurar los umbrales de cada cliente desde
+        # su snapshot. Las candidatas ya estan en el WAL (se leen en el flush) y
+        # el conteo de EOFs lo recupera el EofCoordinator por su cuenta.
+        for client_id in self.thresholds_state.get_all_client_ids():
+            snapshot, _ = self.thresholds_state.recover_client(client_id)
+            if snapshot:
+                self.thresholds_by_client[client_id] = snapshot
+                logging.info("Recovered thresholds for client %s", client_id)
 
     def _next_msg_id(self) -> int:
         msg_id = self.msg_counter
@@ -169,11 +187,13 @@ class HistoricalAverageFilter:
             for avg in batch:
                 fmt = avg["payment_format"]
                 thresholds[fmt] = avg["average_amount"] / self.config.threshold_divisor
+            # Snapshot de los umbrales (antes del ack) para poder recuperarlos.
+            self.thresholds_state.save_snapshot(client_id, thresholds)
             logging.info("Stored %d averages for client %s", len(batch), client_id)
 
         elif msg_type == CANDIDATES_MSG_TYPE:
-            # TODO: en vez de acumular en memoria, persistir a disco aca.
-            self.candidates_by_client.setdefault(client_id, []).extend(batch)
+            # Las candidatas van directo al WAL en disco (con fsync), no a memoria.
+            self.candidates_state.append_batch(client_id, batch)
             logging.info(
                 "Buffered %d candidate txs for client %s", len(batch), client_id
             )
@@ -183,33 +203,35 @@ class HistoricalAverageFilter:
 
     def _on_flush(self, client_id: str) -> None:
         thresholds = self.thresholds_by_client.pop(client_id, {})
-        # TODO: cuando las candidatas esten en disco, releerlas aca en vez de
-        # tomarlas de memoria.
-        candidates = self.candidates_by_client.pop(client_id, [])
 
         result = []
-        for tx in candidates:
-            threshold = thresholds.get(tx.payment_format)
-            if threshold is None:
-                # No hay promedio para ese formato en [9/1, 9/5]; no se puede
-                # comparar, se descarta.
-                continue
-            if (tx.amount_paid or 0.0) < threshold:
-                # Proyeccion al resultado de Q3. El orden de columnas del CSV lo
-                # define el orden de campos de Q3ResultRow.
-                result.append(  # TODO cambiar a que sea un batch, la generacion de Q3ResultRow la hace el join
-                    Q3ResultRow(
-                        from_bank=tx.from_bank,
-                        from_account=tx.from_account,
-                        payment_format=tx.payment_format,
-                        amount_paid=tx.amount_paid,
+        candidate_count = 0
+        # Las candidatas se releen en streaming desde el WAL en disco; vienen
+        # como dicts (no TransactionRow), asi que se accede por clave.
+        for wal_batch in self.candidates_state.iter_wal_batches(client_id):
+            for tx in wal_batch:
+                candidate_count += 1
+                threshold = thresholds.get(tx.get("payment_format"))
+                if threshold is None:
+                    # No hay promedio para ese formato en [9/1, 9/5]; no se puede
+                    # comparar, se descarta.
+                    continue
+                if (tx.get("amount_paid") or 0.0) < threshold:
+                    # Proyeccion al resultado de Q3. El orden de columnas del CSV
+                    # lo define el orden de campos de Q3ResultRow.
+                    result.append(
+                        Q3ResultRow(
+                            from_bank=tx.get("from_bank"),
+                            from_account=tx.get("from_account"),
+                            payment_format=tx.get("payment_format"),
+                            amount_paid=tx.get("amount_paid"),
+                        )
                     )
-                )
 
         logging.info(
             "Flush client %s: %d candidates -> %d below threshold",
             client_id,
-            len(candidates),
+            candidate_count,
             len(result),
         )
 
@@ -238,6 +260,11 @@ class HistoricalAverageFilter:
             )
         )
         self.output_mw.send(eof_msg, routing_key="eof_broadcast")
+
+        # Estado del cliente ya consumido: liberar candidatas (WAL) y umbrales
+        # (snapshot) en disco. El conteo de EOFs lo limpia el EofCoordinator.
+        self.candidates_state.delete_client(client_id)
+        self.thresholds_state.delete_client(client_id)
 
     def stop(self) -> None:
         if self.input_mw:

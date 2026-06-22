@@ -106,6 +106,18 @@ class WorkerStateManager:
 
         return snapshot, historical_batches
 
+    def iter_wal_batches(self, client_id: str):
+        """Itera el WAL del cliente batch por batch (una linea = un batch),
+        sin cargar todo el archivo en memoria. Util cuando el WAL es grande
+        (ej. candidatas de Q3) y solo se necesita recorrerlo de a poco."""
+        wal_path = self._get_wal_path(client_id)
+        if not os.path.exists(wal_path):
+            return
+        with open(wal_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    yield json.loads(line)
+
     def delete_client(self, client_id: str) -> None:
         for path in [self._get_snapshot_path(client_id), self._get_wal_path(client_id)]:
             try:

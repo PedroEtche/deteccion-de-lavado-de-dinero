@@ -5,7 +5,9 @@ import zlib
 from src.common.middleware import MessageMiddlewareExchangeRabbitMQ
 from src.common.middleware.middleware_rabbitmq import CONSUMER_HEARTBEAT
 from src.common.communication.internal import (
+    build_batch_message,
     build_eof_message,
+    build_raw_transactions_message,
     deserialize,
     serialize,
 )
@@ -17,7 +19,7 @@ from src.common.duplicate_handler import DuplicateHandler
 class BaseWorker(ABC):
     """
     Handles all RabbitMQ infrastructure, round-robin routing, and EOF coordination.
-    Subclasses only need to implement `process_data` and `flush_state`.
+    Subclasses only need to implement `process_batch` and `flush_state`.
     """
 
     def __init__(self, config):
@@ -106,7 +108,8 @@ class BaseWorker(ABC):
                 )
 
                 self.duplicate_handler.mark_seen(client_id, sender, msg_id)
-                self.process_data(client_id, msg_id, msg_type, decoded["payload"])
+                batch = decoded.get("payload", {}).get("batch", [])
+                self.process_batch(client_id, batch, msg_type)
 
             ack()
         except Exception:
@@ -116,7 +119,12 @@ class BaseWorker(ABC):
     def send_downstream(
         self, client_id: str, message: dict, shard_routing_key: str = None
     ) -> None:
-        """Serializes and routes a fully built message to the next stage."""
+        """Serializes and routes a fully built message to the next stage.
+
+        Primitiva de despacho de bajo nivel: estampa sender/msg_id, elige la
+        routing key y hace fan-out. Los subclases normalmente usan send() o
+        send_groups(); join la usa directamente via su callback.
+        """
         if not message:
             return
         logging.info(
@@ -124,6 +132,8 @@ class BaseWorker(ABC):
             client_id,
             self.config.routing_strategy,
         )
+        # Copia para no mutar el dict que nos pasaron (lo estampa el padre).
+        message = dict(message)
         msg_id = self._next_msg_id()
         message["sender"] = self.sender_id
         message["msg_id"] = msg_id
@@ -182,17 +192,60 @@ class BaseWorker(ABC):
         self.msg_counter += 1
         return msg_id
 
-    def get_sharded_route(self, shard_key: str) -> str:
-        """Helper for subclasses that need to pre-batch data by physical route."""
+    def send(self, client_id: str, batch: list, message_type: str = "batch") -> None:
+        """Emite un unico batch aguas abajo. La routing key la decide la
+        routing_strategy (round_robin / broadcast). El subclase solo aporta las
+        filas y el tipo; el armado del mensaje y el ruteo los hace el padre."""
+        if not batch:
+            return
+        message = self._build_message(message_type, client_id, batch)
+        self.send_downstream(client_id, message)
+
+    def send_groups(
+        self, client_id: str, groups: list, message_type: str = "batch"
+    ) -> None:
+        """Emite filas agrupadas. `groups` es una lista de (shard_key, batch).
+
+        Si la routing_strategy es 'sharded', agrupa por worker fisico
+        (_sharded_route) y manda un mensaje por worker. Si no, aplana todos los
+        grupos en un unico mensaje. Asi el subclase no ramifica segun la
+        estrategia ni calcula routing keys."""
+        if self.config.routing_strategy == "sharded":
+            physical_groups: dict[str, list] = {}
+            for shard_key, batch in groups:
+                if not batch:
+                    continue
+                routing_key = self._sharded_route(str(shard_key))
+                physical_groups.setdefault(routing_key, []).extend(batch)
+            for routing_key, combined_batch in physical_groups.items():
+                message = self._build_message(message_type, client_id, combined_batch)
+                self.send_downstream(
+                    client_id, message, shard_routing_key=routing_key
+                )
+        else:
+            flat_batch: list = []
+            for _shard_key, batch in groups:
+                flat_batch.extend(batch)
+            self.send(client_id, flat_batch, message_type)
+
+    def _build_message(self, message_type: str, client_id: str, batch: list) -> dict:
+        """Construye el mensaje del tipo pedido. sender/msg_id los estampa
+        send_downstream, asi que aca no se setean."""
+        if message_type == "raw_transactions":
+            return build_raw_transactions_message(
+                client=client_id, msg_id=None, batch=batch
+            )
+        return build_batch_message(message_type, client=client_id, batch=batch)
+
+    def _sharded_route(self, shard_key: str) -> str:
+        """Worker fisico destino para una clave logica (sharding por hash)."""
         hash_val = zlib.crc32(shard_key.encode("utf-8"))
         target_worker = (hash_val % self.config.num_downstream_workers) + 1
         return f"worker_{target_worker}"
 
     @abstractmethod
-    def process_data(
-        self, client_id: str, msg_id: str, msg_type: str, payload: dict
-    ) -> None:
-        """Process incoming data."""
+    def process_batch(self, client_id: str, batch: list, msg_type: str) -> None:
+        """Procesa un batch entrante ya extraido del payload."""
         pass
 
     @abstractmethod

@@ -2,14 +2,11 @@ import logging
 import os
 import signal
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import yaml
 
 from src.common.worker import BaseWorker
-from src.common.communication.internal import (
-    build_batch_message,
-)
 
 from .strategies import (
     AccountPairCountStategy,
@@ -112,26 +109,11 @@ class GroupWorker(BaseWorker):
     def __init__(self, config: GroupConfig):
         super().__init__(config)
 
-    def process_data(
-        self, client_id: str, msg_id: str, msg_type: str, payload: dict
-    ) -> None:
-        batch = payload.get("batch", [])
+    def process_batch(self, client_id: str, batch: list, msg_type: str) -> None:
         logging.info("Processing batch of %d rows for client %s", len(batch), client_id)
         routed = self.strategy.group_and_route(batch)
-
-        batches: Dict[str, List[dict]] = {}
-        for route, grouped in routed:
-            route = self.get_sharded_route(route)
-            batches.setdefault(route, []).extend(grouped)
-
-        for route, mega_batch in batches.items():
-            batch_msg = build_batch_message(
-                message_type="batch",
-                client=client_id,
-                batch=mega_batch,
-            )
-
-            self.send_downstream(client_id, batch_msg, shard_routing_key=route)
+        # routed: [(clave_logica, batch), ...]; send_groups agrupa por worker fisico.
+        self.send_groups(client_id, routed)
 
     def flush_state(self, client_id: str) -> None:
         pass

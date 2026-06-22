@@ -7,7 +7,6 @@ from typing import Any, Dict
 import yaml
 
 from src.common.worker import BaseWorker
-from src.common.communication.internal import build_batch_message
 from src.common.state_manager import WorkerStateManager
 
 from .strategies import (
@@ -129,24 +128,14 @@ class MergeWorker(BaseWorker):
         self.received_batches_per_client[client_id] = len(wal_batches)
         logging.info("Recovered client %s", client_id)
 
-    def process_data(
-        self, client_id: str, msg_id: str, msg_type: str, payload: dict
-    ) -> None:
-        batch = payload.get("batch", [])
-
+    def process_batch(self, client_id: str, batch: list, msg_type: str) -> None:
         count = self.received_batches_per_client.get(client_id, 0) + 1
         self.received_batches_per_client[client_id] = count
 
         self.state_manager.append_batch(client_id, batch)
 
         merged_batch = self.strategy.merge_batch(batch, client_id, msg_type)
-        if merged_batch:
-            batch_msg = build_batch_message(
-                message_type="batch",
-                client=client_id,
-                batch=merged_batch,
-            )
-            self.send_downstream(client_id, batch_msg)
+        self.send(client_id, merged_batch, "batch")
 
         if count % SNAPSHOT_BATCH == 0:
             logging.info("Triggering checkpoint snapshot for client %s", client_id)

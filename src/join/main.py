@@ -129,11 +129,7 @@ class JoinWorker(BaseWorker):
         self.received_batches_per_client[client_id] = len(wal_batches)
         logging.info("Recovered client %s", client_id)
 
-    def process_data(
-        self, client_id: str, msg_id: str, msg_type: str, payload: dict
-    ) -> None:
-        batch = payload.get("batch", [])
-
+    def process_batch(self, client_id: str, batch: list, msg_type: str) -> None:
         count = self.received_batches_per_client.get(client_id, 0) + 1
         self.received_batches_per_client[client_id] = count
 

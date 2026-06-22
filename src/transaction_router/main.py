@@ -70,16 +70,16 @@ class TransactionRouter:
         # Contador monotonico por sender (msg_id entero creciente desde 0).
         self.msg_counter = 0
 
-    def _next_msg_id(self) -> int:
-        msg_id = self.msg_counter
-        self.msg_counter += 1
-        return msg_id
-
         self.eof_state_manager = WorkerStateManager(
             base_dir="/app/state",
             stage_name=f"{self.config.stage_name}_eof",
             worker_id=self.config.worker_id,
         )
+
+    def _next_msg_id(self) -> int:
+        msg_id = self.msg_counter
+        self.msg_counter += 1
+        return msg_id
 
     def start(self) -> None:
         for route in self.config.routes:

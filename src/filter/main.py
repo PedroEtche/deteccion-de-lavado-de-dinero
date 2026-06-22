@@ -6,7 +6,6 @@ from typing import Any, Dict, List
 
 import yaml
 
-from src.common.communication.internal import build_raw_transactions_message
 from src.common.worker import BaseWorker
 
 from .strategies import (
@@ -106,23 +105,10 @@ class FilterWorker(BaseWorker):
         super().__init__(config)
         self.strategy = config.strategy
 
-    def process_data(
-        self, client_id: str, msg_id: str, msg_type: str, payload: dict
-    ) -> None:
-        batch = payload.get("batch", [])
-
+    def process_batch(self, client_id: str, batch: list, msg_type: str) -> None:
         filtered_batch = self.strategy.filter_batch(batch)
         logging.info("Filtered batch: %d in -> %d out", len(batch), len(filtered_batch))
-
-        if filtered_batch:
-            # msg_id lo asigna send_downstream (contador monotonico del sender);
-            # no se reusa el msg_id entrante.
-            out_msg = build_raw_transactions_message(
-                client=client_id,
-                msg_id=None,
-                batch=filtered_batch,
-            )
-            self.send_downstream(client_id, out_msg)
+        self.send(client_id, filtered_batch, "raw_transactions")
 
     def flush_state(self, client_id: str) -> None:
         pass

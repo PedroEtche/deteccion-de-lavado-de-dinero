@@ -1,4 +1,5 @@
 import logging
+import signal
 from abc import ABC, abstractmethod
 import zlib
 
@@ -252,3 +253,124 @@ class BaseWorker(ABC):
     def flush_state(self, client_id: str) -> None:
         """Send any final aggregated state before the EOF is forwarded."""
         pass
+
+
+class StreamWorker(BaseWorker):
+    """Base para los workers ad-hoc (router e historical_filter) que necesitan
+    una topologia de input/output propia y que emiten en el flush, en vez del
+    fanout estandar de BaseWorker.
+
+    Reusa de BaseWorker la identidad del emisor (sender_id/msg_counter/
+    _next_msg_id), el eof_state_manager y el armado de mensajes, pero pisa
+    start/_on_message/stop para no usar su modelo de salida. En esta rama NO se
+    usan send/send_groups/send_downstream/output_exchanges/duplicate_handler.
+
+    Hooks que implementa cada subclase:
+      - input_routing_keys(): keys que bindea el input (default: worker_id + eof).
+      - setup_outputs()/close_outputs(): crear/cerrar los exchanges de salida.
+      - handle_data(client_id, msg_type, batch): procesar un batch de datos.
+      - on_flush(client_id): emitir el resultado final + EOF (lo dispara
+        EofCoordinator cuando llegaron todos los EOFs esperados).
+    """
+
+    def __init__(self, config):
+        super().__init__(config)
+        self.input_exchange = None
+
+    def start(self) -> None:
+        logging.info("Starting %s...", self.__class__.__name__)
+        self._running = True
+
+        self.setup_outputs()
+
+        self.eof_coordinator = EofCoordinator(
+            expected_eofs=self.config.expected_eofs,
+            on_flush=self.on_flush,
+            state_manager=self.eof_state_manager,
+        )
+
+        self.input_exchange = MessageMiddlewareExchangeRabbitMQ(
+            host=self.config.mom_host,
+            exchange_name=self.config.input_exchange,
+            routing_keys=self.input_routing_keys(),
+            heartbeat=CONSUMER_HEARTBEAT,  # consumer: RabbitMQ detecta caidas y re-encola
+        )
+
+        logging.info(
+            "%s listening on %s", self.__class__.__name__, self.config.input_exchange
+        )
+        self.input_exchange.start_consuming(self._on_message)
+
+    def _on_message(self, message, ack, nack) -> None:
+        try:
+            decoded = deserialize(message)
+            msg_type = decoded.get("type")
+            client_id = decoded.get("client")
+
+            if msg_type == "eof":
+                logging.info("EOF received for client %s", client_id)
+                self.eof_coordinator.handle_eof(client_id)
+            else:
+                batch = decoded.get("payload", {}).get("batch", [])
+                self.handle_data(client_id, msg_type, batch)
+            ack()
+        except Exception:
+            logging.exception("Error processing message; nack")
+            nack()
+
+    def stop(self) -> None:
+        self._running = False
+        if self.input_exchange:
+            self.input_exchange.stop_consuming()
+            self.input_exchange.close()
+        self.close_outputs()
+
+    def input_routing_keys(self) -> list:
+        """Keys que bindea el input exchange. Default: la cola round-robin de
+        este worker mas el broadcast de EOF. Las subclases que reciben mas de un
+        stream (ej. historical_filter con data_broadcast) lo pisan."""
+        return [f"worker_{self.config.worker_id}", "eof_broadcast"]
+
+    # process_batch/flush_state son @abstractmethod en BaseWorker, pero en esta
+    # rama el dispatch entra por handle_data/on_flush. Los implementamos para que
+    # las hojas sean instanciables; no se invocan.
+    def process_batch(self, client_id: str, batch: list, msg_type: str) -> None:
+        raise NotImplementedError
+
+    def flush_state(self, client_id: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def setup_outputs(self) -> None:
+        """Crear los exchanges de salida propios de la subclase."""
+        pass
+
+    @abstractmethod
+    def close_outputs(self) -> None:
+        """Cerrar los exchanges de salida creados en setup_outputs."""
+        pass
+
+    @abstractmethod
+    def handle_data(self, client_id: str, msg_type: str, batch: list) -> None:
+        """Procesar un batch de datos (no EOF) recien llegado."""
+        pass
+
+    @abstractmethod
+    def on_flush(self, client_id: str) -> None:
+        """Emitir el resultado final y propagar el EOF aguas abajo."""
+        pass
+
+
+def run_worker(worker) -> int:
+    """Registra los handlers de SIGTERM/SIGINT que paran al worker y arranca el
+    consumo. Centraliza el boilerplate identico de cada main()."""
+
+    def handle_sigterm(_signum, _frame):
+        logging.info("Received SIGTERM signal")
+        worker.stop()
+
+    signal.signal(signal.SIGTERM, handle_sigterm)
+    signal.signal(signal.SIGINT, handle_sigterm)
+
+    worker.start()
+    return 0

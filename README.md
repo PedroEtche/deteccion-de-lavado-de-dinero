@@ -2,13 +2,13 @@
 
 ## Funcionalidades
 
-- Q2 falla con unkwons
-- Historical filter no bardee a pika
-- Persistir msg_ids en workers con estado
-- Escritura atomica de directorios (batches cuando llegan y msg_id)
-- Stateless solo persiste el EOF_count, Stateful persiste batches + last_msg_id_seen + msg_id_counter + state + EOF_count
-- Gateway + cliente tolerancia a fallos
-- Introducir fail detection
+- Q2 falla con unkwons -> MV
+- Historical filter no bardee a pika -> MM
+- Persistir msg_ids en workers con estado -> MV
+- Escritura atomica de directorios (batches cuando llegan y msg_id) -> MV
+- Stateless solo persiste el EOF_count, Stateful persiste batches + last_msg_id_seen + msg_id_counter + state + EOF_count -> MV
+- Introducir fail detection -> P
+- Gateway + cliente tolerancia a fallos -> P
 
 ## Performance
 

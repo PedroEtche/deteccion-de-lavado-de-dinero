@@ -166,7 +166,7 @@ class Node:
         failed = []
         for peer in self._peers:
             if not self._healthcheck(peer):
-                logging.warning("Detected failed node: %s", peer.node_id)
+                logging.warning("Detected failed node: %s:%s", peer.host, peer.node_id)
                 failed.append(peer.node_id)
         return failed
 

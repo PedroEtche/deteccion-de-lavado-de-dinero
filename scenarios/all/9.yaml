@@ -58,6 +58,7 @@ services:
       - NUM_DOWNSTREAM_WORKERS=3
       - STAGE_NAME=filtro_usd
       - FD_NODES=1:filtro_usd_1,2:filtro_usd_2,3:filtro_usd_3
+      - FD_NODE_ID=1
 
   filtro_usd_2:
     build:
@@ -76,6 +77,7 @@ services:
       - NUM_DOWNSTREAM_WORKERS=3
       - STAGE_NAME=filtro_usd
       - FD_NODES=1:filtro_usd_1,2:filtro_usd_2,3:filtro_usd_3
+      - FD_NODE_ID=2
 
   filtro_usd_3:
     build:
@@ -94,6 +96,7 @@ services:
       - NUM_DOWNSTREAM_WORKERS=3
       - STAGE_NAME=filtro_usd
       - FD_NODES=1:filtro_usd_1,2:filtro_usd_2,3:filtro_usd_3
+      - FD_NODE_ID=3
 
   q1_filter_lt50_1:
     build:
@@ -112,6 +115,7 @@ services:
       - NUM_DOWNSTREAM_WORKERS=1
       - STAGE_NAME=q1_filter_lt50
       - FD_NODES=1:q1_filter_lt50_1,2:q1_filter_lt50_2,3:q1_filter_lt50_3
+      - FD_NODE_ID=1
 
   q1_filter_lt50_2:
     build:
@@ -130,6 +134,7 @@ services:
       - NUM_DOWNSTREAM_WORKERS=1
       - STAGE_NAME=q1_filter_lt50
       - FD_NODES=1:q1_filter_lt50_1,2:q1_filter_lt50_2,3:q1_filter_lt50_3
+      - FD_NODE_ID=2
 
   q1_filter_lt50_3:
     build:
@@ -148,6 +153,7 @@ services:
       - NUM_DOWNSTREAM_WORKERS=1
       - STAGE_NAME=q1_filter_lt50
       - FD_NODES=1:q1_filter_lt50_1,2:q1_filter_lt50_2,3:q1_filter_lt50_3
+      - FD_NODE_ID=3
 
   q1_join:
     build:
@@ -187,6 +193,7 @@ services:
       - ROUTING_STRATEGY=sharded
       - STAGE_NAME=q2_group_bank_max
       - FD_NODES=1:q2_group_1,2:q2_group_2,3:q2_group_3
+      - FD_NODE_ID=1
 
   q2_group_2:
     build:
@@ -206,6 +213,7 @@ services:
       - ROUTING_STRATEGY=sharded
       - STAGE_NAME=q2_group_bank_max
       - FD_NODES=1:q2_group_1,2:q2_group_2,3:q2_group_3
+      - FD_NODE_ID=2
 
   q2_group_3:
     build:
@@ -225,6 +233,7 @@ services:
       - ROUTING_STRATEGY=sharded
       - STAGE_NAME=q2_group_bank_max
       - FD_NODES=1:q2_group_1,2:q2_group_2,3:q2_group_3
+      - FD_NODE_ID=3
 
   q2_aggregator_1:
     build:
@@ -240,10 +249,11 @@ services:
     environment:
       - WORKER_ID=1
       - EOF_EXPECTED=3
-      - NUM_DOWNSTREAM_WORKERS=1
+      - NUM_DOWNSTREAM_WORKERS=3
       - ROUTING_STRATEGY=round_robin
       - STAGE_NAME=q2_aggregator
       - FD_NODES=1:q2_aggregator_1,2:q2_aggregator_2,3:q2_aggregator_3
+      - FD_NODE_ID=1
 
   q2_aggregator_2:
     build:
@@ -259,10 +269,11 @@ services:
     environment:
       - WORKER_ID=2
       - EOF_EXPECTED=3
-      - NUM_DOWNSTREAM_WORKERS=1
+      - NUM_DOWNSTREAM_WORKERS=3
       - ROUTING_STRATEGY=round_robin
       - STAGE_NAME=q2_aggregator
       - FD_NODES=1:q2_aggregator_1,2:q2_aggregator_2,3:q2_aggregator_3
+      - FD_NODE_ID=2
 
   q2_aggregator_3:
     build:
@@ -278,16 +289,17 @@ services:
     environment:
       - WORKER_ID=3
       - EOF_EXPECTED=3
-      - NUM_DOWNSTREAM_WORKERS=1
+      - NUM_DOWNSTREAM_WORKERS=3
       - ROUTING_STRATEGY=round_robin
       - STAGE_NAME=q2_aggregator
       - FD_NODES=1:q2_aggregator_1,2:q2_aggregator_2,3:q2_aggregator_3
+      - FD_NODE_ID=3
 
-  q2_merge:
+  q2_merge_1:
     build:
       context: .
       dockerfile: src/merge/Dockerfile
-    container_name: q2_merge
+    container_name: q2_merge_1
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -298,6 +310,44 @@ services:
       - EOF_EXPECTED=4
       - NUM_DOWNSTREAM_WORKERS=1
       - STAGE_NAME=q2_merge
+      - FD_NODES=1:q2_merge_1,2:q2_merge_2,3:q2_merge_3
+      - FD_NODE_ID=1
+
+  q2_merge_2:
+    build:
+      context: .
+      dockerfile: src/merge/Dockerfile
+    container_name: q2_merge_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ./src/merge/config/accounts_config.yaml:/app/config.yaml:ro
+    environment:
+      - WORKER_ID=2
+      - EOF_EXPECTED=4
+      - NUM_DOWNSTREAM_WORKERS=1
+      - STAGE_NAME=q2_merge
+      - FD_NODES=1:q2_merge_1,2:q2_merge_2,3:q2_merge_3
+      - FD_NODE_ID=2
+
+  q2_merge_3:
+    build:
+      context: .
+      dockerfile: src/merge/Dockerfile
+    container_name: q2_merge_3
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ./src/merge/config/accounts_config.yaml:/app/config.yaml:ro
+    environment:
+      - WORKER_ID=3
+      - EOF_EXPECTED=4
+      - NUM_DOWNSTREAM_WORKERS=1
+      - STAGE_NAME=q2_merge
+      - FD_NODES=1:q2_merge_1,2:q2_merge_2,3:q2_merge_3
+      - FD_NODE_ID=3
 
   q2_join:
     build:
@@ -312,7 +362,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - WORKER_ID=1
-      - EOF_EXPECTED=1
+      - EOF_EXPECTED=3
       - NUM_DOWNSTREAM_WORKERS=1
       - QUERY_RESULT_NUMBER=2
       - STAGE_NAME=q2_join
@@ -335,6 +385,7 @@ services:
       - WORKER_ID=1
       - STAGE_NAME=q3_q4_router
       - FD_NODES=1:q3_q4_router_1,2:q3_q4_router_2,3:q3_q4_router_3
+      - FD_NODE_ID=1
 
   q3_q4_router_2:
     build:
@@ -352,6 +403,7 @@ services:
       - WORKER_ID=2
       - STAGE_NAME=q3_q4_router
       - FD_NODES=1:q3_q4_router_1,2:q3_q4_router_2,3:q3_q4_router_3
+      - FD_NODE_ID=2
 
   q3_q4_router_3:
     build:
@@ -369,6 +421,7 @@ services:
       - WORKER_ID=3
       - STAGE_NAME=q3_q4_router
       - FD_NODES=1:q3_q4_router_1,2:q3_q4_router_2,3:q3_q4_router_3
+      - FD_NODE_ID=3
 
   q3_group_1:
     build:
@@ -388,6 +441,7 @@ services:
       - ROUTING_STRATEGY=sharded
       - STAGE_NAME=q3_group
       - FD_NODES=1:q3_group_1,2:q3_group_2,3:q3_group_3
+      - FD_NODE_ID=1
 
   q3_group_2:
     build:
@@ -407,6 +461,7 @@ services:
       - ROUTING_STRATEGY=sharded
       - STAGE_NAME=q3_group
       - FD_NODES=1:q3_group_1,2:q3_group_2,3:q3_group_3
+      - FD_NODE_ID=2
 
   q3_group_3:
     build:
@@ -426,6 +481,7 @@ services:
       - ROUTING_STRATEGY=sharded
       - STAGE_NAME=q3_group
       - FD_NODES=1:q3_group_1,2:q3_group_2,3:q3_group_3
+      - FD_NODE_ID=3
 
   q3_aggregator_1:
     build:
@@ -445,6 +501,7 @@ services:
       - ROUTING_STRATEGY=round_robin
       - STAGE_NAME=q3_aggregator
       - FD_NODES=1:q3_aggregator_1,2:q3_aggregator_2,3:q3_aggregator_3
+      - FD_NODE_ID=1
 
   q3_aggregator_2:
     build:
@@ -464,6 +521,7 @@ services:
       - ROUTING_STRATEGY=round_robin
       - STAGE_NAME=q3_aggregator
       - FD_NODES=1:q3_aggregator_1,2:q3_aggregator_2,3:q3_aggregator_3
+      - FD_NODE_ID=2
 
   q3_aggregator_3:
     build:
@@ -483,6 +541,7 @@ services:
       - ROUTING_STRATEGY=round_robin
       - STAGE_NAME=q3_aggregator
       - FD_NODES=1:q3_aggregator_1,2:q3_aggregator_2,3:q3_aggregator_3
+      - FD_NODE_ID=3
 
   q3_averages_join:
     build:
@@ -519,6 +578,7 @@ services:
       - EOF_EXPECTED=4
       - NUM_DOWNSTREAM_WORKERS=1
       - STAGE_NAME=q3_historical_filter
+      - FD_NODE_ID=1
 
   q3_historical_filter_2:
     build:
@@ -535,6 +595,7 @@ services:
       - EOF_EXPECTED=4
       - NUM_DOWNSTREAM_WORKERS=1
       - STAGE_NAME=q3_historical_filter
+      - FD_NODE_ID=2
 
   q3_historical_filter_3:
     build:
@@ -551,6 +612,7 @@ services:
       - EOF_EXPECTED=4
       - NUM_DOWNSTREAM_WORKERS=1
       - STAGE_NAME=q3_historical_filter
+      - FD_NODE_ID=3
 
   q3_result_join:
     build:
@@ -591,6 +653,7 @@ services:
       - ROUTING_STRATEGY=sharded
       - STAGE_NAME=group_scatter
       - FD_NODES=1:group_scatter_1,2:group_scatter_2,3:group_scatter_3
+      - FD_NODE_ID=1
 
   group_scatter_2:
     build:
@@ -611,6 +674,7 @@ services:
       - ROUTING_STRATEGY=sharded
       - STAGE_NAME=group_scatter
       - FD_NODES=1:group_scatter_1,2:group_scatter_2,3:group_scatter_3
+      - FD_NODE_ID=2
 
   group_scatter_3:
     build:
@@ -631,6 +695,7 @@ services:
       - ROUTING_STRATEGY=sharded
       - STAGE_NAME=group_scatter
       - FD_NODES=1:group_scatter_1,2:group_scatter_2,3:group_scatter_3
+      - FD_NODE_ID=3
 
   aggregator_scatter_group_1:
     build:
@@ -651,6 +716,7 @@ services:
       - ROUTING_STRATEGY=sharded
       - STAGE_NAME=scatter_aggregator
       - FD_NODES=1:aggregator_scatter_group_1,2:aggregator_scatter_group_2,3:aggregator_scatter_group_3
+      - FD_NODE_ID=1
 
   aggregator_scatter_group_2:
     build:
@@ -671,6 +737,7 @@ services:
       - ROUTING_STRATEGY=sharded
       - STAGE_NAME=scatter_aggregator
       - FD_NODES=1:aggregator_scatter_group_1,2:aggregator_scatter_group_2,3:aggregator_scatter_group_3
+      - FD_NODE_ID=2
 
   aggregator_scatter_group_3:
     build:
@@ -691,6 +758,7 @@ services:
       - ROUTING_STRATEGY=sharded
       - STAGE_NAME=scatter_aggregator
       - FD_NODES=1:aggregator_scatter_group_1,2:aggregator_scatter_group_2,3:aggregator_scatter_group_3
+      - FD_NODE_ID=3
 
   merge_with_self_1:
     build:
@@ -710,6 +778,7 @@ services:
       - NUM_DOWNSTREAM_WORKERS=3
       - STAGE_NAME=self_merge
       - FD_NODES=1:merge_with_self_1,2:merge_with_self_2,3:merge_with_self_3
+      - FD_NODE_ID=1
 
   merge_with_self_2:
     build:
@@ -729,6 +798,7 @@ services:
       - NUM_DOWNSTREAM_WORKERS=3
       - STAGE_NAME=self_merge
       - FD_NODES=1:merge_with_self_1,2:merge_with_self_2,3:merge_with_self_3
+      - FD_NODE_ID=2
 
   merge_with_self_3:
     build:
@@ -748,6 +818,7 @@ services:
       - NUM_DOWNSTREAM_WORKERS=3
       - STAGE_NAME=self_merge
       - FD_NODES=1:merge_with_self_1,2:merge_with_self_2,3:merge_with_self_3
+      - FD_NODE_ID=3
 
   group_account_pair_1:
     build:
@@ -767,6 +838,7 @@ services:
       - NUM_DOWNSTREAM_WORKERS=3
       - STAGE_NAME=group_account_pair
       - FD_NODES=1:group_account_pair_1,2:group_account_pair_2,3:group_account_pair_3
+      - FD_NODE_ID=1
 
   group_account_pair_2:
     build:
@@ -786,6 +858,7 @@ services:
       - NUM_DOWNSTREAM_WORKERS=3
       - STAGE_NAME=group_account_pair
       - FD_NODES=1:group_account_pair_1,2:group_account_pair_2,3:group_account_pair_3
+      - FD_NODE_ID=2
 
   group_account_pair_3:
     build:
@@ -805,6 +878,7 @@ services:
       - NUM_DOWNSTREAM_WORKERS=3
       - STAGE_NAME=group_account_pair
       - FD_NODES=1:group_account_pair_1,2:group_account_pair_2,3:group_account_pair_3
+      - FD_NODE_ID=3
 
   aggregator_account_pair_1:
     build:
@@ -824,6 +898,7 @@ services:
       - NUM_DOWNSTREAM_WORKERS=3
       - STAGE_NAME=aggregator_account_pair
       - FD_NODES=1:aggregator_account_pair_1,2:aggregator_account_pair_2,3:aggregator_account_pair_3
+      - FD_NODE_ID=1
 
   aggregator_account_pair_2:
     build:
@@ -843,6 +918,7 @@ services:
       - NUM_DOWNSTREAM_WORKERS=3
       - STAGE_NAME=aggregator_account_pair
       - FD_NODES=1:aggregator_account_pair_1,2:aggregator_account_pair_2,3:aggregator_account_pair_3
+      - FD_NODE_ID=2
 
   aggregator_account_pair_3:
     build:
@@ -862,6 +938,7 @@ services:
       - NUM_DOWNSTREAM_WORKERS=3
       - STAGE_NAME=aggregator_account_pair
       - FD_NODES=1:aggregator_account_pair_1,2:aggregator_account_pair_2,3:aggregator_account_pair_3
+      - FD_NODE_ID=3
 
   group_by_accounts_1:
     build:
@@ -882,6 +959,7 @@ services:
       - ROUTING_STRATEGY=sharded
       - STAGE_NAME=group_accounts
       - FD_NODES=1:group_by_accounts_1,2:group_by_accounts_2,3:group_by_accounts_3
+      - FD_NODE_ID=1
 
   group_by_accounts_2:
     build:
@@ -902,6 +980,7 @@ services:
       - ROUTING_STRATEGY=sharded
       - STAGE_NAME=group_accounts
       - FD_NODES=1:group_by_accounts_1,2:group_by_accounts_2,3:group_by_accounts_3
+      - FD_NODE_ID=2
 
   group_by_accounts_3:
     build:
@@ -922,6 +1001,7 @@ services:
       - ROUTING_STRATEGY=sharded
       - STAGE_NAME=group_accounts
       - FD_NODES=1:group_by_accounts_1,2:group_by_accounts_2,3:group_by_accounts_3
+      - FD_NODE_ID=3
 
   aggregator_accounts_1:
     build:
@@ -941,6 +1021,7 @@ services:
       - NUM_DOWNSTREAM_WORKERS=1
       - STAGE_NAME=aggregator_accounts
       - FD_NODES=1:aggregator_accounts_1,2:aggregator_accounts_2,3:aggregator_accounts_3
+      - FD_NODE_ID=1
 
   aggregator_accounts_2:
     build:
@@ -960,6 +1041,7 @@ services:
       - NUM_DOWNSTREAM_WORKERS=1
       - STAGE_NAME=aggregator_accounts
       - FD_NODES=1:aggregator_accounts_1,2:aggregator_accounts_2,3:aggregator_accounts_3
+      - FD_NODE_ID=2
 
   aggregator_accounts_3:
     build:
@@ -979,6 +1061,7 @@ services:
       - NUM_DOWNSTREAM_WORKERS=1
       - STAGE_NAME=aggregator_accounts
       - FD_NODES=1:aggregator_accounts_1,2:aggregator_accounts_2,3:aggregator_accounts_3
+      - FD_NODE_ID=3
 
   q4_join_0:
     build:
@@ -1017,6 +1100,7 @@ services:
       - EOF_EXPECTED=1
       - STAGE_NAME=q5_router
       - FD_NODES=1:q5_router_1,2:q5_router_2,3:q5_router_3
+      - FD_NODE_ID=1
 
   q5_router_2:
     build:
@@ -1034,6 +1118,7 @@ services:
       - EOF_EXPECTED=1
       - STAGE_NAME=q5_router
       - FD_NODES=1:q5_router_1,2:q5_router_2,3:q5_router_3
+      - FD_NODE_ID=2
 
   q5_router_3:
     build:
@@ -1051,6 +1136,7 @@ services:
       - EOF_EXPECTED=1
       - STAGE_NAME=q5_router
       - FD_NODES=1:q5_router_1,2:q5_router_2,3:q5_router_3
+      - FD_NODE_ID=3
 
   q5_converter_1:
     build:
@@ -1069,6 +1155,7 @@ services:
       - NUM_DOWNSTREAM_WORKERS=1
       - STAGE_NAME=q5_converter
       - FD_NODES=1:q5_converter_1,2:q5_converter_2,3:q5_converter_3
+      - FD_NODE_ID=1
 
   q5_converter_2:
     build:
@@ -1087,6 +1174,7 @@ services:
       - NUM_DOWNSTREAM_WORKERS=1
       - STAGE_NAME=q5_converter
       - FD_NODES=1:q5_converter_1,2:q5_converter_2,3:q5_converter_3
+      - FD_NODE_ID=2
 
   q5_converter_3:
     build:
@@ -1105,6 +1193,7 @@ services:
       - NUM_DOWNSTREAM_WORKERS=1
       - STAGE_NAME=q5_converter
       - FD_NODES=1:q5_converter_1,2:q5_converter_2,3:q5_converter_3
+      - FD_NODE_ID=3
 
   q5_join:
     build:

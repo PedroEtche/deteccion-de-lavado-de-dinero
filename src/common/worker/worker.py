@@ -85,13 +85,13 @@ class BaseWorker(ABC):
 
         self.input_exchange.start_consuming(self._on_message)
 
-    def _start_fail_detection(self) -> None:
+    def _start_fail_detection(self):
         """Start fail detection.
         node_id is the worker_id (unique within the stage) and the peers come from the environment variables.
         Node.start() blocks (runs its monitoring loop), so it runs in a daemon thread to
         avoid blocking message consumption.
         """
-        self.fd_node = fail_recovery.node_from_env(self.config.worker_id)
+        self.fd_node = fail_recovery.node_from_env()
         threading.Thread(
             target=self.fd_node.start, daemon=True, name="fail-detection"
         ).start()

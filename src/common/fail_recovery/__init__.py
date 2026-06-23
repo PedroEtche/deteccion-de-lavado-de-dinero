@@ -3,7 +3,7 @@ import os
 from .fail_detection import Node
 
 
-def node_from_env(node_id: str) -> Node:
+def node_from_env() -> Node:
     """Construye un Node de deteccion de fallas desde las env var
 
     node_id : id Bully de este worker. Lo provee el worker (su WORKER_ID, que

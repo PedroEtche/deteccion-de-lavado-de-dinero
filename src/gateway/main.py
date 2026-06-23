@@ -8,6 +8,7 @@ import uuid
 from dataclasses import dataclass
 
 from src.common.communication.tcp import TCPSocket
+from src.common import fail_recovery
 from src.common.middleware import (
     MessageMiddlewareExchangeRabbitMQ,
 )
@@ -279,7 +280,9 @@ class Gateway:
             )
             eof_message = serialize(
                 build_eof_message(
-                    client=client_id, msg_id=next(self._msg_counter), sender=self.sender_id
+                    client=client_id,
+                    msg_id=next(self._msg_counter),
+                    sender=self.sender_id,
                 )
             )
 
@@ -338,6 +341,8 @@ class Gateway:
         logging.info("Starting Gateway...")
         self.running = True
 
+        self._start_fail_detection()
+
         self._setup_middleware()
 
         self._result_thread = threading.Thread(
@@ -378,6 +383,18 @@ class Gateway:
             self._close_resources()
 
         return 0
+
+    def _start_fail_detection(self):
+        """Start fail detection.
+        node_id is the worker_id (unique within the stage) and the peers come from the environment variables.
+        Node.start() blocks (runs its monitoring loop), so it runs in a daemon thread to
+        avoid blocking message consumption.
+        """
+        self.fd_node = fail_recovery.node_from_env()
+        threading.Thread(
+            target=self.fd_node.start, daemon=True, name="fail-detection"
+        ).start()
+        logging.info("Fail detection daemon started")
 
 
 def main():

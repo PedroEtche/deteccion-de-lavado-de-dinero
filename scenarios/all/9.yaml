@@ -578,6 +578,7 @@ services:
       - EOF_EXPECTED=4
       - NUM_DOWNSTREAM_WORKERS=1
       - STAGE_NAME=q3_historical_filter
+      - FD_NODES=1:q3_historical_filter_1,2:q3_historical_filter_2,3:q3_historical_filter_3
       - FD_NODE_ID=1
 
   q3_historical_filter_2:
@@ -595,6 +596,7 @@ services:
       - EOF_EXPECTED=4
       - NUM_DOWNSTREAM_WORKERS=1
       - STAGE_NAME=q3_historical_filter
+      - FD_NODES=1:q3_historical_filter_1,2:q3_historical_filter_2,3:q3_historical_filter_3
       - FD_NODE_ID=2
 
   q3_historical_filter_3:
@@ -612,6 +614,7 @@ services:
       - EOF_EXPECTED=4
       - NUM_DOWNSTREAM_WORKERS=1
       - STAGE_NAME=q3_historical_filter
+      - FD_NODES=1:q3_historical_filter_1,2:q3_historical_filter_2,3:q3_historical_filter_3
       - FD_NODE_ID=3
 
   q3_result_join:

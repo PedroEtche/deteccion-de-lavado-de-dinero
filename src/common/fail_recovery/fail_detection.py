@@ -6,7 +6,10 @@ import threading
 from dataclasses import dataclass
 from typing import List
 
-from message import Message
+try:
+    from .message import Message
+except ImportError:  # ejecucion standalone (test.py / chaos)
+    from message import Message
 
 PORT = 54315
 IP = "0.0.0.0"
@@ -38,11 +41,12 @@ class Node:
     def __init__(
         self,
         node_id: str,
-        peers: list[tuple[str, str, int]],
+        peers: list[tuple[str, str]],
         peer_containers: dict[str, str],
     ):
         """
-        peers:           list of (node_id, hostname, port), excluding self.
+        peers:           list of (node_id, hostname), excluding self. El puerto
+                         es fijo (PORT) y lo pone el propio Node.
         peer_containers: {node_id: docker_container_name} used to restart peers.
         """
         self.node_id = node_id
@@ -52,7 +56,7 @@ class Node:
         # Resolving here at startup would crash a node that is being restarted
         # while a peer is also down: Docker drops the DNS entry of a stopped
         # container
-        self._peers = [Peer(nid, host, port) for nid, host, port in peers]
+        self._peers = [Peer(nid, host, PORT) for nid, host in peers]
 
         self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

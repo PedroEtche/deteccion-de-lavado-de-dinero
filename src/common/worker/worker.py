@@ -1,9 +1,9 @@
 import logging
-from abc import ABC, abstractmethod
+import threading
 import zlib
+from abc import ABC, abstractmethod
 
-from src.common.middleware import MessageMiddlewareExchangeRabbitMQ
-from src.common.middleware.middleware_rabbitmq import CONSUMER_HEARTBEAT
+from src.common import fail_recovery
 from src.common.communication.internal import (
     build_batch_message,
     build_eof_message,
@@ -11,9 +11,11 @@ from src.common.communication.internal import (
     deserialize,
     serialize,
 )
-from src.common.eof import EofCoordinator
-from src.common.state_manager import WorkerStateManager
 from src.common.duplicate_handler import DuplicateHandler
+from src.common.eof import EofCoordinator
+from src.common.middleware import MessageMiddlewareExchangeRabbitMQ
+from src.common.middleware.middleware_rabbitmq import CONSUMER_HEARTBEAT
+from src.common.state_manager import WorkerStateManager
 
 
 class BaseWorker(ABC):
@@ -48,6 +50,8 @@ class BaseWorker(ABC):
         logging.info(f"Starting {self.__class__.__name__}...")
         self._running = True
 
+        self._start_fail_detection()
+
         self.eof_coordinator = EofCoordinator(
             expected_eofs=self.config.expected_eofs,
             on_flush=self._internal_on_flush,
@@ -80,6 +84,18 @@ class BaseWorker(ABC):
         self.output_exchange = self.output_exchanges[0]
 
         self.input_exchange.start_consuming(self._on_message)
+
+    def _start_fail_detection(self) -> None:
+        """Start fail detection.
+        node_id is the worker_id (unique within the stage) and the peers come from the environment variables.
+        Node.start() blocks (runs its monitoring loop), so it runs in a daemon thread to
+        avoid blocking message consumption.
+        """
+        self.fd_node = fail_recovery.node_from_env(self.config.worker_id)
+        threading.Thread(
+            target=self.fd_node.start, daemon=True, name="fail-detection"
+        ).start()
+        logging.info("Fail detection daemon started")
 
     def _on_message(self, message: bytes, ack, nack) -> None:
         try:
@@ -219,9 +235,7 @@ class BaseWorker(ABC):
                 physical_groups.setdefault(routing_key, []).extend(batch)
             for routing_key, combined_batch in physical_groups.items():
                 message = self._build_message(message_type, client_id, combined_batch)
-                self.send_downstream(
-                    client_id, message, shard_routing_key=routing_key
-                )
+                self.send_downstream(client_id, message, shard_routing_key=routing_key)
         else:
             flat_batch: list = []
             for _shard_key, batch in groups:

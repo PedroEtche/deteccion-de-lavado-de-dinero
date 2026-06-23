@@ -36,7 +36,8 @@ q1_switch:
 	@echo Escenarios de prueba:
 	@echo "1) Un cliente, set de datos de prueba (small_trans), una sola replica de cada elemento"
 	@echo "2) Un cliente, set de datos de prueba (small_trans), una sola replica de cada elemento y el router de transacciones"
-	@echo "3) Un cliente, set de datos de prueba (LI-Small_Trans), una sola replica de cada elemento, el router de transacciones y un esclavo del filter y join de la q1"
+	@echo "3) Un cliente, set de datos de prueba (small_trans), 2 replicas del filtro de q1  y fail detection"
+	@echo "4) Un cliente, set de datos de prueba (LI-Small), 2 replicas del filtro de q1  y fail detection"
 	@read -p "Selecciona uno: " option;	\
 	cp ./scenarios/q1/$${option}.yaml docker-compose.yaml
 .PHONY: q1_switch

@@ -1,7 +1,7 @@
 import logging
 import os
 
-from fail_detection import PORT, Node
+from fail_detection import Node
 
 
 def main():
@@ -14,7 +14,7 @@ def main():
     )
 
     peers = [
-        (str(i), f"node{i}", PORT) for i in range(1, n_nodes + 1) if str(i) != node_id
+        (str(i), f"node{i}") for i in range(1, n_nodes + 1) if str(i) != node_id
     ]
     peer_containers = {
         str(i): f"node{i}" for i in range(1, n_nodes + 1) if str(i) != node_id

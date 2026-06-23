@@ -127,7 +127,7 @@ all_switch:
 	@echo "4) Pruebas con datos fixed: 3 cliente y 2 workers"
 	@echo "5) Pruebas con datos fixed: 3 cliente, 2 workers y longitud de batches pequeñas"
 	@echo "6) Pruebas con datos LI-Small: 3 cliente, 2 workers"
-	@echo "7) Pruebas con datos Li-Small: 3 cliente, 2 workers"
+	@echo "7) Pruebas con datos Li-Medium: 3 cliente, 2 workers"
 	@read -p "Selecciona uno: " option;	\
 	cp ./scenarios/all/$${option}.yaml docker-compose.yaml
 .PHONY: q5_switch

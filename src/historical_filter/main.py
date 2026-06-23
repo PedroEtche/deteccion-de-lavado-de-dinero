@@ -27,6 +27,8 @@ CONFIG_PATH = "./config.yaml"
 AVERAGES_MSG_TYPE = "batch"
 CANDIDATES_MSG_TYPE = "raw_transactions"
 
+#
+RESULT_BATCH_SIZE = 5000
 
 @dataclass
 class HistoricalFilterConfig:
@@ -204,8 +206,9 @@ class HistoricalAverageFilter:
     def _on_flush(self, client_id: str) -> None:
         thresholds = self.thresholds_by_client.pop(client_id, {})
 
-        result = []
         candidate_count = 0
+        emitted_count = 0
+        result_batch = []
         # Las candidatas se releen en streaming desde el WAL en disco; vienen
         # como dicts (no TransactionRow), asi que se accede por clave.
         for wal_batch in self.candidates_state.iter_wal_batches(client_id):
@@ -219,7 +222,7 @@ class HistoricalAverageFilter:
                 if (tx.get("amount_paid") or 0.0) < threshold:
                     # Proyeccion al resultado de Q3. El orden de columnas del CSV
                     # lo define el orden de campos de Q3ResultRow.
-                    result.append(
+                    result_batch.append(
                         Q3ResultRow(
                             from_bank=tx.get("from_bank"),
                             from_account=tx.get("from_account"),
@@ -227,32 +230,23 @@ class HistoricalAverageFilter:
                             amount_paid=tx.get("amount_paid"),
                         )
                     )
+                    # Emitir por chunks: un unico mensaje con todo el resultado
+                    # supera el max message size de RabbitMQ con datasets grandes.
+                    if len(result_batch) >= RESULT_BATCH_SIZE:
+                        self._send_result_batch(client_id, result_batch)
+                        emitted_count += len(result_batch)
+                        result_batch = []
+
+        if result_batch:
+            self._send_result_batch(client_id, result_batch)
+            emitted_count += len(result_batch)
 
         logging.info(
             "Flush client %s: %d candidates -> %d below threshold",
             client_id,
             candidate_count,
-            len(result),
+            emitted_count,
         )
-
-        if result:
-            # msg_type "batch": tipo generico ya usado entre workers (group,
-            # aggregator). No dispara conversion a TransactionRow en el join,
-            # que lo reenvuelve como q3_result (QueryResultStrategy 3).
-            msg_id = self._next_msg_id()
-            out_msg = serialize(
-                build_batch_message(
-                    "batch",
-                    client=client_id,
-                    msg_id=msg_id,
-                    batch=result,
-                    sender=self.sender_id,
-                )
-            )
-            # Round-robin determinista: worker destino = msg_id % N.
-            target_worker = (msg_id % self.config.num_downstream_workers) + 1
-            routing_key = f"worker_{target_worker}"
-            self.output_mw.send(out_msg, routing_key=routing_key)
 
         eof_msg = serialize(
             build_eof_message(
@@ -265,6 +259,24 @@ class HistoricalAverageFilter:
         # (snapshot) en disco. El conteo de EOFs lo limpia el EofCoordinator.
         self.candidates_state.delete_client(client_id)
         self.thresholds_state.delete_client(client_id)
+
+    def _send_result_batch(self, client_id: str, result: list) -> None:
+        # msg_type "batch": tipo generico ya usado entre workers (group,
+        # aggregator). No dispara conversion a TransactionRow en el join, que lo
+        # reenvuelve como q3_result (QueryResultStrategy 3).
+        msg_id = self._next_msg_id()
+        out_msg = serialize(
+            build_batch_message(
+                "batch",
+                client=client_id,
+                msg_id=msg_id,
+                batch=result,
+                sender=self.sender_id,
+            )
+        )
+        # Round-robin determinista: worker destino = msg_id % N.
+        target_worker = (msg_id % self.config.num_downstream_workers) + 1
+        self.output_mw.send(out_msg, routing_key=f"worker_{target_worker}")
 
     def stop(self) -> None:
         if self.input_mw:

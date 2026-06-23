@@ -228,7 +228,7 @@ services:
       rabbitmq:
         condition: service_healthy
     volumes:
-    - ./src/transaction_router/config/q3_q4_dates.yaml:/app/config.yaml:ro
+    - ./src/transaction_router/config/q3_q4_dates_scaled.yaml:/app/config.yaml:ro
     environment:
     - EOF_EXPECTED=2        # filtro_usd
     - WORKER_ID=1
@@ -243,7 +243,7 @@ services:
       rabbitmq:
         condition: service_healthy
     volumes:
-    - ./src/transaction_router/config/q3_q4_dates.yaml:/app/config.yaml:ro
+    - ./src/transaction_router/config/q3_q4_dates_scaled.yaml:/app/config.yaml:ro
     environment:
     - EOF_EXPECTED=2        # filtro_usd
     - WORKER_ID=2
@@ -506,11 +506,11 @@ services:
     - NUM_DOWNSTREAM_WORKERS=2
     - STAGE_NAME=group_account_pair
     
-  aggreator_account_pair_0:
+  aggregator_account_pair_1:
     build:
       context: .
       dockerfile: src/aggregator/Dockerfile
-    container_name: aggregator_account_pair_0 
+    container_name: aggregator_account_pair_1
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -518,9 +518,26 @@ services:
     - ./src/aggregator/config/account_pairs_aggregator.yaml:/app/config.yaml:ro
     - ./persisted_state:/app/state
     environment:
-    - EOF_EXPECTED=1
+    - EOF_EXPECTED=2
     - WORKER_ID=1
-    - NUM_DOWNSTREAM_WORKERS=1
+    - NUM_DOWNSTREAM_WORKERS=2
+    - STAGE_NAME=aggregator_account_pair
+
+  aggregator_account_pair_2:
+    build:
+      context: .
+      dockerfile: src/aggregator/Dockerfile
+    container_name: aggregator_account_pair_2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+    - ./src/aggregator/config/account_pairs_aggregator.yaml:/app/config.yaml:ro
+    - ./persisted_state:/app/state
+    environment:
+    - EOF_EXPECTED=2
+    - WORKER_ID=2
+    - NUM_DOWNSTREAM_WORKERS=2
     - STAGE_NAME=aggregator_account_pair
 
   group_account_pair_2:

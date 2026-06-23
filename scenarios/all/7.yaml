@@ -228,7 +228,7 @@ services:
       rabbitmq:
         condition: service_healthy
     volumes:
-    - ./src/transaction_router/config/q3_q4_dates.yaml:/app/config.yaml:ro
+    - ./src/transaction_router/config/q3_q4_dates_scaled.yaml:/app/config.yaml:ro
     environment:
     - EOF_EXPECTED=2        # filtro_usd
     - WORKER_ID=1
@@ -243,7 +243,7 @@ services:
       rabbitmq:
         condition: service_healthy
     volumes:
-    - ./src/transaction_router/config/q3_q4_dates.yaml:/app/config.yaml:ro
+    - ./src/transaction_router/config/q3_q4_dates_scaled.yaml:/app/config.yaml:ro
     environment:
     - EOF_EXPECTED=2        # filtro_usd
     - WORKER_ID=2

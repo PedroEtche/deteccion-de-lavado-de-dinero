@@ -1,0 +1,35 @@
+# Router por fecha de Q3/Q4, escalado: reparte a 3 instancias de cada downstream.
+# Variante 3x de q3_q4_dates.yaml (que tiene num_downstream_workers: 1 para 1x).
+# Mismas rutas/fechas; solo cambia num_downstream_workers a 3.
+
+mom_host: rabbitmq
+
+input: q3_usd_filtered_exchange
+
+routes:
+  - name: q3_historic
+    output: q3_group_input_exchange
+    num_downstream_workers: 3
+    routing_strategy: round_robin
+    filters:
+      - type: date_range
+        from: 2022-09-01
+        to: 2022-09-05
+
+  - name: q3_candidates
+    output: q3_histavg_input_exchange
+    num_downstream_workers: 3
+    routing_strategy: round_robin
+    filters:
+      - type: date_range
+        from: 2022-09-06
+        to: 2022-09-15
+
+  - name: q4_transactions
+    output: q4_group_input_exchange
+    num_downstream_workers: 3
+    routing_strategy: round_robin
+    filters:
+      - type: date_range
+        from: 2022-09-01
+        to: 2022-09-06

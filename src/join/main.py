@@ -123,6 +123,9 @@ class JoinWorker(StatefulWorker):
         if not message:
             return
         
+        if self._is_recovering:
+            return
+
         msg_id = self._next_msg_id()
         message["msg_id"] = msg_id
         message["sender"] = self.sender_id

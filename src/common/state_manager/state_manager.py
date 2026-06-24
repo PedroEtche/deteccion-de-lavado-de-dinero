@@ -47,13 +47,13 @@ class WorkerStateManager:
             raise e
 
 
-    def append_batch(self, client_id: str, batch: Any, msg_id: int, sender: str) -> None:
-        if not batch: 
+    def append_batch(self, client_id: str, batch: Any, msg_id: int, sender: str, msg_type: str = None) -> None:
+        if not batch:
             return
         wal_path = self._get_path(client_id, ".jsonl")
         try:
             with open(wal_path, "a", encoding="utf-8") as f:
-                json.dump({"msg_id": msg_id, "sender": sender, "batch": batch}, f, default=_custom_serializer)
+                json.dump({"msg_id": msg_id, "sender": sender, "msg_type": msg_type, "batch": batch}, f, default=_custom_serializer)
                 f.write("\n")
                 f.flush()
                 os.fsync(f.fileno())
@@ -111,7 +111,7 @@ class WorkerStateManager:
                     record = json.loads(line)
                     sender, msg_id = record["sender"], record["msg_id"]
                     seen_msgs[sender] = max(seen_msgs.get(sender, 0), msg_id)
-                    historical_batches.append(record["batch"])
+                    historical_batches.append((record["batch"], record.get("msg_type")))
                     good_count += 1
                 except json.JSONDecodeError:
                     if i == len(lines) - 1:

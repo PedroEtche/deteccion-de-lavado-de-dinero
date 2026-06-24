@@ -135,8 +135,8 @@ class MergeWorker(StatefulWorker):
 
         self.duplicate_handler.restore_state(client_id, last_seen_msg)
 
-        for batch in wal_batches:
-            self.strategy.merge_batch(batch, client_id, msg_type="batch")
+        for batch, msg_type in wal_batches:
+            self.strategy.merge_batch(batch, client_id, msg_type=msg_type or "batch")
 
         self.received_batches_per_client[client_id] = len(wal_batches)
         logging.info("Recovered client %s", client_id)
@@ -145,7 +145,7 @@ class MergeWorker(StatefulWorker):
         count = self.received_batches_per_client.get(client_id, 0) + 1
         self.received_batches_per_client[client_id] = count
 
-        self.state_manager.append_batch(client_id, batch, msg_id=msg_id, sender=sender)
+        self.state_manager.append_batch(client_id, batch, msg_id=msg_id, sender=sender, msg_type=msg_type)
         self.strategy.merge_batch(batch, client_id, msg_type)
 
         if count % SNAPSHOT_BATCH == 0:

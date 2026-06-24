@@ -146,7 +146,7 @@ class AggregatorWorker(StatefulWorker):
 
         self.duplicate_handler.restore_state(client_id, last_seen_msg)
 
-        for batch in wal_batches:
+        for batch, _msg_type in wal_batches:
             self.strategy.aggregate_batch(batch, client_id)
 
         self.received_batches_per_client[client_id] = len(wal_batches)

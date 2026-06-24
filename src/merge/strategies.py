@@ -3,6 +3,15 @@ from typing import Any, Dict, List
 
 from src.common.communication.internal import TransactionRow
 
+
+def _field(row: Any, name: str) -> Any:
+    """Lee un campo de una fila que puede venir como objeto (flujo en vivo) o
+    como dict (reaplicada desde el WAL, que la serializa a dict)."""
+    if isinstance(row, dict):
+        return row.get(name)
+    return getattr(row, name)
+
+
 class MergeStrategy(ABC):
     """Abstract strategy for accumulating and merging data batches."""
 
@@ -75,7 +84,7 @@ class AccountsStrategy(MergeStrategy):
             if client_id not in self.accounts:
                 self.accounts[client_id] = {}
             for row in batch:
-                self.accounts[client_id][row.bank_id] = row.bank_name
+                self.accounts[client_id][_field(row, "bank_id")] = _field(row, "bank_name")
         else:
             if client_id not in self.pending_transactions:
                 self.pending_transactions[client_id] = []

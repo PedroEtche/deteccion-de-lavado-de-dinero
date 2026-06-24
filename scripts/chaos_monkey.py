@@ -23,10 +23,17 @@ from datetime import datetime
 
 # ----------------------------- CONFIGURACION --------------------------------
 # Containers protegidos (no se matan). Match por substring sobre el nombre.
-EXCLUDE_PATTERNS = ["rabbitmq", "gateway", "client_", "q3_historical_filter", "join"]
+EXCLUDE_PATTERNS = [
+    "rabbitmq",
+    "gateway",
+    "client_",
+    "q3_historical_filter",
+    "join",
+    "router",
+]
 
 # Segundos entre kills.
-INTERVAL = int(os.environ.get("INTERVAL", "1"))
+INTERVAL = int(os.environ.get("INTERVAL", "5"))
 
 # Compose file del proyecto.
 COMPOSE_FILE = os.environ.get("COMPOSE_FILE", "docker-compose.yaml")

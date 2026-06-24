@@ -147,7 +147,7 @@ class JoinWorker(StatefulWorker):
         self.duplicate_handler.restore_state(client_id, last_seen_msg)
 
         self._is_recovering = True
-        for batch in wal_batches:
+        for batch, _msg_type in wal_batches:
             self.strategy.join_batch(batch, client_id)
         self._is_recovering = False
 

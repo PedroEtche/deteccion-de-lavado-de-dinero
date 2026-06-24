@@ -3,6 +3,8 @@ from .protocol import (
     send_csv,
     send_eof,
     receive_streams,
+    read_csv_batches,
+    build_stream_message,
     STREAM_TRANSACTIONS,
     STREAM_ACCOUNTS,
 )
@@ -11,6 +13,9 @@ from .internal import (
     deserialize,
     build_batch_message,
     build_eof_message,
+    build_ack_message,
+    build_hello_message,
+    build_hello_ack_message,
     TransactionRow,
     AccountRow,
 )
@@ -21,6 +26,14 @@ __all__ = [
     "send_csv",
     "send_eof",
     "receive_streams",
+    "read_csv_batches",
+    "build_stream_message",
+    "serialize",
+    "deserialize",
+    "build_eof_message",
+    "build_ack_message",
+    "build_hello_message",
+    "build_hello_ack_message",
     "STREAM_TRANSACTIONS",
     "STREAM_ACCOUNTS",
 ]

@@ -64,6 +64,19 @@ register_message_type(
     payload_validator=_validate_batch_payload,
 )
 register_message_type("eof")
+# ACK del gateway al cliente: confirma que un mensaje (identificado por su
+# msg_id del cliente) ya fue publicado aguas abajo. Sin payload.
+register_message_type("ack", required_fields=["client", "msg_id"])
+# Handshake de identificacion. `hello` lo manda el cliente al conectar: si trae
+# `client` esta reanudando con un UUID propio, si no pide que el gateway le
+# asigne uno. `hello_ack` devuelve el UUID confirmado/asignado.
+register_message_type("hello")
+register_message_type("hello_ack", required_fields=["client"])
+# Señal del gateway al cliente de que ya llegaron TODOS los EOF de resultado de
+# esa sesion (pipeline completo). Permite que un cliente que reconecta en la fase
+# de resultados corte limpio en vez de reintentar para siempre cuando el gateway,
+# tras un restart, ya tenia los EOF persistidos y va a cerrar la conexion.
+register_message_type("results_done", required_fields=["client"])
 register_message_type(
     "q1_result",
     payload_required=True,
@@ -299,6 +312,34 @@ def build_raw_accounts_message(*, client, msg_id, batch, sender=None):
 def build_eof_message(*, client, msg_id, sender=None):
     """Wrapper for building EOF message"""
     return build_message("eof", client=client, msg_id=msg_id, sender=sender)
+
+
+def build_ack_message(*, client, msg_id, sender):
+    """ACK del gateway al cliente confirmando que el mensaje con ese msg_id ya
+    fue publicado aguas abajo. El cliente lo usa para avanzar su stop-and-wait."""
+    return build_message("ack", client=client, msg_id=msg_id, sender=sender)
+
+
+def build_hello_message(*, uuid=None, sender):
+    """Saludo de identificacion del cliente. `uuid` presente = reanudacion con
+    id propio; ausente = pide que el gateway le asigne uno."""
+    return build_message("hello", client=uuid, sender=sender)
+
+
+def build_hello_ack_message(*, client, sender, resume_from=-1):
+    """Respuesta del gateway al `hello` con el UUID confirmado/asignado y el
+    punto de reanudacion de datos: `resume_from` es el ultimo msg_id que el
+    gateway reenvio downstream de forma durable para ese cliente (o -1 si es
+    nuevo). El cliente streamea desde resume_from + 1."""
+    msg = build_message("hello_ack", client=client, sender=sender)
+    msg["resume_from"] = resume_from
+    return msg
+
+
+def build_results_done_message(*, client, sender):
+    """Señal del gateway de que la sesion del cliente quedo completa (llegaron
+    todos los EOF de resultado). El cliente la usa para cortar la recepcion."""
+    return build_message("results_done", client=client, sender=sender)
 
 
 def build_results_for_query(query_number: int, batch: list, eof: bool, client: str):

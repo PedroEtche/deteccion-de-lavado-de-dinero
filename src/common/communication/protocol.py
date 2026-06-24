@@ -86,6 +86,45 @@ def send_eof(sock, *, client=None, msg_id=None, sender):
     sock.send_bytes(serialize(msg))
 
 
+def read_csv_batches(csv_path, batch_size, stream):
+    """Lee un CSV y hace yield de batches (listas de TransactionRow/AccountRow
+    según `stream`). No envía nada: el caller decide cómo despacharlos (p.ej.
+    stop-and-wait con msg_id propio). Reusa el mapeo de columnas de _map_row."""
+    if batch_size <= 0:
+        raise ValueError("batch_size must be > 0")
+
+    if stream == STREAM_TRANSACTIONS:
+        field_map, row_cls = _TRANSACTION_FIELD_MAP, TransactionRow
+    elif stream == STREAM_ACCOUNTS:
+        field_map, row_cls = _ACCOUNT_FIELD_MAP, AccountRow
+    else:
+        raise ValueError(f"Unknown stream: {stream}")
+
+    with open(csv_path, "r", encoding=_ENCODING, newline="") as handle:
+        reader = csv.DictReader(handle)
+        batch = []
+        for raw_row in reader:
+            batch.append(_map_row(raw_row, field_map, row_cls))
+            if len(batch) >= batch_size:
+                yield batch
+                batch = []
+        if batch:
+            yield batch
+
+
+def build_stream_message(stream, *, client, msg_id, batch, sender):
+    """Construye el mensaje raw_* correspondiente al stream para un batch dado."""
+    if stream == STREAM_TRANSACTIONS:
+        return build_raw_transactions_message(
+            client=client, msg_id=msg_id, batch=batch, sender=sender
+        )
+    if stream == STREAM_ACCOUNTS:
+        return build_raw_accounts_message(
+            client=client, msg_id=msg_id, batch=batch, sender=sender
+        )
+    raise ValueError(f"Unknown stream: {stream}")
+
+
 def receive_streams(sock):
     """
     Generador que recibe mensajes del socket y hace yield de (stream, batch)

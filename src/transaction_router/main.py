@@ -78,10 +78,10 @@ class TransactionRouter(StreamWorker):
             if route.exchange:
                 route.exchange.close()
 
-    def handle_data(self, client_id: str, msg_type: str, batch: list) -> None:
-        self._route_batch(client_id, batch)
+    def handle_data(self, client_id: str, msg_type: str, batch: list, msg_id: int, sender: str) -> None:
+        self._route_batch(client_id, batch, msg_id, sender)
 
-    def _route_batch(self, client_id: str, batch: list) -> None:
+    def _route_batch(self, client_id: str, batch: list, msg_id: int, sender: str) -> None:
         for route in self.config.routes:
             sub_batch = [tx for tx in batch if route.matches(tx)]
             if not sub_batch:
@@ -92,13 +92,12 @@ class TransactionRouter(StreamWorker):
                     f"Unsupported routing strategy: {route.routing_strategy}"
                 )
 
-            msg_id = self._next_msg_id()
             out_msg = serialize(
                 build_raw_transactions_message(
                     client=client_id,
                     msg_id=msg_id,
                     batch=sub_batch,
-                    sender=self.sender_id,
+                    sender=sender,
                 )
             )
             routing_key = route.routing_key_for(msg_id)

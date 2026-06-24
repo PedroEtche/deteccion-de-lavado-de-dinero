@@ -6,7 +6,7 @@ from typing import Any, Dict
 
 import yaml
 
-from src.common.worker import BaseWorker
+from src.common.worker import StatefulWorker
 from src.common.state_manager import WorkerStateManager
 
 from .strategies import (
@@ -17,6 +17,7 @@ from .strategies import (
 )
 
 SNAPSHOT_BATCH = 1000
+RESULT_BATCH_SIZE = 5000
 
 CONFIG_PATH = "./config.yaml"
 
@@ -93,7 +94,7 @@ def log_config(config: MergeConfig) -> None:
     )
 
 
-class MergeWorker(BaseWorker):
+class MergeWorker(StatefulWorker):
     """
     Stateful Merge. Uses a strategy to accumulate data in memory.
     Flushes state only when expected_eofs is reached.
@@ -135,7 +136,7 @@ class MergeWorker(BaseWorker):
         self.state_manager.append_batch(client_id, batch)
 
         merged_batch = self.strategy.merge_batch(batch, client_id, msg_type)
-        self.send(client_id, merged_batch, "batch")
+        # self.send(client_id, merged_batch, "batch")
 
         if count % SNAPSHOT_BATCH == 0:
             logging.info("Triggering checkpoint snapshot for client %s", client_id)
@@ -151,6 +152,29 @@ class MergeWorker(BaseWorker):
         )
         self.strategy.clear_client_state(client_id)
         self.state_manager.delete_client(client_id)
+
+        self.received_batches_per_client.pop(client_id, None)
+
+    def flush_state(self, client_id: str) -> None:
+        logging.info(
+            "All EOFs received. Flushing merge state for client %s", client_id
+        )
+
+        final_data = self.strategy.get_result_for_client(client_id)
+        
+        if not final_data:
+            logging.info("No data to flush for client %s", client_id)
+        else:
+            for i in range(0, len(final_data), RESULT_BATCH_SIZE):
+                chunk = final_data[i : i + RESULT_BATCH_SIZE]
+                
+                self.send(client_id, chunk, "batch")
+                
+            logging.info("Flushed %d total records in chunks of %d for client %s", len(final_data), RESULT_BATCH_SIZE, client_id)
+
+        self.strategy.clear_client_state(client_id)
+        self.state_manager.delete_client(client_id)
+        self.received_batches_per_client.pop(client_id, None)
 
 
 def main() -> int:

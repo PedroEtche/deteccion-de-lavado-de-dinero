@@ -6,7 +6,7 @@ from typing import Any, Dict
 
 import yaml
 
-from src.common.worker import BaseWorker
+from src.common.worker import StatelessWorker
 
 from .strategies import (
     AccountPairCountStategy,
@@ -100,7 +100,7 @@ def log_config(config: GroupConfig) -> None:
     )
 
 
-class GroupWorker(BaseWorker):
+class GroupWorker(StatelessWorker):
     """
     Stateless cross-batch grouping worker.
     Uses strategies to calculate downstream routes.
@@ -109,11 +109,16 @@ class GroupWorker(BaseWorker):
     def __init__(self, config: GroupConfig):
         super().__init__(config)
 
-    def process_batch(self, client_id: str, batch: list, msg_type: str) -> None:
+    def process_batch(self, client_id: str, batch: list, msg_type: str, msg_id: int, sender: str) -> None:
         logging.info("Processing batch of %d rows for client %s", len(batch), client_id)
         routed = self.strategy.group_and_route(batch)
         # routed: [(clave_logica, batch), ...]; send_groups agrupa por worker fisico.
-        self.send_groups(client_id, routed)
+        self.send_groups(
+            client_id, 
+            routed, 
+            msg_id=msg_id, 
+            sender=sender
+        )
 
     def flush_state(self, client_id: str) -> None:
         pass

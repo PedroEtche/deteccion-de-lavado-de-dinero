@@ -6,7 +6,7 @@ from typing import Any, Dict
 
 import yaml
 
-from src.common.worker import BaseWorker
+from src.common.worker import StatefulWorker
 from src.common.state_manager import WorkerStateManager
 
 from .strategies import (
@@ -104,7 +104,7 @@ def log_config(config: AggregatorConfig) -> None:
     )
 
 
-class AggregatorWorker(BaseWorker):
+class AggregatorWorker(StatefulWorker):
     """
     Stateful aggregator.
     Accumulates data in memory via strategies and flushes only upon receiving expected_eofs.
@@ -169,6 +169,8 @@ class AggregatorWorker(BaseWorker):
 
         self.strategy.clear_client_state(client_id)
         self.state_manager.delete_client(client_id)
+
+        self.received_batches_per_client.pop(client_id, None)
 
 
 def main() -> int:

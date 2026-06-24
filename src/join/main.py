@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 
 import yaml
 
-from src.common.worker import BaseWorker
+from src.common.worker import StatefulWorker
 from src.common.state_manager import WorkerStateManager
 
 from .strategies import (
@@ -94,14 +94,14 @@ def log_config(config: JoinConfig) -> None:
         config.output_exchange,
         str(config.strategy),
         config.expected_eofs,
-    )
+    ) 
 
 
-class JoinWorker(BaseWorker):
+class JoinWorker(StatefulWorker):
     def __init__(self, config: JoinConfig):
         super().__init__(config)
         self.strategy = config.strategy
-        self.strategy.register_join_callback(self.send_downstream)
+        self.strategy.register_join_callback(self._join_callback)
 
         self.received_batches_per_client = {}
 
@@ -116,6 +116,16 @@ class JoinWorker(BaseWorker):
         for client_id in client_ids:
             logging.info("Recovering state for client %s", client_id)
             self._recover_client_state(client_id)
+
+    def _join_callback(self, client_id: str, message: dict) -> None:
+        if not message:
+            return
+        
+        msg_id = self._next_msg_id()
+        message["msg_id"] = msg_id
+        message["sender"] = self.sender_id
+        
+        self._route_and_send(client_id, message, msg_id)
 
     def _recover_client_state(self, client_id: str) -> None:
         snapshot, wal_batches = self.state_manager.recover_client(client_id)
@@ -147,9 +157,10 @@ class JoinWorker(BaseWorker):
 
     def flush_state(self, client_id: str) -> None:
         final_msg = self.strategy.flush(client_id)
-        self.send_downstream(client_id, final_msg)
+        self._join_callback(client_id, final_msg)
 
         self.state_manager.delete_client(client_id)
+        self.received_batches_per_client.pop(client_id, None)
 
 
 def main() -> int:

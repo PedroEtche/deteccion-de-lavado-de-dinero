@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 
 import yaml
 
-from src.common.worker import BaseWorker
+from src.common.worker import StatelessWorker
 
 from .strategies import (
     AmountComparisonStrategy,
@@ -100,16 +100,22 @@ def log_config(config: FilterConfig) -> None:
     )
 
 
-class FilterWorker(BaseWorker):
+class FilterWorker(StatelessWorker):
     def __init__(self, config: FilterConfig):
         super().__init__(config)
         self.strategy = config.strategy
 
-    def process_batch(self, client_id: str, batch: list, msg_type: str) -> None:
+    def process_batch(self, client_id: str, batch: list, msg_type: str, msg_id: int, sender: str) -> None:
         filtered_batch = self.strategy.filter_batch(batch)
         logging.info("Filtered batch: %d in -> %d out", len(batch), len(filtered_batch))
-        self.send(client_id, filtered_batch, "raw_transactions")
-
+        self.send(
+            client_id, 
+            filtered_batch, 
+            "raw_transactions", 
+            msg_id=msg_id, 
+            sender=sender
+        )
+        
     def flush_state(self, client_id: str) -> None:
         pass
 

@@ -144,7 +144,7 @@ class HistoricalAverageFilter(StreamWorker):
         if self.output_mw:
             self.output_mw.close()
 
-    def handle_data(self, client_id: str, msg_type: str, batch: list) -> None:
+    def handle_data(self, client_id: str, msg_type: str, batch: list, msg_id: int, sender: str) -> None:
         self._accumulate(client_id, msg_type, batch)
 
     def _accumulate(self, client_id: str, msg_type: str, batch: list) -> None:

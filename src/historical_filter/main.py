@@ -160,8 +160,21 @@ class HistoricalAverageFilter(StreamWorker):
             logging.info("Stored %d averages for client %s", len(batch), client_id)
 
         elif msg_type == CANDIDATES_MSG_TYPE:
-            # Las candidatas van directo al WAL en disco (con fsync), no a memoria.
-            self.candidates_state.append_batch(client_id, batch, msg_id=msg_id, sender=sender)
+            # Proyectar a solo los campos que usa el flush ANTES de persistir, asi
+            # el WAL no guarda columnas que no se usan. Las candidatas llegan como TransactionRow.
+            projected = [
+                {
+                    "from_bank": tx.from_bank,
+                    "from_account": tx.from_account,
+                    "payment_format": tx.payment_format,
+                    "amount_paid": tx.amount_paid,
+                }
+                for tx in batch
+            ]
+            # Van directo al WAL en disco (con fsync), no a memoria.
+            self.candidates_state.append_batch(
+                client_id, projected, msg_id=msg_id, sender=sender
+            )
             logging.info(
                 "Buffered %d candidate txs for client %s", len(batch), client_id
             )

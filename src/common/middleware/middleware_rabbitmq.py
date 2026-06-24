@@ -19,6 +19,8 @@ CONSUMER_HEARTBEAT = 60
 
 class MessageMiddlewareQueueRabbitMQ(MessageMiddlewareQueue):
     def __init__(self, host, queue_name, heartbeat=0):
+        # Ver nota en MessageMiddlewareExchangeRabbitMQ: apagado graceful.
+        self._stopping = False
         try:
             self.connection = pika.BlockingConnection(
                 pika.ConnectionParameters(
@@ -74,15 +76,20 @@ class MessageMiddlewareQueueRabbitMQ(MessageMiddlewareQueue):
 
             self.channel.start_consuming()
         except (AMQPConnectionError, AMQPChannelError):
+            if self._stopping:
+                return  # apagado graceful por SIGTERM, no es falla
             raise MessageMiddlewareDisconnectedError(
                 "Connection lost while consuming messages."
             )
         except Exception as e:
+            if self._stopping:
+                return  # apagado graceful por SIGTERM, no es falla
             raise MessageMiddlewareMessageError(
                 f"An error occurred while consuming messages: {str(e)}"
             )
 
     def stop_consuming(self):
+        self._stopping = True
         try:
             self.channel.stop_consuming()
         except (AMQPConnectionError, AMQPChannelError):
@@ -104,6 +111,10 @@ class MessageMiddlewareQueueRabbitMQ(MessageMiddlewareQueue):
 
 class MessageMiddlewareExchangeRabbitMQ(MessageMiddlewareExchange):
     def __init__(self, host, exchange_name, routing_keys=None, queue_name=None, exchange_type="direct", heartbeat=0):
+        # Flag de apagado: lo prende stop_consuming() (lo llama el handler de
+        # SIGTERM). Si start_consuming se rompe mientras estamos parando, no es
+        # un error real sino el cierre reentrante de la conexion -> salida limpia.
+        self._stopping = False
         try:
             self.connection = pika.BlockingConnection(
                 pika.ConnectionParameters(
@@ -185,15 +196,20 @@ class MessageMiddlewareExchangeRabbitMQ(MessageMiddlewareExchange):
             )
             self.channel.start_consuming()
         except (AMQPConnectionError, AMQPChannelError):
+            if self._stopping:
+                return  # apagado graceful por SIGTERM, no es falla
             raise MessageMiddlewareDisconnectedError(
                 "Connection lost while consuming messages."
             )
         except Exception as e:
+            if self._stopping:
+                return  # apagado graceful por SIGTERM, no es falla
             raise MessageMiddlewareMessageError(
                 f"An error occurred while consuming messages: {str(e)}"
             )
 
     def stop_consuming(self):
+        self._stopping = True
         try:
             self.channel.stop_consuming()
         except (AMQPConnectionError, AMQPChannelError):

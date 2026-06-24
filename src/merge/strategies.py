@@ -160,7 +160,7 @@ class SelfMergeStrategy(MergeStrategy):
                     merged_record = self._create_merged_record(tx, outbound_tx)
                     if merged_record is not None:
                         client_results.append(merged_record)
-                        
+
             if dest_key not in client_inbound:
                 client_inbound[dest_key] = []
             client_inbound[dest_key].append(tx)

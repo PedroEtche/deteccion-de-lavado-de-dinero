@@ -88,7 +88,11 @@ class AccountsStrategy(MergeStrategy):
         transactions = self.pending_transactions.get(client_id, [])
 
         for row in transactions:
+<<<<<<< HEAD
             bank_id = str(row["from_bank"]).lstrip('0')
+=======
+            bank_id = str(row["from_bank"]).lstrip('0') or '0'
+>>>>>>> e04d3ac (less commented code)
             bank_name = client_accounts.get(bank_id, "Unknown")
 
             enriched_batch.append({
@@ -160,7 +164,11 @@ class SelfMergeStrategy(MergeStrategy):
                     merged_record = self._create_merged_record(tx, outbound_tx)
                     if merged_record is not None:
                         client_results.append(merged_record)
+<<<<<<< HEAD
 
+=======
+                        
+>>>>>>> e04d3ac (less commented code)
             if dest_key not in client_inbound:
                 client_inbound[dest_key] = []
             client_inbound[dest_key].append(tx)

@@ -26,6 +26,10 @@ test:
 	-python3 scripts/compare_results.py q5
 .PHONY: test
 
+test_all:
+	python3 scripts/check_sizes.py
+.PHONY: test_all
+
 debug:
 	@echo "Levanto solo Rabbit + Gateawy + cliente para ver si los mensajes llegan"
 	cp ./scenarios/debug-compose.yaml docker-compose.yaml

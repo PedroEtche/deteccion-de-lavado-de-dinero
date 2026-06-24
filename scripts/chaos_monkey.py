@@ -28,7 +28,6 @@ EXCLUDE_PATTERNS = [
     "gateway",
     "client_",
     "q3_historical_filter",
-    "join",
     "router",
 ]
 

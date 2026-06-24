@@ -120,6 +120,11 @@ q5_test_fixed:
 	docker compose -f docker-compose.yaml down
 .PHONY: q5_test_fixed
 
+chaos:
+	@echo "Chaos Monkey: espera a que levanten todos los containers y empieza a matarlos."
+	python3 scripts/chaos_monkey.py --wait
+.PHONY: chaos
+
 all_switch:
 	@echo Escenarios de prueba:
 	@echo "1) Pruebas con datos fixed: 1 cliente y 1 worker de cada"

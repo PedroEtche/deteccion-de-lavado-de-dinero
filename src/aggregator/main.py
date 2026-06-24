@@ -21,6 +21,7 @@ from .strategies import (
 )
 
 SNAPSHOT_BATCH = 1000
+RESULT_BATCH_SIZE = 5000
 
 CONFIG_PATH = "./config.yaml"
 
@@ -128,6 +129,16 @@ class AggregatorWorker(StatefulWorker):
             self._recover_client_state(client_id)
 
     def _recover_client_state(self, client_id: str) -> None:
+        pending_results = self.state_manager.load_results(client_id)
+        if pending_results:
+            logging.warning("Crash detected during previous flush! Resending atomic results for %s", client_id)
+            self.execute_result(client_id, pending_results)
+            
+            self.strategy.clear_client_state(client_id)
+            self.state_manager.delete_client(client_id)
+            self.received_batches_per_client.pop(client_id, None)
+            return
+        
         snapshot, wal_batches, last_seen_msg = self.state_manager.recover_client(client_id)
 
         if snapshot:
@@ -159,15 +170,17 @@ class AggregatorWorker(StatefulWorker):
             self.received_batches_per_client[client_id] = 0
 
     def flush_state(self, client_id: str) -> None:
-        logging.info(
-            "All EOFs received. Flushing aggregated result for client %s", client_id
-        )
+        logging.info("All EOFs received. Flushing aggregated result for client %s", client_id)
         routed_batches = self.strategy.get_result_for_client(client_id)
+
         if not routed_batches:
             logging.info("No data to flush for client %s", client_id)
         else:
-            # send_groups decide round_robin/broadcast vs sharded segun la config.
-            self.send_groups(client_id, routed_batches)
+            results = self.prepare_results(routed_batches, RESULT_BATCH_SIZE)
+            
+            self.state_manager.save_results(client_id, results)
+            
+            self.execute_result(client_id, results)
 
         self.strategy.clear_client_state(client_id)
         self.state_manager.delete_client(client_id)

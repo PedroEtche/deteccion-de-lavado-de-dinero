@@ -25,11 +25,11 @@ class EofCoordinator:
         client_ids = self.state_manager.get_all_client_ids()
 
         for client_id in client_ids:
-            snapshot, _wal, _seen_msgs = self.state_manager.recover_client(client_id)
-            logging.info("Recovered EOF count for client %s: %s", client_id, snapshot)
-            self.eofs_by_client[client_id] = snapshot
-            
-            if snapshot >= self._expected:
+            eof_count = self.state_manager.load_eof_count(client_id)
+            logging.info("Recovered EOF count for client %s: %s", client_id, eof_count)
+            self.eofs_by_client[client_id] = eof_count
+
+            if eof_count >= self._expected:
                 self.pending_flushes.append(client_id)
 
     def resume_pending_flushes(self) -> None:

@@ -197,7 +197,16 @@ class StatefulWorker(BaseWorker):
         message = self._build_message(message_type, client_id, batch, msg_id=msg_id, sender=self.sender_id)
         self._route_and_send(client_id, message, msg_id)
 
-    def send_groups(self, client_id: str, groups: list, message_type: str = "batch") -> None:
+    def send_groups(self, client_id: str, groups: list, message_type: str = "batch", chunk_size: int = 5000) -> None:
+        result = self.prepare_results(groups, chunk_size)
+        self.execute_result(client_id, result, message_type)
+
+    def prepare_results(self, groups: list, chunk_size: int) -> list:
+        """
+        Consolidates logical groups into physical routing chunks,
+        assigns msg_ids, and returns a JSON-serializable result list.
+        """
+        result = []
         if self.config.routing_strategy == "sharded":
             physical_groups: dict[str, list] = {}
             for shard_key, batch in groups:
@@ -206,14 +215,43 @@ class StatefulWorker(BaseWorker):
                 physical_groups.setdefault(routing_key, []).extend(batch)
                 
             for routing_key, combined_batch in physical_groups.items():
-                msg_id = self._next_msg_id()
-                message = self._build_message(message_type, client_id, combined_batch, msg_id=msg_id, sender=self.sender_id)
-                self._route_and_send(client_id, message, msg_id, shard_routing_key=routing_key)
+                for i in range(0, len(combined_batch), chunk_size):
+                    chunk = combined_batch[i : i + chunk_size]
+                    result.append({
+                        "msg_id": self._next_msg_id(),
+                        "routing_key": routing_key,
+                        "batch": chunk
+                    })
         else:
             flat_batch: list = []
             for _shard_key, batch in groups:
-                flat_batch.extend(batch)
-            self.send(client_id, flat_batch, message_type)
+                if batch:
+                    flat_batch.extend(batch)
+            for i in range(0, len(flat_batch), chunk_size):
+                chunk = flat_batch[i : i + chunk_size]
+                result.append({
+                    "msg_id": self._next_msg_id(),
+                    "routing_key": None,
+                    "batch": chunk
+                })
+        return result
+
+    def execute_result(self, client_id: str, result: list, message_type: str = "batch") -> None:
+        """Translates the saved result dictionaries into RabbitMQ messages directly."""
+        for item in result:
+            message = self._build_message(
+                message_type=message_type, 
+                client_id=client_id, 
+                batch=item["batch"], 
+                msg_id=item["msg_id"], 
+                sender=self.sender_id
+            )
+            self._route_and_send(
+                client_id=client_id, 
+                message=message, 
+                msg_id=item["msg_id"], 
+                shard_routing_key=item.get("routing_key")
+            )
 
     @abstractmethod
     def process_batch(self, client_id: str, batch: list, msg_type: str, msg_id: int, sender: str) -> None:

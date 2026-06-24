@@ -77,6 +77,8 @@ class BaseWorker(ABC):
         ]
         self.output_exchange = self.output_exchanges[0]
 
+        self.eof_coordinator.resume_pending_flushes()
+
         self.input_exchange.start_consuming(self._on_message)
 
     def _start_fail_detection(self):
@@ -187,7 +189,7 @@ class StatefulWorker(BaseWorker):
 
     def _dispatch_payload(self, client_id: str, batch: list, msg_type: str, msg_id: int, sender: str) -> None:
         # Ignore upstream identity, stateful workers only care about the data
-        self.process_batch(client_id, batch, msg_type)
+        self.process_batch(client_id, batch, msg_type, msg_id, sender)
 
     def send(self, client_id: str, batch: list, message_type: str = "batch") -> None:
         if not batch: return
@@ -214,7 +216,7 @@ class StatefulWorker(BaseWorker):
             self.send(client_id, flat_batch, message_type)
 
     @abstractmethod
-    def process_batch(self, client_id: str, batch: list, msg_type: str) -> None:
+    def process_batch(self, client_id: str, batch: list, msg_type: str, msg_id: int, sender: str) -> None:
         pass
 
 
@@ -368,3 +370,17 @@ class StreamWorker(BaseWorker):
     def on_flush(self, client_id: str) -> None:
         """Emitir el resultado final y propagar el EOF aguas abajo."""
         pass
+
+def run_worker(worker) -> int:
+    """Registra los handlers de SIGTERM/SIGINT que paran al worker y arranca el
+    consumo. Centraliza el boilerplate identico de cada main()."""
+
+    def handle_sigterm(_signum, _frame):
+        logging.info("Received SIGTERM signal")
+        worker.stop()
+
+    signal.signal(signal.SIGTERM, handle_sigterm)
+    signal.signal(signal.SIGINT, handle_sigterm)
+
+    worker.start()
+    return 0

@@ -128,10 +128,12 @@ class AggregatorWorker(StatefulWorker):
             self._recover_client_state(client_id)
 
     def _recover_client_state(self, client_id: str) -> None:
-        snapshot, wal_batches = self.state_manager.recover_client(client_id)
+        snapshot, wal_batches, last_seen_msg = self.state_manager.recover_client(client_id)
 
         if snapshot:
             self.strategy.set_client_state(client_id, snapshot)
+
+        self.duplicate_handler.restore_state(client_id, last_seen_msg)
 
         for batch in wal_batches:
             self.strategy.aggregate_batch(batch, client_id)
@@ -139,12 +141,11 @@ class AggregatorWorker(StatefulWorker):
         self.received_batches_per_client[client_id] = len(wal_batches)
         logging.info("Recovered client %s", client_id)
 
-    def process_batch(self, client_id: str, batch: list, msg_type: str) -> None:
+    def process_batch(self, client_id: str, batch: list, msg_type: str, msg_id: int, sender: str) -> None:
         count = self.received_batches_per_client.get(client_id, 0) + 1
         self.received_batches_per_client[client_id] = count
 
-        self.state_manager.append_batch(client_id, batch)
-
+        self.state_manager.append_batch(client_id, batch, msg_id=msg_id, sender=sender)
         logging.info("Processing batch of %d rows for client %s", len(batch), client_id)
         self.strategy.aggregate_batch(batch, client_id)
 
@@ -152,7 +153,8 @@ class AggregatorWorker(StatefulWorker):
             logging.info("Triggering checkpoint snapshot for client %s", client_id)
 
             current_state = self.strategy.get_client_state(client_id)
-            self.state_manager.save_snapshot(client_id, current_state)
+            current_last_seen_msg = self.duplicate_handler.get_state(client_id)
+            self.state_manager.save_snapshot(client_id, current_state, current_last_seen_msg)
 
             self.received_batches_per_client[client_id] = 0
 
@@ -169,7 +171,6 @@ class AggregatorWorker(StatefulWorker):
 
         self.strategy.clear_client_state(client_id)
         self.state_manager.delete_client(client_id)
-
         self.received_batches_per_client.pop(client_id, None)
 
 

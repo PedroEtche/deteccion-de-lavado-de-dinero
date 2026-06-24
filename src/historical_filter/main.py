@@ -118,7 +118,7 @@ class HistoricalAverageFilter(StreamWorker):
         # su snapshot. Las candidatas ya estan en el WAL (se leen en el flush) y
         # el conteo de EOFs lo recupera el EofCoordinator por su cuenta.
         for client_id in self.thresholds_state.get_all_client_ids():
-            snapshot, _ = self.thresholds_state.recover_client(client_id)
+            snapshot, _wal, _seen_msgs = self.thresholds_state.recover_client(client_id)
             if snapshot:
                 self.thresholds_by_client[client_id] = snapshot
                 logging.info("Recovered thresholds for client %s", client_id)
@@ -145,21 +145,23 @@ class HistoricalAverageFilter(StreamWorker):
             self.output_mw.close()
 
     def handle_data(self, client_id: str, msg_type: str, batch: list, msg_id: int, sender: str) -> None:
-        self._accumulate(client_id, msg_type, batch)
+        self._accumulate(client_id, msg_type, batch, msg_id=msg_id, sender=sender)
 
-    def _accumulate(self, client_id: str, msg_type: str, batch: list) -> None:
+    def _accumulate(self, client_id: str, msg_type: str, batch: list, msg_id: int, sender: str) -> None:
         if msg_type == AVERAGES_MSG_TYPE:
             thresholds = self.thresholds_by_client.setdefault(client_id, {})
             for avg in batch:
                 fmt = avg["payment_format"]
                 thresholds[fmt] = avg["average_amount"] / self.config.threshold_divisor
+            
             # Snapshot de los umbrales (antes del ack) para poder recuperarlos.
-            self.thresholds_state.save_snapshot(client_id, thresholds)
+            current_seen_msgs = self.duplicate_handler.get_state(client_id)
+            self.thresholds_state.save_snapshot(client_id, thresholds, current_seen_msgs)
             logging.info("Stored %d averages for client %s", len(batch), client_id)
 
         elif msg_type == CANDIDATES_MSG_TYPE:
             # Las candidatas van directo al WAL en disco (con fsync), no a memoria.
-            self.candidates_state.append_batch(client_id, batch)
+            self.candidates_state.append_batch(client_id, batch, msg_id=msg_id, sender=sender)
             logging.info(
                 "Buffered %d candidate txs for client %s", len(batch), client_id
             )

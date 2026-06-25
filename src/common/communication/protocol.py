@@ -40,16 +40,11 @@ STREAM_TRANSACTIONS = 1
 STREAM_ACCOUNTS = 2
 
 
-def send_csv(sock, csv_path, batch_size, stream, *, sender):
+def read_csv_batches(csv_path, batch_size, stream):
     """
-    Lee un CSV, lo convierte a TransactionRow/AccountRow según `stream`
-    y lo envía en batches usando el protocolo de internal.py.
-
-    - sender: identificador estable del emisor (ej. "client"); obligatorio
-              porque serialize() lo exige en todo mensaje que sale al cable.
-    - client: identificador del cliente (requerido por build_raw_* )
-    - msg_id_fn: callable sin args que genera un msg_id por batch.
-                 Por defecto usa uuid.uuid4().
+    Generador que lee un CSV y hace yield de batches (listas de TransactionRow o
+    AccountRow según `stream`). Es la mitad "lectora" de send_csv: no toca la red,
+    así el cliente puede asignar un msg_id por batch y decidir cuáles enviar.
     """
     if batch_size <= 0:
         raise ValueError("batch_size must be > 0")
@@ -57,11 +52,9 @@ def send_csv(sock, csv_path, batch_size, stream, *, sender):
     if stream == STREAM_TRANSACTIONS:
         field_map = _TRANSACTION_FIELD_MAP
         row_cls = TransactionRow
-        build_fn = build_raw_transactions_message
     elif stream == STREAM_ACCOUNTS:
         field_map = _ACCOUNT_FIELD_MAP
         row_cls = AccountRow
-        build_fn = build_raw_accounts_message
     else:
         raise ValueError(f"Unknown stream: {stream}")
 
@@ -70,14 +63,40 @@ def send_csv(sock, csv_path, batch_size, stream, *, sender):
 
         batch = []
         for raw_row in reader:
-            row = _map_row(raw_row, field_map, row_cls)
-            batch.append(row)
+            batch.append(_map_row(raw_row, field_map, row_cls))
             if len(batch) >= batch_size:
-                _send_batch(sock, batch, build_fn, sender)
+                yield batch
                 batch = []
 
         if batch:
-            _send_batch(sock, batch, build_fn, sender)
+            yield batch
+
+
+def build_stream_message(stream, *, client, msg_id, batch, sender):
+    """Construye el mensaje raw correspondiente al `stream` (transactions o
+    accounts). Despacha al builder de internal.py según el tipo de stream."""
+    if stream == STREAM_TRANSACTIONS:
+        build_fn = build_raw_transactions_message
+    elif stream == STREAM_ACCOUNTS:
+        build_fn = build_raw_accounts_message
+    else:
+        raise ValueError(f"Unknown stream: {stream}")
+    return build_fn(client=client, msg_id=msg_id, batch=batch, sender=sender)
+
+
+def send_csv(sock, csv_path, batch_size, stream, *, sender):
+    """
+    Lee un CSV, lo convierte a TransactionRow/AccountRow según `stream`
+    y lo envía en batches usando el protocolo de internal.py.
+
+    - sender: identificador estable del emisor (ej. "client"); obligatorio
+              porque serialize() lo exige en todo mensaje que sale al cable.
+    """
+    for batch in read_csv_batches(csv_path, batch_size, stream):
+        msg = build_stream_message(
+            stream, client=None, msg_id=None, batch=batch, sender=sender
+        )
+        sock.send_bytes(serialize(msg))
 
 
 def send_eof(sock, *, client=None, msg_id=None, sender):
@@ -128,8 +147,3 @@ def _map_row(raw_row, field_map, row_cls):
         if value:
             kwargs[field_name] = value
     return row_cls(**kwargs)
-
-
-def _send_batch(sock, batch, build_fn, sender):
-    msg = build_fn(client=None, msg_id=None, batch=batch, sender=sender)
-    sock.send_bytes(serialize(msg))

@@ -1,193 +1,9 @@
-# import csv
-# import dataclasses
-# import logging
-# import os
-# import signal
-# import threading
-# import time
-
-# from src.common.communication import (
-#     STREAM_ACCOUNTS,
-#     STREAM_TRANSACTIONS,
-#     connect,
-#     deserialize,
-#     send_csv,
-#     send_eof,
-# )
-
-# _CONNECT_RETRY_DELAY = 1.0
-# _CONNECT_MAX_RETRIES = 30
-# SERVER_HOST = os.environ["SERVER_HOST"]
-# SERVER_PORT = int(os.environ["SERVER_PORT"])
-# ACCOUNTS_PATH = os.environ["ACCOUNTS_PATH"]
-# TRANSACTIONS_PATH = os.environ["TRANSACTIONS_PATH"]
-# BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "500"))
-# OUTPUT_PATH = os.environ["OUTPUT_PATH"]
-
-
-# def _connect_with_retry(host, port):
-#     for attempt in range(1, _CONNECT_MAX_RETRIES + 1):
-#         try:
-#             return connect(host, port)
-#         except (ConnectionRefusedError, OSError) as exc:
-#             if attempt == _CONNECT_MAX_RETRIES:
-#                 raise
-#             logging.info(
-#                 "Connection to %s:%s refused (attempt %d/%d): %s. Retrying in %ss",
-#                 host,
-#                 port,
-#                 attempt,
-#                 _CONNECT_MAX_RETRIES,
-#                 exc,
-#                 _CONNECT_RETRY_DELAY,
-#             )
-#             time.sleep(_CONNECT_RETRY_DELAY)
-
-
-# def persist_rows(output_file, batch):
-#     with open(output_file, "a") as csvfile:
-#         csv_writer = csv.writer(csvfile, delimiter=",", quotechar='"')
-#         for row in batch:
-#             row_dict = dataclasses.asdict(row) if dataclasses.is_dataclass(row) else row
-
-#             csv_writer.writerow(v for v in row_dict.values() if v is not None)
-
-
-# # Tabla tipo-de-resultado -> archivo: evita las 5 ramas repetidas del if/elif
-# # y hace que agregar/quitar una query sea cambiar una sola linea.
-# _RESULT_FILES = {
-#     "q1_result": "q1.csv",
-#     "q2_result": "q2.csv",
-#     "q3_result": "q3.csv",
-#     "q4_result": "q4.csv",
-#     "q5_result": "q5.csv",
-# }
-# _EXPECTED_RESULTS = len(_RESULT_FILES)  # un EOF por query
-
-
-# class Client:
-#     def __init__(self, server_host, server_port, output_path):
-#         self.output_path = output_path
-#         self.closed = False
-#         self.server_socket = _connect_with_retry(server_host, server_port)
-#         signal.signal(signal.SIGTERM, self.handle_sigterm)
-#         # El lector SOLO lee y persiste; nunca toca el ciclo de vida del socket.
-#         # El dueño del socket es el thread principal: lo crea y lo cierra.
-#         self._reader_thread = threading.Thread(
-#             target=self.recv_results,
-#             daemon=True,  # si el proceso muere, el thread no bloquea el exit
-#         )
-#         self._reader_thread.start()
-
-#     def handle_sigterm(self, signum, frame):
-#         # Corre en el thread principal. NO cierra ni hace join: solo marca el
-#         # cierre y despierta al lector bloqueado en recv() cerrando el socket.
-#         # El thread principal sigue en start() y hace el cierre ordenado, asi
-#         # nunca hay dos threads tocando el socket a la vez.
-#         logging.info("Received SIGTERM signal")
-#         self.closed = True
-#         try:
-#             self.server_socket.shutdown("rdwr")
-#         except OSError:
-#             pass
-
-#     def start(self, accounts_path, transactions_path, batch_size):
-#         logging.info("Sending data")
-#         try:
-#             send_csv(
-#                 self.server_socket,
-#                 accounts_path,
-#                 batch_size,
-#                 STREAM_ACCOUNTS,
-#                 sender="client",
-#             )
-#             send_csv(
-#                 self.server_socket,
-#                 transactions_path,
-#                 batch_size,
-#                 STREAM_TRANSACTIONS,
-#                 sender="client",
-#             )
-#             send_eof(self.server_socket, sender="client")
-#             logging.info("Datasets sent; waiting for results")
-#         finally:
-#             # Cerramos solo la escritura: el server sabe que no hay mas datos,
-#             # pero seguimos leyendo resultados. Puede fallar si un SIGTERM ya
-#             # hizo shutdown del socket; en ese caso no hay nada que señalizar.
-#             try:
-#                 self.server_socket.shutdown("wr")
-#             except OSError:
-#                 pass
-
-#         # El lector termina al juntar los EOFs (o si el server corta). Recien
-#         # cuando termino de persistir cerramos el fd: UN solo close, UN solo thread.
-#         self._reader_thread.join()
-#         self.server_socket.close()
-
-#     def recv_results(self):
-#         logging.info("Receiving results")
-#         pending_eofs = _EXPECTED_RESULTS
-#         # 'self.closed' lo escribe el handler (mismo proceso, GIL mediante) y lo
-#         # lee este thread: alcanza para cortar el loop si el shutdown nos desperto.
-#         while pending_eofs > 0 and not self.closed:
-#             try:
-#                 msg = self.server_socket.recv_bytes()
-#             except ConnectionError:
-#                 logging.info(
-#                     "Server closed connection with %d EOF(s) still pending",
-#                     pending_eofs,
-#                 )
-#                 return
-
-#             if self._persist_message(deserialize(msg)):
-#                 pending_eofs -= 1
-
-#     def _persist_message(self, decoded):
-#         """Persiste un batch. Devuelve True solo si era el EOF final de una query."""
-#         file_name = _RESULT_FILES.get(decoded["type"])
-#         if file_name is None:
-#             logging.info("Unexpected Message: %s", decoded)
-#             return False
-#         batch = decoded["payload"]["batch"]
-#         if decoded["eof"]:
-#             logging.info("Query result EOF: %s", decoded)
-#             if len(batch) > 0:
-#                 persist_rows(self.output_path + file_name, batch)
-#             return True
-#         persist_rows(self.output_path + file_name, batch)
-#         return False
-
-
-# def main() -> int:
-#     execution_time = time.time()
-#     logging.basicConfig(level=logging.INFO)
-#     for i in range(1, 6):
-#         # Create 5 output files
-#         file_name = f"q{i}.csv"
-#         output_file = os.path.join(OUTPUT_PATH, file_name)
-#         file = open(output_file, "w")
-#         file.close()
-
-#     client = Client(SERVER_HOST, SERVER_PORT, OUTPUT_PATH)
-#     client.start(ACCOUNTS_PATH, TRANSACTIONS_PATH, BATCH_SIZE)
-
-#     execution_time = time.time() - execution_time
-#     minutes, seconds = divmod(execution_time, 60)
-#     logging.info("Client FINISH in: %d minutes and %f seconds", minutes, seconds)
-#     return 0
-
-
-# if __name__ == "__main__":
-#     main()
-
-
 import csv
 import dataclasses
-import json
 import logging
 import os
 import signal
-import tempfile
+import threading
 import time
 
 from src.common.communication import (
@@ -255,148 +71,203 @@ _RESULT_FILES = {
 _EXPECTED_RESULTS = len(_RESULT_FILES)  # un EOF por query (5 queries)
 
 
+class GatewayConnection:
+    """Conexion al gateway compartida por el lector y el escritor.
+
+    Los dos threads usan el mismo socket a la vez: uno solo lee y el otro solo
+    escribe, lo cual es seguro. El problema es la reconexion: si el gateway se
+    cae, las dos operaciones fallan casi al mismo tiempo y los dos threads
+    intentarian reconectar. Para que reconecte UNO solo usamos un lock y un
+    contador de 'generacion': cada socket nuevo tiene una generacion mayor.
+
+    Cuando una operacion falla, el thread llama a recover() pasando la generacion
+    del socket que estaba usando. Si esa generacion sigue siendo la actual, es el
+    primero en enterarse y reconecta de verdad (bajo el lock). Si ya avanzo, otro
+    thread reconecto mientras este esperaba el lock, asi que no hace nada y toma
+    el socket nuevo.
+
+    El handshake (hello/hello_ack) tambien corre bajo el lock dentro de recover(),
+    asi nunca hay dos recv() a la vez sobre el mismo socket: el thread que no
+    reconecta esta bloqueado en el lock o todavia en su recv() del socket viejo,
+    que al cerrarse lo despierta con error."""
+
+    def __init__(self, host, port, sender):
+        self._host = host
+        self._port = port
+        self._sender = sender
+        self._lock = threading.Lock()
+        self._generation = 0
+        self._sock = None
+        self.client_id = None
+        self.resume_from = -1
+        self.closed = False
+
+    def connect(self):
+        """Primera conexion + handshake. Corre en el thread principal antes de
+        arrancar el lector."""
+        self._sock = _connect_with_retry(self._host, self._port)
+        self._handshake()
+
+    def generation(self):
+        return self._generation
+
+    def send_message(self, message):
+        """Serializa y envia. Puede lanzar ConnectionError/OSError si el socket
+        se cayo; el que llama reacciona con recover()."""
+        self._sock.send_bytes(serialize(message))
+
+    def recv_message(self):
+        """Recibe y deserializa. Puede lanzar ConnectionError/OSError; el que
+        llama reacciona con recover()."""
+        return deserialize(self._sock.recv_bytes())
+
+    def recover(self, seen_generation):
+        """Garantiza un socket vivo tras una falla. Reconecta solo si nadie lo
+        hizo ya (la generacion no cambio desde que el que llama empezo a usar el
+        socket). El otro thread, mientras tanto, espera en el lock."""
+        with self._lock:
+            if self.closed or seen_generation != self._generation:
+                # Otro thread ya reconecto (o nos estamos cerrando): el socket
+                # actual ya es el bueno, no hay nada que hacer.
+                return
+            self._reconnect_socket()
+            self._handshake()
+            self._generation += 1
+            logging.info(
+                "Reconnected (generation=%d, client_id=%s, resume_from=%d)",
+                self._generation,
+                self.client_id,
+                self.resume_from,
+            )
+
+    def shutdown(self):
+        """Despierta a los threads bloqueados en recv()/send() cerrando el
+        socket. Lo usa el handler de SIGTERM."""
+        self.closed = True
+        try:
+            self._sock.shutdown("rdwr")
+        except OSError:
+            pass
+
+    def close(self):
+        try:
+            self._sock.close()
+        except OSError:
+            pass
+
+    # ----- helpers internos -----
+
+    def _reconnect_socket(self):
+        try:
+            self._sock.close()
+        except OSError:
+            pass
+        self._sock = _connect_with_retry(self._host, self._port)
+
+    def _handshake(self):
+        """Manda `hello` (con nuestro client_id si ya lo tenemos, o vacio para
+        que el gateway nos asigne uno) y espera `hello_ack`, que confirma el
+        client_id y trae `resume_from`: el ultimo msg_id que el gateway reenvio
+        downstream de forma durable. Streameamos desde resume_from + 1."""
+        self._sock.send_bytes(
+            serialize(build_hello_message(uuid=self.client_id, sender=self._sender))
+        )
+        ack = deserialize(self._sock.recv_bytes())
+        self.client_id = ack.get("client")
+        self.resume_from = ack.get("resume_from", -1)
+        logging.info(
+            "Handshake done; client_id=%s resume_from=%d",
+            self.client_id,
+            self.resume_from,
+        )
+
+
 class Client:
-    """Cliente con envio en streaming hacia el gateway.
+    """Cliente con dos threads sobre una unica conexion al gateway:
 
-    Handshake: al conectar manda `hello` (con su UUID si lo tiene, o vacio para
-    que el gateway le asigne uno) y espera `hello_ack`, que ademas trae
-    `resume_from`: el ultimo msg_id que el gateway reenvio downstream de forma
-    durable. El cliente streamea desde resume_from + 1.
+    - El thread principal (escritor) streamea accounts + transactions y al final
+      manda el EOF. Si la conexion se cae, reconecta y re-streamea salteando lo
+      que el gateway ya tiene (resume_from). Los workers deduplican.
+    - Un thread lector recibe los resultados, los persiste y cuenta sus EOF.
 
-    Envio de datos: streamea accounts + transactions con un msg_id monotonico.
-    Si la conexion se cae, reconecta (el handshake le
-    devuelve el nuevo punto de reanudacion) y re-streamea salteando lo ya
-    reenviado. Los workers deduplican
-
-    EOF: stop-and-wait (barrera). Resultados: ver _recv_results."""
+    Si el gateway se cae, lo detecta cualquiera de los dos threads y reconecta
+    UNO solo (ver GatewayConnection). Si el cliente muere, arranca de cero: no
+    persiste progreso. El dedup de resultados es solo en memoria, para no
+    reescribir filas si el gateway reenvia resultados tras su propio restart."""
 
     def __init__(self, server_host, server_port, output_path):
-        self.server_host = server_host
-        self.server_port = server_port
         self.output_path = output_path
         self.closed = False
 
-        # Cursor de reanudacion de datos: ultimo msg_id que el gateway ya tiene.
-        # Lo fija el hello_ack (resume_from); -1 = empezar de cero.
-        self._cursor = -1
-        # msg_id del EOF (= total de batches), calculado al terminar el stream.
+        self.conn = GatewayConnection(server_host, server_port, _SENDER)
+
+        # msg_id del EOF de entrada (= total de batches). Lo fija el escritor al
+        # terminar de streamear; el lector lo usa para reenviar el EOF tras
+        # reconectar en la fase de resultados.
         self._eof_msg_id = None
-        self._pending_eofs = 5
-        self._client_id = None
+        self._pending_eofs = _EXPECTED_RESULTS
 
         # Dedup de resultados por (sender, msg_id): evita reescribir filas en los
-        # CSV ante (p.ej. tras un restart del gateway).
+        # CSV ante una reentrega (p.ej. tras un restart del gateway).
         self._dedup = DuplicateHandler()
 
-        self.sock = _connect_with_retry(server_host, server_port)
         signal.signal(signal.SIGTERM, self.handle_sigterm)
 
     def handle_sigterm(self, signum, frame):
         logging.info("Received SIGTERM signal")
         self.closed = True
-        try:
-            self.sock.shutdown("rdwr")
-        except OSError:
-            pass
-
-    # ----- handshake / conexion -----
-
-    def _handshake(self):
-        """Manda `hello` y espera `hello_ack`, fijando self.client_id. Reintenta
-        reconectando ante fallos de socket."""
-        while not self.closed:
-            try:
-                self.sock.send_bytes(
-                    serialize(build_hello_message(uuid=self.uuid, sender=_SENDER))
-                )
-                ack = deserialize(self.sock.recv_bytes())
-                self._client_id = ack.get("client")
-
-                # Punto de reanudacion de datos que dicta el gateway.
-                self._cursor = ack.get("resume_from", -1)
-                logging.info(
-                    "Handshake done; client_id=%s resume_from=%d",
-                    self._client_id,
-                    self._cursor,
-                )
-                return
-            except (ConnectionError, OSError) as exc:
-                logging.warning("Handshake failed: %s; reconnecting", exc)
-                self._reconnect()
-
-    def _reconnect(self):
-        """Reconecta y rehace el handshake antes de seguir enviando datos."""
-        self._reconnect_socket()
-        self._handshake()
-        logging.info("Reconnected and re-handshaked (client_id=%s)", self._client_id)
-
-    def _reconnect_socket(self):
-        try:
-            self.sock.close()
-        except OSError:
-            pass
-        self.sock = _connect_with_retry(self.server_host, self.server_port)
-
-    # ----- envio de datos (streaming) -----
+        self.conn.shutdown()
 
     def start(self, accounts_path, transactions_path, batch_size):
-        self._handshake()
-        # Ya tenemos client_id definitivo: restauramos el estado de dedup de
-        # resultados persistido (vacio en una corrida nueva).
-        logging.info(
-            "Streaming data (client_id=%s, resume_from=%d)",
-            self._client_id,
-            self._cursor,
-        )
+        # 1) Handshake inicial en el thread principal.
+        self.conn.connect()
 
-        self._reader_thread = threading.Thread(
-            target=self._recv_results,
-            daemon=True,  # si el proceso muere, el thread no bloquea el exit
-        )
-        self._reader_thread.start()
+        # 2) Arrancamos el lector lo antes posible: antes de empezar a streamear,
+        #    asi nunca quedan resultados sin leer.
+        reader_thread = threading.Thread(target=self._recv_results, daemon=True)
+        reader_thread.start()
 
-        self._eof_msg_id = self._stream_data(
-            accounts_path, transactions_path, batch_size
-        )
-        if self.closed:
-            return
+        # 3) El propio thread principal hace de escritor.
+        self._send_loop(accounts_path, transactions_path, batch_size)
 
-        # El EOF es stop-and-wait. Si el gateway ya lo tenia (cursor al dia con el
-        # EOF), saltamos directo a resultados.
-        if self._cursor < self._eof_msg_id:
-            logging.info("Data streamed; sending EOF (msg_id=%d)", self._eof_msg_id)
-            self._send_eof_reliable(self._eof_msg_id)  # TODO: Eliminar stop-n-wait
-        else:
-            logging.info("EOF already acknowledged (cursor=%d); skipping", self._cursor)
         if self.closed:
             return
 
         logging.info("Datasets sent; waiting for results")
-        self._reader_thread.join()
-        self.sock.close()
+        reader_thread.join()
+        self.conn.close()
 
-    def _stream_data(self, accounts_path, transactions_path, batch_size):
-        """Streamea accounts y luego transactions sin esperar ACK por batch.
-        Ante una caida reconecta (el handshake actualiza self._cursor con el nuevo
-        resume_from) y re-streamea desde el inicio salteando lo ya reenviado.
-        Devuelve el msg_id que le corresponde al EOF (= total de batches)."""
+    # ----- escritor -----
+
+    def _send_loop(self, accounts_path, transactions_path, batch_size):
+        """Streamea todos los batches y manda el EOF. Ante una caida reconecta
+        (el handshake actualiza resume_from) y reintenta desde el principio
+        salteando lo ya enviado."""
         while not self.closed:
+            seen_generation = self.conn.generation()
             try:
-                return self._send_all_batches(
+                eof_msg_id = self._stream_all_batches(
                     accounts_path, transactions_path, batch_size
                 )
-            except (ConnectionError, OSError) as exc:
-                logging.warning(
-                    "Connection lost streaming data (cursor=%d): %s; reconnecting",
-                    self._cursor,
-                    exc,
+                if self.closed:
+                    return
+                self._eof_msg_id = eof_msg_id
+                logging.info("Data streamed; sending EOF (msg_id=%d)", eof_msg_id)
+                self.conn.send_message(
+                    build_eof_message(
+                        client=self.conn.client_id,
+                        msg_id=eof_msg_id,
+                        sender=_SENDER,
+                    )
                 )
-                self._reconnect()
-        return self._cursor + 1
+                return
+            except (ConnectionError, OSError) as exc:
+                logging.warning("Connection lost while sending: %s; reconnecting", exc)
+                self.conn.recover(seen_generation)
 
-    def _send_all_batches(self, accounts_path, transactions_path, batch_size):
+    def _stream_all_batches(self, accounts_path, transactions_path, batch_size):
         """Asigna un msg_id monotonico desde 0 a cada batch (accounts y luego
-        transactions) y envia solo los > self._cursor (los <= ya los tiene el
+        transactions) y envia solo los > resume_from (los <= ya los tiene el
         gateway). Devuelve el total de batches = msg_id del EOF."""
         msg_id = 0
         streams = (
@@ -405,16 +276,14 @@ class Client:
         )
         for stream, path in streams:
             for batch in read_csv_batches(path, batch_size, stream):
-                if msg_id > self._cursor:
-                    self.sock.send_bytes(
-                        serialize(
-                            build_stream_message(
-                                stream,
-                                client=self.client_id,
-                                msg_id=msg_id,
-                                batch=batch,
-                                sender=_SENDER,
-                            )
+                if msg_id > self.conn.resume_from:
+                    self.conn.send_message(
+                        build_stream_message(
+                            stream,
+                            client=self.conn.client_id,
+                            msg_id=msg_id,
+                            batch=batch,
+                            sender=_SENDER,
                         )
                     )
                 msg_id += 1
@@ -422,64 +291,29 @@ class Client:
                     return msg_id
         return msg_id
 
-    def _send_eof_reliable(self, msg_id):
-        """Envia el EOF (stop-and-wait) y bloquea hasta su ACK. Ante una caida
-        reconecta y reenvia el mismo msg_id; es idempotente (el gateway re-forwarda
-        deduplicado y re-persiste el cursor)."""
-        payload = serialize(
-            build_eof_message(client=self.client_id, msg_id=msg_id, sender=_SENDER)
-        )
-        while not self.closed:
-            try:
-                self.sock.send_bytes(payload)
-                self._wait_for_ack(msg_id)
-                return
-            except (ConnectionError, OSError) as exc:
-                logging.warning(
-                    "Connection lost waiting EOF ack (msg_id %d): %s; reconnecting",
-                    msg_id,
-                    exc,
-                )
-                self._reconnect()
-
-    def _wait_for_ack(self, msg_id):
-        """Recibe hasta el ACK de `msg_id`. True con el ACK correcto, False si el
-        cliente se cierra. Propaga ConnectionError si el socket se cae."""
-        while not self.closed:
-            decoded = deserialize(self.sock.recv_bytes())
-            if decoded.get("type") == "ack":
-                if decoded.get("msg_id") == msg_id:
-                    return True
-                logging.debug(
-                    "Ignoring stale ACK %s (waiting %d)", decoded.get("msg_id"), msg_id
-                )
-                continue
-            # No deberian llegar resultados durante la ingesta, pero si llegan
-            # los persistimos para no perderlos.
-            if self._persist_message(decoded):
-                self._count_eof()
-        return False
+    # ----- lector -----
 
     def _recv_results(self):
         logging.info("Receiving results")
         while self._pending_eofs > 0 and not self.closed:
+            seen_generation = self.conn.generation()
             try:
-                msg = self.sock.recv_bytes()
+                decoded = self.conn.recv_message()
             except (ConnectionError, OSError) as exc:
                 if self.closed:
                     return
                 # El gateway se cayo mientras recibiamos resultados: reconectamos
-                # (esperando a que vuelva) y le reenviamos nuestro EOF para
-                # re-señalar que ya terminamos de enviar y seguimos esperando
-                # resultados. Proseguimos donde quedamos (pending_eofs es durable).
+                # (esperando a que vuelva) y le reenviamos el EOF para reseñalar
+                # que ya terminamos de enviar. Seguimos donde quedamos.
                 logging.warning(
                     "Connection lost receiving results (%d pending): %s; reconnecting",
                     self._pending_eofs,
                     exc,
                 )
-                self._reconnect()
+                self.conn.recover(seen_generation)
+                self._resend_eof()
                 continue
-            decoded = deserialize(msg)
+
             msg_type = decoded.get("type")
             if msg_type in ("ack", "hello_ack"):
                 continue
@@ -494,32 +328,25 @@ class Client:
                 self._pending_eofs = 0
                 return
             if self._persist_message(decoded):
-                self._count_eof()
+                self._pending_eofs -= 1
 
     def _resend_eof(self):
         """Reenvia el EOF de entrada con su msg_id original tras reconectar en la
-        fase de resultados. Idempotente: los workers deduplican por
-        (gateway, msg_id) y el gateway por su progreso durable de resultados. Si
-        el socket vuelve a caerse, el proximo recv del loop lo detecta y reconecta."""
+        fase de resultados. Idempotente: el gateway deduplica por su progreso
+        durable. Si el socket vuelve a caerse, el proximo recv del loop lo detecta
+        y reconecta."""
         if self._eof_msg_id is None:
             return
         try:
-            self.sock.send_bytes(
-                serialize(
-                    build_eof_message(
-                        client=self.client_id,
-                        msg_id=self._eof_msg_id,
-                        sender=_SENDER,
-                    )
+            self.conn.send_message(
+                build_eof_message(
+                    client=self.conn.client_id,
+                    msg_id=self._eof_msg_id,
+                    sender=_SENDER,
                 )
             )
         except (ConnectionError, OSError):
             pass
-
-    def _count_eof(self):
-        """Descuenta un EOF de resultado ya recibido y persiste el progreso."""
-        self._pending_eofs -= 1
-        self._progress.set_pending_eofs(self._pending_eofs)
 
     def _persist_message(self, decoded):
         """Persiste un batch. Devuelve True solo si era el EOF final (no visto
@@ -533,7 +360,7 @@ class Client:
 
         sender = decoded.get("sender")
         msg_id = decoded.get("msg_id")
-        if self._dedup.is_duplicate(self.client_id, sender, msg_id):
+        if self._dedup.is_duplicate(self.conn.client_id, sender, msg_id):
             logging.debug(
                 "Duplicate result from %s msg_id %s; skipping", sender, msg_id
             )
@@ -548,8 +375,7 @@ class Client:
         else:
             persist_rows(self.output_path + file_name, batch)
 
-        self._dedup.mark_seen(self.client_id, sender, msg_id)
-        self._progress.set_received_results(self._dedup.get_state(self.client_id))
+        self._dedup.mark_seen(self.conn.client_id, sender, msg_id)
         return is_eof
 
 

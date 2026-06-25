@@ -64,4 +64,11 @@ class EofCoordinator:
             self.state_manager.delete_client(client_id)
             
         return client_eofs
+
+    def clear_client(self, client_id: str) -> None:
+        """
+        Deletes the state for a specific client.
+        """
+        self.eofs_by_client.pop(client_id, None)
+        self.state_manager.delete_client(client_id)
         

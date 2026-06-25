@@ -17,7 +17,7 @@ from .strategies import (
     QueryResultStrategy,
 )
 
-SNAPSHOT_BATCH = 1000
+SNAPSHOT_BATCH = 100
 
 CONFIG_PATH = "./config.yaml"
 
@@ -188,17 +188,16 @@ class JoinWorker(StatefulWorker):
 
         self._execute_join_results(client_id, [final_msg])
 
-        # --- THE CLEANUP ---
-        self.state_manager.delete_client(client_id)
-        self.received_batches_per_client.pop(client_id, None)
+        self.clear_client_state(client_id)
         
     def _execute_join_results(self, client_id: str, results: list) -> None:
         """Translates the saved outbox dictionaries into messages directly."""
         for message in results:
-            # Since final_msg is fully constructed by the strategy, 
-            # we just dispatch it using the exact locked msg_id.
             self._route_and_send(client_id, message, msg_id=message["msg_id"])
 
+    def clear_client_state(self, client_id: str) -> None:
+        self.state_manager.delete_client(client_id)
+        self.received_batches_per_client.pop(client_id, None)
 
 def main() -> int:
     config = init_config()

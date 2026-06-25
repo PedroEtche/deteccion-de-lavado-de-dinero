@@ -256,9 +256,7 @@ class HistoricalAverageFilter(StreamWorker):
         # Estado del cliente ya consumido: liberar candidatas (WAL + checkpoint) y
         # umbrales (snapshot) en disco. El estado de EOF lo borra el EofCoordinator
         # despues de este on_flush, asi el trigger es lo ultimo en irse.
-        self.thresholds_by_client.pop(client_id, None)
-        self.candidates_state.delete_client(client_id)
-        self.thresholds_state.delete_client(client_id)
+        self.clear_client_state(client_id)
 
     def _send_result_batch(self, client_id: str, result: list, msg_id: int) -> None:
         # msg_type "batch": tipo generico ya usado entre workers (group,
@@ -276,6 +274,11 @@ class HistoricalAverageFilter(StreamWorker):
         # Round-robin determinista: worker destino = msg_id % N.
         target_worker = (msg_id % self.config.num_downstream_workers) + 1
         self.output_mw.send(out_msg, routing_key=f"worker_{target_worker}")
+
+    def clear_client_state(self, client_id: str) -> None:
+        self.thresholds_by_client.pop(client_id, None)
+        self.candidates_state.delete_client(client_id)
+        self.thresholds_state.delete_client(client_id)
 
 def main() -> int:
     config = init_config()

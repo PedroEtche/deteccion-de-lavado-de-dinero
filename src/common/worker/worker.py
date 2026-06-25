@@ -11,6 +11,7 @@ from src.common.communication.internal import (
     build_raw_transactions_message,
     deserialize,
     serialize,
+    build_delete_client_message,
 )
 from src.common.duplicate_handler import DuplicateHandler
 from src.common.eof import EofCoordinator
@@ -107,8 +108,12 @@ class BaseWorker(ABC):
             if msg_type == "eof":
                 logging.info("Received EOF from upstream for client %s", client_id)
                 self.eof_coordinator.handle_eof(client_id)
+
+            elif msg_type == "delete_client":
+                logging.info("Received delete_client for client %s", client_id)
+                self._internal_delete_client(client_id)
+
             else:
-                logging.info("Received message of type %s for client %s", msg_type, client_id)
                 batch = decoded.get("payload", {}).get("batch", [])
                 
                 self._dispatch_payload(client_id, batch, msg_type, msg_id, sender)
@@ -136,6 +141,23 @@ class BaseWorker(ABC):
         eof_msg = serialize(eof_message)
         for exchange in self.output_exchanges:
             exchange.send(eof_msg, routing_key="eof_broadcast")
+
+    def _internal_delete_client(self, client_id: str, msg_id: int) -> None:
+        logging.info("Deleting state for client %s", client_id)
+        self.clear_client_state(client_id)
+
+        self.eof_coordinator.clear_client(client_id)
+        self.duplicate_handler.clear_client(client_id)
+
+        self._propagate_delete_client(client_id, msg_id)
+
+    def _propagate_delete_client(self, client_id: str, msg_id: int) -> None:
+        delete_message = build_delete_client_message(
+            client=client_id, msg_id=msg_id, sender=self.sender_id
+        )
+        out_msg = serialize(delete_message)
+        for exchange in self.output_exchanges:
+            exchange.send(out_msg, routing_key="eof_broadcast")
 
     def stop(self) -> None:
         self._running = False
@@ -178,6 +200,10 @@ class BaseWorker(ABC):
 
     @abstractmethod
     def flush_state(self, client_id: str) -> None:
+        pass
+
+    @abstractmethod
+    def clear_client_state(self, client_id: str) -> None:
         pass
 
 

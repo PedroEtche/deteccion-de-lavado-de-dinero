@@ -122,9 +122,9 @@ class Payload:
         return cls(**data)
 
 
-# @dataclass
-# class Q1ResultRow(Payload):
-
+@dataclass
+class DeleteClient(Payload):
+    client_id: str
 
 @dataclass
 class Q2ResultRow(Payload):
@@ -353,6 +353,9 @@ def build_results_for_query(query_number: int, batch: list, eof: bool, client: s
     msg["eof"] = eof
     return msg
 
+def build_delete_client_message(client_id: str, sender: str):
+    """Wrapper for building delete client message"""
+    return build_message("delete_client", payload={"client_id": client_id}, sender=sender)
 
 def serialize(message):
     _validate_message(message, require_sender=True)

@@ -142,18 +142,18 @@ class BaseWorker(ABC):
         for exchange in self.output_exchanges:
             exchange.send(eof_msg, routing_key="eof_broadcast")
 
-    def _internal_delete_client(self, client_id: str, msg_id: int) -> None:
+    def _internal_delete_client(self, client_id: str) -> None:
         logging.info("Deleting state for client %s", client_id)
         self.clear_client_state(client_id)
 
         self.eof_coordinator.clear_client(client_id)
         self.duplicate_handler.clear_client(client_id)
 
-        self._propagate_delete_client(client_id, msg_id)
+        self._propagate_delete_client(client_id)
 
-    def _propagate_delete_client(self, client_id: str, msg_id: int) -> None:
+    def _propagate_delete_client(self, client_id: str) -> None:
         delete_message = build_delete_client_message(
-            client=client_id, msg_id=msg_id, sender=self.sender_id
+            client=client_id, msg_id=self._next_msg_id(), sender=self.sender_id
         )
         out_msg = serialize(delete_message)
         for exchange in self.output_exchanges:
@@ -170,6 +170,19 @@ class BaseWorker(ABC):
         msg_id = self.msg_counter
         self.msg_counter += 1
         return msg_id
+
+    def _seen_msgs_with_current(self, client_id: str, sender: str, msg_id: int) -> dict:
+        """seen_msgs del cliente incluyendo el (sender, msg_id) en vuelo, para que
+        el snapshot quede consistente con el estado (que ya aplico este batch).
+
+        Necesario porque mark_seen() del mensaje actual recien corre despues de
+        process_batch (en _on_message), asi que duplicate_handler.get_state() va
+        atrasado exactamente un mensaje al momento del snapshot. Con prefetch=1
+        ese unico (sender, msg_id) faltante es el del mensaje en proceso."""
+        seen = self.duplicate_handler.get_state(client_id)  # devuelve copia
+        if sender is not None and msg_id is not None:
+            seen[sender] = max(seen.get(sender, 0), msg_id)
+        return seen
 
     def _route_and_send(self, client_id: str, message: dict, msg_id: int, shard_routing_key: str = None) -> None:
         """Centralized routing logic used by both Stateful and Stateless subclasses."""

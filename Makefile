@@ -9,7 +9,6 @@ up:
 down:
 	docker compose -f docker-compose.yaml stop -t 15
 	docker compose -f docker-compose.yaml down
-	# rm -f results/clients/client_*/q1.csv results/clients/client_*/q2.csv results/clients/client_*/q3.csv results/clients/client_*/q4.csv results/clients/client_*/q5.csv
 	rm -rf results/clients/client_*
 	rm -f persisted_state/*
 .PHONY: down

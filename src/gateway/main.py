@@ -7,18 +7,20 @@ import threading
 import uuid
 from dataclasses import dataclass
 
-from src.common.communication.tcp import TCPSocket
 from src.common import fail_recovery
-from src.common.middleware import (
-    MessageMiddlewareExchangeRabbitMQ,
-)
 from src.common.communication.internal import (
+    build_delete_client_message,
     build_eof_message,
     build_raw_accounts_message,
     build_raw_transactions_message,
     deserialize,
     serialize,
 )
+from src.common.communication.tcp import TCPSocket
+from src.common.middleware import (
+    MessageMiddlewareExchangeRabbitMQ,
+)
+from src.common.state_manager import WorkerStateManager
 
 
 @dataclass
@@ -79,8 +81,6 @@ class Gateway:
         self.mom_host = gateway_config.mom_host
         self.sender_id = "gateway"
         # Contador monotonico del sender (msg_id entero creciente desde 0).
-        # itertools.count: su next() es atomico bajo el GIL, asi que es seguro
-        # frente a los multiples threads de cliente que emiten al pipeline.
         self._msg_counter = itertools.count(0)
 
         self.transactions_usd_exchange_name = gateway_config.transactions_usd_exchange
@@ -111,6 +111,13 @@ class Gateway:
         self._client_registry = {}
         self._client_threads = []
         self._result_thread = None
+
+        # Persistimos el uuid de cada cliente en vuelo (un archivo atomico por
+        # cliente). Si el gateway se cae, al reiniciar quedan los uuids de los
+        # clientes que no habian terminado: les mandamos delete_client.
+        self._client_store = WorkerStateManager(
+            base_dir="/app/state", stage_name="gateway", worker_id=1
+        )
 
     def _setup_middleware(self):
         self.transactions_usd_mw = MessageMiddlewareExchangeRabbitMQ(
@@ -216,6 +223,32 @@ class Gateway:
             self.transactions_date_mw.send(eof_message, routing_key=routing_key)
             self.accounts_mw.send(eof_message, routing_key=routing_key)
 
+    def send_delete_client(self, client_id: str):
+        """Broadcasts a delete_client so the workers purge all state for this
+        client. Sin msg_id a proposito: tras un reinicio del gateway el
+        _msg_counter vuelve a 0 y los workers descartarian un msg_id bajo como
+        duplicado; sin msg_id, is_duplicate lo deja pasar."""
+        routing_key = "eof_broadcast"
+        delete_message = serialize(
+            build_delete_client_message(client=client_id, sender=self.sender_id)
+        )
+
+        with self._send_lock:
+            self.transactions_usd_mw.send(delete_message, routing_key=routing_key)
+            self.transactions_date_mw.send(delete_message, routing_key=routing_key)
+            self.accounts_mw.send(delete_message, routing_key=routing_key)
+
+    def _purge_persisted_clients(self):
+        """Al arrancar, cualquier uuid persistido pertenece a un cliente que
+        estaba en vuelo cuando el gateway se cayo. Le decimos al pipeline que
+        borre su estado y lo olvidamos."""
+        for client_id in self._client_store.get_all_client_ids():
+            logging.info(
+                "Recovered persisted client %s; sending delete_client", client_id
+            )
+            self.send_delete_client(client_id)
+            self._client_store.delete_client(client_id)
+
     def handle_client_request(self, client_socket):
         tcp = TCPSocket(client_socket)
         client_id = str(uuid.uuid4())
@@ -228,14 +261,23 @@ class Gateway:
                 "eofs": 0,
             }
 
+        # Persistimos el uuid de forma atomica apenas entra el cliente.
+        self._client_store._atomic_write(
+            self._client_store._get_path(client_id, ".json"),
+            {"client_id": client_id},
+        )
+
         logging.info("Registered client %s", client_id)
 
+        client_disconnected = False
         try:
             while True:
                 try:
                     raw_bytes = tcp.recv_bytes()
                 except ConnectionError:
-                    logging.info("The client has disconnected")
+                    # Se corto antes de mandar el EOF: el cliente se cayo.
+                    logging.info("The client %s has disconnected", client_id)
+                    client_disconnected = True
                     break
 
                 message = deserialize(raw_bytes)
@@ -243,6 +285,10 @@ class Gateway:
                 logging.info(
                     "Received message of type %s from client %s", msg_type, client_id
                 )
+
+                if msg_type == "eof":
+                    # Fin normal de datos del cliente.
+                    break
 
                 if msg_type == "raw_transactions":
                     txs = message.get("payload", {}).get("batch", [])
@@ -274,24 +320,30 @@ class Gateway:
                     )
                     self.send_accounts_data(serialized_message)
 
-            logging.info(
-                "Inbound EOF received for client %s; forwarding EOF downstream",
-                client_id,
-            )
-            eof_message = serialize(
-                build_eof_message(
-                    client=client_id,
-                    msg_id=next(self._msg_counter),
-                    sender=self.sender_id,
+            if client_disconnected:
+                logging.info(
+                    "Propagating delete_client for disconnected client %s", client_id
                 )
-            )
+                self.send_delete_client(client_id)
+            else:
+                logging.info(
+                    "Inbound EOF received for client %s; forwarding EOF downstream",
+                    client_id,
+                )
+                eof_message = serialize(
+                    build_eof_message(
+                        client=client_id,
+                        msg_id=next(self._msg_counter),
+                        sender=self.sender_id,
+                    )
+                )
 
-            self.send_eof(eof_message)
+                self.send_eof(eof_message)
 
-            done.wait()
-            logging.info(
-                "Pipeline complete for client %s; closing client socket", client_id
-            )
+                done.wait()
+                logging.info(
+                    "Pipeline complete for client %s; closing client socket", client_id
+                )
 
         except socket.error:
             logging.error("The connection with the server was lost")
@@ -300,6 +352,9 @@ class Gateway:
         finally:
             with self._registry_lock:
                 self._client_registry.pop(client_id, None)
+            # El cliente termino (normal o caida): olvidamos su uuid persistido
+            # para no mandarle un delete_client de mas en el proximo reinicio.
+            self._client_store.delete_client(client_id)
             tcp.close()
 
     def _close_resources(self):
@@ -344,6 +399,10 @@ class Gateway:
         self._start_fail_detection()
 
         self._setup_middleware()
+
+        # Si veniamos de una caida, mandamos delete_client por cada cliente que
+        # habia quedado en vuelo antes de empezar a aceptar conexiones nuevas.
+        self._purge_persisted_clients()
 
         self._result_thread = threading.Thread(
             target=self.handle_client_response, daemon=True

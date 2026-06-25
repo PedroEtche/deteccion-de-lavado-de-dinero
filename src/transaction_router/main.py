@@ -72,6 +72,9 @@ class TransactionRouter(StreamWorker):
                 self.config.mom_host, route.output
             )
             logging.info("Route %s -> exchange %s", route.name, route.output)
+        # Lista de salidas que usa BaseWorker._propagate_delete_client para
+        # broadcastear el delete_client aguas abajo (igual que el EOF en on_flush).
+        self.output_exchanges = [route.exchange for route in self.config.routes]
 
     def close_outputs(self) -> None:
         for route in self.config.routes:

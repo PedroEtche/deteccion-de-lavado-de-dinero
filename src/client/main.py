@@ -69,6 +69,10 @@ class Client:
     def __init__(self, server_host, server_port, output_path):
         self.output_path = output_path
         self.closed = False
+        # completed: True solo si juntamos todos los EOF de resultado.
+        # stopped_by_signal: True si nos frenaron con SIGTERM (no reiniciar).
+        self.completed = False
+        self.stopped_by_signal = False
         self.server_socket = _connect_with_retry(server_host, server_port)
         signal.signal(signal.SIGTERM, self.handle_sigterm)
         # El lector SOLO lee y persiste; nunca toca el ciclo de vida del socket.
@@ -86,6 +90,7 @@ class Client:
         # nunca hay dos threads tocando el socket a la vez.
         logging.info("Received SIGTERM signal")
         self.closed = True
+        self.stopped_by_signal = True
         try:
             self.server_socket.shutdown("rdwr")
         except OSError:
@@ -110,12 +115,16 @@ class Client:
             )
             send_eof(self.server_socket, sender="client")
             logging.info("Datasets sent; waiting for results")
-        finally:
             # Cerramos solo la escritura: el server sabe que no hay mas datos,
-            # pero seguimos leyendo resultados. Puede fallar si un SIGTERM ya
-            # hizo shutdown del socket; en ese caso no hay nada que señalizar.
+            # pero seguimos leyendo resultados.
+            self.server_socket.shutdown("wr")
+        except OSError as exc:
+            # El gateway se cayo mientras enviabamos. Despertamos al lector
+            # bloqueado en recv y salimos para que main reinicie desde 0.
+            logging.info("Connection lost while sending: %s", exc)
+            self.closed = True
             try:
-                self.server_socket.shutdown("wr")
+                self.server_socket.shutdown("rdwr")
             except OSError:
                 pass
 
@@ -123,6 +132,7 @@ class Client:
         # cuando termino de persistir cerramos el fd: UN solo close, UN solo thread.
         self._reader_thread.join()
         self.server_socket.close()
+        return self.completed
 
     def recv_results(self):
         logging.info("Receiving results")
@@ -142,6 +152,9 @@ class Client:
             if self._persist_message(deserialize(msg)):
                 pending_eofs -= 1
 
+        # Solo es un run exitoso si juntamos todos los EOF de resultado.
+        self.completed = pending_eofs == 0
+
     def _persist_message(self, decoded):
         """Persiste un batch. Devuelve True solo si era el EOF final de una query."""
         file_name = _RESULT_FILES.get(decoded["type"])
@@ -158,18 +171,32 @@ class Client:
         return False
 
 
+def _reset_output_files(output_path):
+    """Trunca los 5 CSV de resultados para arrancar la ejecucion desde 0."""
+    for i in range(1, 6):
+        open(os.path.join(output_path, f"q{i}.csv"), "w").close()
+
+
 def main() -> int:
     execution_time = time.time()
     logging.basicConfig(level=logging.INFO)
-    for i in range(1, 6):
-        # Create 5 output files
-        file_name = f"q{i}.csv"
-        output_file = os.path.join(OUTPUT_PATH, file_name)
-        file = open(output_file, "w")
-        file.close()
 
-    client = Client(SERVER_HOST, SERVER_PORT, OUTPUT_PATH)
-    client.start(ACCOUNTS_PATH, TRANSACTIONS_PATH, BATCH_SIZE)
+    # Si detectamos que el gateway se cayo, sabemos que va a borrar nuestros
+    # datos al reiniciar: arrancamos de 0 (borramos resultados, reconectamos y
+    # reenviamos todo). Solo cortamos al terminar bien o si nos frenan.
+    while True:
+        _reset_output_files(OUTPUT_PATH)
+        try:
+            client = Client(SERVER_HOST, SERVER_PORT, OUTPUT_PATH)
+            completed = client.start(ACCOUNTS_PATH, TRANSACTIONS_PATH, BATCH_SIZE)
+        except OSError as exc:
+            logging.info("Gateway caido (%s); reiniciando ejecucion desde 0", exc)
+            continue
+
+        if completed or client.stopped_by_signal:
+            break
+
+        logging.info("Gateway caido; reiniciando ejecucion desde 0")
 
     execution_time = time.time() - execution_time
     minutes, seconds = divmod(execution_time, 60)

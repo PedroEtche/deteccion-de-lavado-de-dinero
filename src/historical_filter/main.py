@@ -148,6 +148,9 @@ class HistoricalAverageFilter(StreamWorker):
         self.output_mw = MessageMiddlewareExchangeRabbitMQ(
             self.config.mom_host, self.config.output_exchange
         )
+        # Lista de salidas que usa BaseWorker._propagate_delete_client para
+        # broadcastear el delete_client aguas abajo (igual que el EOF en on_flush).
+        self.output_exchanges = [self.output_mw]
 
     def close_outputs(self) -> None:
         if self.output_mw:
@@ -164,7 +167,7 @@ class HistoricalAverageFilter(StreamWorker):
                 thresholds[fmt] = avg["average_amount"] / self.config.threshold_divisor
             
             # Snapshot de los umbrales (antes del ack) para poder recuperarlos.
-            current_seen_msgs = self.duplicate_handler.get_state(client_id)
+            current_seen_msgs = self._seen_msgs_with_current(client_id, sender, msg_id)
             self.thresholds_state.save_snapshot(client_id, thresholds, current_seen_msgs)
             logging.info("Stored %d averages for client %s", len(batch), client_id)
 

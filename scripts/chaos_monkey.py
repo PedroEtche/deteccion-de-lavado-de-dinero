@@ -27,8 +27,6 @@ EXCLUDE_PATTERNS = [
     "rabbitmq",
     "gateway",
     "client_",
-    "q3_historical_filter",
-    "router",
 ]
 
 # Segundos entre kills.

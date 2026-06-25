@@ -152,7 +152,7 @@ class MergeWorker(StatefulWorker):
             logging.info("Triggering checkpoint snapshot for client %s", client_id)
 
             current_state = self.strategy.get_client_state(client_id)
-            current_last_seen_msg = self.duplicate_handler.get_state(client_id)
+            current_last_seen_msg = self._seen_msgs_with_current(client_id, sender, msg_id)
             self.state_manager.save_snapshot(client_id, current_state, current_last_seen_msg)
 
             self.received_batches_per_client[client_id] = 0

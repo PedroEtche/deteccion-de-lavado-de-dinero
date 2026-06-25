@@ -121,6 +121,9 @@ class TransactionRouter(StreamWorker):
             route.exchange.send(eof_msg, routing_key="eof_broadcast")
             logging.info("EOF broadcast to %s for client %s", route.output, client_id)
 
+    def clear_client_state(self, client_id: str) -> None:
+        pass
+
 
 def main() -> int:
     config = init_config()

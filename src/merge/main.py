@@ -16,7 +16,7 @@ from .strategies import (
     SelfMergeStrategy,
 )
 
-SNAPSHOT_BATCH = 1000
+SNAPSHOT_BATCH = 100
 RESULT_BATCH_SIZE = 5000
 
 CONFIG_PATH = "./config.yaml"
@@ -183,6 +183,11 @@ class MergeWorker(StatefulWorker):
 
         self.execute_result(client_id, results_to_send)
 
+        self.strategy.clear_client_state(client_id)
+        self.state_manager.delete_client(client_id)
+        self.received_batches_per_client.pop(client_id, None)
+
+    def clear_client_state(self, client_id):
         self.strategy.clear_client_state(client_id)
         self.state_manager.delete_client(client_id)
         self.received_batches_per_client.pop(client_id, None)

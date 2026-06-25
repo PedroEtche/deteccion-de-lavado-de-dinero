@@ -277,6 +277,11 @@ class HistoricalAverageFilter(StreamWorker):
         target_worker = (msg_id % self.config.num_downstream_workers) + 1
         self.output_mw.send(out_msg, routing_key=f"worker_{target_worker}")
 
+    def clear_client_state(self, client_id: str) -> None:
+        self.thresholds_by_client.pop(client_id, None)
+        self.candidates_state.delete_client(client_id)
+        self.thresholds_state.delete_client(client_id)
+
 def main() -> int:
     config = init_config()
     logging.basicConfig(level=getattr(logging, config.log_level.upper(), logging.INFO))

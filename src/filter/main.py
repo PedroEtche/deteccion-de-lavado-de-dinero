@@ -119,6 +119,8 @@ class FilterWorker(StatelessWorker):
     def flush_state(self, client_id: str) -> None:
         pass
 
+    def clear_client_state(self, client_id: str) -> None:
+        pass
 
 def main() -> int:
     config = init_config()

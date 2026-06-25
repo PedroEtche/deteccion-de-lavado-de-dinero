@@ -1,22 +1,16 @@
 import logging
-import threading
 import os
-import signal
 from dataclasses import dataclass
-from typing import List
+from typing import Any, List
 
-from src.common import fail_recovery
 from src.common.communication.internal import (
     build_eof_message,
     build_raw_transactions_message,
-    deserialize,
     serialize,
 )
-from src.common.eof import EofCoordinator
 from src.common.middleware import MessageMiddlewareExchangeRabbitMQ
-from src.common.middleware.middleware_rabbitmq import CONSUMER_HEARTBEAT
 from src.common.utils import load_yaml_config
-from src.common.state_manager import WorkerStateManager
+from src.common.worker import StreamWorker, run_worker
 
 from .routes import Route, build_routes
 
@@ -32,6 +26,9 @@ class RouterConfig:
     worker_id: int
     log_level: str
     stage_name: str
+    # Lo lee BaseWorker.__init__ (self.strategy = config.strategy); el router no
+    # usa strategy, asi que queda en None.
+    strategy: Any = None
 
 
 def init_config() -> RouterConfig:
@@ -58,91 +55,33 @@ def log_config(config: RouterConfig) -> None:
     )
 
 
-class TransactionRouter:
+class TransactionRouter(StreamWorker):
     """
     Consumes raw transactions from the gateway, evaluates each tx against
     every configured route, and emits one sub-batch per matching route to
     that route's output exchange.
+
+    Hereda de StreamWorker: la infra de consumo/EOF/identidad la pone la base;
+    aca solo van los hooks (setup_outputs/close_outputs/handle_data/on_flush) y
+    el ruteo propio. Usa el input_routing_keys por defecto (worker_id + eof).
     """
 
-    def __init__(self, config: RouterConfig):
-        self.config = config
-        self.input_mw = None
-        self.sender_id = f"{config.stage_name}_{config.worker_id}"
-        # Contador monotonico por sender (msg_id entero creciente desde 0).
-        self.msg_counter = 0
-
-        self.eof_state_manager = WorkerStateManager(
-            base_dir="/app/state",
-            stage_name=f"{self.config.stage_name}_eof",
-            worker_id=self.config.worker_id,
-        )
-
-    def _next_msg_id(self) -> int:
-        msg_id = self.msg_counter
-        self.msg_counter += 1
-        return msg_id
-
-    def start(self) -> None:
-        self._start_fail_detection()
-
+    def setup_outputs(self) -> None:
         for route in self.config.routes:
             route.exchange = MessageMiddlewareExchangeRabbitMQ(
                 self.config.mom_host, route.output
             )
             logging.info("Route %s -> exchange %s", route.name, route.output)
 
-        self.eof_coordinator = EofCoordinator(
-            expected_eofs=self.config.expected_eofs,
-            on_flush=self._on_flush,
-            state_manager=self.eof_state_manager,
-        )
+    def close_outputs(self) -> None:
+        for route in self.config.routes:
+            if route.exchange:
+                route.exchange.close()
 
-        routing_keys = [f"worker_{self.config.worker_id}", "eof_broadcast"]
-        self.input_mw = MessageMiddlewareExchangeRabbitMQ(
-            host=self.config.mom_host,
-            exchange_name=self.config.input_exchange,
-            routing_keys=routing_keys,
-            heartbeat=CONSUMER_HEARTBEAT,  # consumer: RabbitMQ detecta caidas y re-encola
-        )
+    def handle_data(self, client_id: str, msg_type: str, batch: list, msg_id: int, sender: str) -> None:
+        self._route_batch(client_id, batch, msg_id, sender)
 
-        logging.info(
-            "Router listening on %s with keys %s",
-            self.config.input_exchange,
-            routing_keys,
-        )
-        self.input_mw.start_consuming(self._on_message)
-
-    def _start_fail_detection(self):
-        """Start fail detection.
-        node_id is the worker_id (unique within the stage) and the peers come from the environment variables.
-        Node.start() blocks (runs its monitoring loop), so it runs in a daemon thread to
-        avoid blocking message consumption.
-        """
-        self.fd_node = fail_recovery.node_from_env()
-        threading.Thread(
-            target=self.fd_node.start, daemon=True, name="fail-detection"
-        ).start()
-        logging.info("Fail detection daemon started")
-
-    def _on_message(self, message, ack, nack) -> None:
-        try:
-            decoded = deserialize(message)
-            msg_type = decoded.get("type")
-            client_id = decoded.get("client")
-
-            if msg_type == "eof":
-                logging.info("EOF received for client %s", client_id)
-                self.eof_coordinator.handle_eof(client_id)
-            else:
-                batch = decoded.get("payload", {}).get("batch", [])
-                self._route_batch(client_id, batch)
-            ack()
-        except Exception:
-            logging.exception("Error processing message; nack")
-            nack()
-
-    def _route_batch(self, client_id: str, batch: list) -> None:
+    def _route_batch(self, client_id: str, batch: list, msg_id: int, sender: str) -> None:
         for route in self.config.routes:
             sub_batch = [tx for tx in batch if route.matches(tx)]
             if not sub_batch:
@@ -153,13 +92,12 @@ class TransactionRouter:
                     f"Unsupported routing strategy: {route.routing_strategy}"
                 )
 
-            msg_id = self._next_msg_id()
             out_msg = serialize(
                 build_raw_transactions_message(
                     client=client_id,
                     msg_id=msg_id,
                     batch=sub_batch,
-                    sender=self.sender_id,
+                    sender=sender,
                 )
             )
             routing_key = route.routing_key_for(msg_id)
@@ -173,7 +111,7 @@ class TransactionRouter:
             )
 
     # en flush mando eofs
-    def _on_flush(self, client_id: str) -> None:
+    def on_flush(self, client_id: str) -> None:
         eof_msg = serialize(
             build_eof_message(
                 client=client_id, msg_id=self._next_msg_id(), sender=self.sender_id
@@ -183,14 +121,6 @@ class TransactionRouter:
             route.exchange.send(eof_msg, routing_key="eof_broadcast")
             logging.info("EOF broadcast to %s for client %s", route.output, client_id)
 
-    def stop(self) -> None:
-        if self.input_mw:
-            self.input_mw.stop_consuming()
-            self.input_mw.close()
-        for route in self.config.routes:
-            if route.exchange:
-                route.exchange.close()
-
 
 def main() -> int:
     config = init_config()
@@ -198,17 +128,7 @@ def main() -> int:
     log_config(config)
     logging.getLogger("pika").setLevel(logging.WARNING)
 
-    router = TransactionRouter(config)
-
-    def handle_sigterm(_signum, _frame):
-        logging.info("Received SIGTERM signal")
-        router.stop()
-
-    signal.signal(signal.SIGTERM, handle_sigterm)
-    signal.signal(signal.SIGINT, handle_sigterm)
-
-    router.start()
-    return 0
+    return run_worker(TransactionRouter(config))
 
 
 if __name__ == "__main__":

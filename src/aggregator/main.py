@@ -6,7 +6,7 @@ from typing import Any, Dict
 
 import yaml
 
-from src.common.worker import BaseWorker
+from src.common.worker import StatefulWorker
 from src.common.state_manager import WorkerStateManager
 
 from .strategies import (
@@ -21,6 +21,7 @@ from .strategies import (
 )
 
 SNAPSHOT_BATCH = 1000
+RESULT_BATCH_SIZE = 5000
 
 CONFIG_PATH = "./config.yaml"
 
@@ -104,7 +105,7 @@ def log_config(config: AggregatorConfig) -> None:
     )
 
 
-class AggregatorWorker(BaseWorker):
+class AggregatorWorker(StatefulWorker):
     """
     Stateful aggregator.
     Accumulates data in memory via strategies and flushes only upon receiving expected_eofs.
@@ -128,23 +129,34 @@ class AggregatorWorker(BaseWorker):
             self._recover_client_state(client_id)
 
     def _recover_client_state(self, client_id: str) -> None:
-        snapshot, wal_batches = self.state_manager.recover_client(client_id)
+        pending_results = self.state_manager.load_results(client_id)
+        if pending_results:
+            logging.warning("Crash detected during previous flush! Resending atomic results for %s", client_id)
+            self.execute_result(client_id, pending_results)
+            
+            self.strategy.clear_client_state(client_id)
+            self.state_manager.delete_client(client_id)
+            self.received_batches_per_client.pop(client_id, None)
+            return
+        
+        snapshot, wal_batches, last_seen_msg = self.state_manager.recover_client(client_id)
 
         if snapshot:
             self.strategy.set_client_state(client_id, snapshot)
 
-        for batch in wal_batches:
+        self.duplicate_handler.restore_state(client_id, last_seen_msg)
+
+        for batch, _msg_type in wal_batches:
             self.strategy.aggregate_batch(batch, client_id)
 
         self.received_batches_per_client[client_id] = len(wal_batches)
         logging.info("Recovered client %s", client_id)
 
-    def process_batch(self, client_id: str, batch: list, msg_type: str) -> None:
+    def process_batch(self, client_id: str, batch: list, msg_type: str, msg_id: int, sender: str) -> None:
         count = self.received_batches_per_client.get(client_id, 0) + 1
         self.received_batches_per_client[client_id] = count
 
-        self.state_manager.append_batch(client_id, batch)
-
+        self.state_manager.append_batch(client_id, batch, msg_id=msg_id, sender=sender)
         logging.info("Processing batch of %d rows for client %s", len(batch), client_id)
         self.strategy.aggregate_batch(batch, client_id)
 
@@ -152,23 +164,27 @@ class AggregatorWorker(BaseWorker):
             logging.info("Triggering checkpoint snapshot for client %s", client_id)
 
             current_state = self.strategy.get_client_state(client_id)
-            self.state_manager.save_snapshot(client_id, current_state)
+            current_last_seen_msg = self.duplicate_handler.get_state(client_id)
+            self.state_manager.save_snapshot(client_id, current_state, current_last_seen_msg)
 
             self.received_batches_per_client[client_id] = 0
 
     def flush_state(self, client_id: str) -> None:
-        logging.info(
-            "All EOFs received. Flushing aggregated result for client %s", client_id
-        )
+        logging.info("All EOFs received. Flushing aggregated result for client %s", client_id)
         routed_batches = self.strategy.get_result_for_client(client_id)
+
         if not routed_batches:
             logging.info("No data to flush for client %s", client_id)
         else:
-            # send_groups decide round_robin/broadcast vs sharded segun la config.
-            self.send_groups(client_id, routed_batches)
+            results = self.prepare_results(routed_batches, RESULT_BATCH_SIZE)
+            
+            self.state_manager.save_results(client_id, results)
+            
+            self.execute_result(client_id, results)
 
         self.strategy.clear_client_state(client_id)
         self.state_manager.delete_client(client_id)
+        self.received_batches_per_client.pop(client_id, None)
 
 
 def main() -> int:

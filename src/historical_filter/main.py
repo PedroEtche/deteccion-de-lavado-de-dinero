@@ -1,23 +1,18 @@
 import logging
-import threading
 import os
-import signal
 from dataclasses import dataclass
-from typing import Dict
+from typing import Any, Dict
 
-from src.common import fail_recovery
 from src.common.communication.internal import (
     Q3ResultRow,
     build_batch_message,
     build_eof_message,
-    deserialize,
     serialize,
 )
-from src.common.eof import EofCoordinator
 from src.common.middleware import MessageMiddlewareExchangeRabbitMQ
-from src.common.middleware.middleware_rabbitmq import CONSUMER_HEARTBEAT
 from src.common.utils import load_yaml_config
 from src.common.state_manager import WorkerStateManager
+from src.common.worker import StreamWorker, run_worker
 
 CONFIG_PATH = "./config.yaml"
 
@@ -29,8 +24,10 @@ CONFIG_PATH = "./config.yaml"
 AVERAGES_MSG_TYPE = "batch"
 CANDIDATES_MSG_TYPE = "raw_transactions"
 
-#
 RESULT_BATCH_SIZE = 5000
+
+# Cada cuantos records del WAL se persiste el progreso del flush.
+CHECKPOINT_EVERY = 200
 
 
 @dataclass
@@ -44,6 +41,9 @@ class HistoricalFilterConfig:
     num_downstream_workers: int
     log_level: str
     stage_name: str
+    # Lo lee BaseWorker.__init__ (self.strategy = config.strategy); este worker
+    # no usa strategy, asi que queda en None.
+    strategy: Any = None
 
 
 def init_config() -> HistoricalFilterConfig:
@@ -74,10 +74,9 @@ def log_config(config: HistoricalFilterConfig) -> None:
     )
 
 
-class HistoricalAverageFilter:
+class HistoricalAverageFilter(StreamWorker):
     """
-    Ad-hoc worker (no hereda de BaseWorker) que junta DOS streams por
-    payment_format y emite el resultado de Q3:
+    Worker que junta DOS streams por payment_format y emite el resultado de Q3:
 
       - averages: promedio de monto por payment_format del rango [9/1, 9/5].
       - candidates: transacciones USD del rango [9/6, 9/15].
@@ -87,29 +86,21 @@ class HistoricalAverageFilter:
     promedios, asi que se bufferean ambos streams y se emite en el flush
     (cuando llegaron todos los EOFs).
 
-    No usa BaseWorker porque este stage necesita distinguir de que stream
-    viene cada batch (via msg_type) Y emitir en el flush. Consideramos que era mejor
-    no modificar las otras abstracciones y codear esta clase especifica.
+    Hereda de StreamWorker: la infra de consumo/EOF/identidad la pone la base.
+    Lo propio de este stage es distinguir de que stream viene cada batch (via
+    msg_type, en handle_data) y emitir recien en on_flush; ademas bindea una
+    routing key extra (data_broadcast) via input_routing_keys.
     """
 
     def __init__(self, config: HistoricalFilterConfig):
-        self.config = config
-        self.input_mw = None
+        super().__init__(config)
         self.output_mw = None
-        self.sender_id = f"{config.stage_name}_{config.worker_id}"
-        # Contador monotonico por sender (msg_id entero creciente desde 0).
-        self.msg_counter = 0
 
         # Umbrales por cliente (chico): thresholds_by_client[client][fmt] =
         # promedio / divisor. Vive en memoria pero se espeja a un snapshot en
         # disco para poder recuperarlo tras una caida.
         self.thresholds_by_client: Dict[str, Dict[str, float]] = {}
 
-        self.eof_state_manager = WorkerStateManager(
-            base_dir="/app/state",
-            stage_name=f"{self.config.stage_name}_eof",
-            worker_id=self.config.worker_id,
-        )
         # Candidatas [9/6-9/15]: se vuelcan al WAL en disco a medida que llegan
         # (no se acumulan en memoria) y se releen en streaming en el flush.
         self.candidates_state = WorkerStateManager(
@@ -129,90 +120,70 @@ class HistoricalAverageFilter:
         # su snapshot. Las candidatas ya estan en el WAL (se leen en el flush) y
         # el conteo de EOFs lo recupera el EofCoordinator por su cuenta.
         for client_id in self.thresholds_state.get_all_client_ids():
-            snapshot, _ = self.thresholds_state.recover_client(client_id)
+            snapshot, _wal, _seen_msgs = self.thresholds_state.recover_client(client_id)
             if snapshot:
                 self.thresholds_by_client[client_id] = snapshot
                 logging.info("Recovered thresholds for client %s", client_id)
 
-    def _next_msg_id(self) -> int:
-        msg_id = self.msg_counter
-        self.msg_counter += 1
-        return msg_id
+        # Restaurar el watermark de dedup de las candidatas desde su WAL, asi una
+        # candidata reentregada tras una caida no se vuelve a appendear (duplicado).
+        for client_id in self.candidates_state.get_all_client_ids():
+            seen = self.candidates_state.recover_seen_msgs(client_id)
+            if seen:
+                self.duplicate_handler.restore_state(client_id, seen)
 
-    def start(self) -> None:
-        self._start_fail_detection()
-
-        self.output_mw = MessageMiddlewareExchangeRabbitMQ(
-            self.config.mom_host, self.config.output_exchange
-        )
-
-        self.eof_coordinator = EofCoordinator(
-            expected_eofs=self.config.expected_eofs,
-            on_flush=self._on_flush,
-            state_manager=self.eof_state_manager,
-        )
-
-        # Tres routing keys:
+    def input_routing_keys(self) -> list:
+        # Tres routing keys (la base por defecto solo bindea las dos primeras
+        # variantes; aca agregamos data_broadcast):
         #   - worker_{id}: candidatas [9/6-9/15] que llegan round-robin del router.
         #   - data_broadcast: promedios que llegan por fanout del join.
         #   - eof_broadcast: EOFs de ambos upstreams (router + join).
-        routing_keys = [
+        return [
             f"worker_{self.config.worker_id}",
             "data_broadcast",
             "eof_broadcast",
         ]
-        self.input_mw = MessageMiddlewareExchangeRabbitMQ(
-            host=self.config.mom_host,
-            exchange_name=self.config.input_exchange,
-            routing_keys=routing_keys,
-            heartbeat=CONSUMER_HEARTBEAT,  # consumer: RabbitMQ detecta caidas y re-encola
+
+    def setup_outputs(self) -> None:
+        self.output_mw = MessageMiddlewareExchangeRabbitMQ(
+            self.config.mom_host, self.config.output_exchange
         )
 
-        logging.info("HistoricalFilter listening on %s", self.config.input_exchange)
-        self.input_mw.start_consuming(self._on_message)
+    def close_outputs(self) -> None:
+        if self.output_mw:
+            self.output_mw.close()
 
-    def _start_fail_detection(self):
-        """Start fail detection.
-        node_id is the worker_id (unique within the stage) and the peers come from the environment variables.
-        Node.start() blocks (runs its monitoring loop), so it runs in a daemon thread to
-        avoid blocking message consumption.
-        """
-        self.fd_node = fail_recovery.node_from_env()
-        threading.Thread(
-            target=self.fd_node.start, daemon=True, name="fail-detection"
-        ).start()
-        logging.info("Fail detection daemon started")
+    def handle_data(self, client_id: str, msg_type: str, batch: list, msg_id: int, sender: str) -> None:
+        self._accumulate(client_id, msg_type, batch, msg_id=msg_id, sender=sender)
 
-    def _on_message(self, message, ack, nack) -> None:
-        try:
-            decoded = deserialize(message)
-            msg_type = decoded.get("type")
-            client_id = decoded.get("client")
-
-            if msg_type == "eof":
-                logging.info("EOF received for client %s", client_id)
-                self.eof_coordinator.handle_eof(client_id)
-            else:
-                batch = decoded.get("payload", {}).get("batch", [])
-                self._accumulate(client_id, msg_type, batch)
-            ack()
-        except Exception:
-            logging.exception("Error processing message; nack")
-            nack()
-
-    def _accumulate(self, client_id: str, msg_type: str, batch: list) -> None:
+    def _accumulate(self, client_id: str, msg_type: str, batch: list, msg_id: int, sender: str) -> None:
         if msg_type == AVERAGES_MSG_TYPE:
             thresholds = self.thresholds_by_client.setdefault(client_id, {})
             for avg in batch:
                 fmt = avg["payment_format"]
                 thresholds[fmt] = avg["average_amount"] / self.config.threshold_divisor
+            
             # Snapshot de los umbrales (antes del ack) para poder recuperarlos.
-            self.thresholds_state.save_snapshot(client_id, thresholds)
+            current_seen_msgs = self.duplicate_handler.get_state(client_id)
+            self.thresholds_state.save_snapshot(client_id, thresholds, current_seen_msgs)
             logging.info("Stored %d averages for client %s", len(batch), client_id)
 
         elif msg_type == CANDIDATES_MSG_TYPE:
-            # Las candidatas van directo al WAL en disco (con fsync), no a memoria.
-            self.candidates_state.append_batch(client_id, batch)
+            # Proyectar a solo los campos que usa el flush ANTES de persistir, asi
+            # el WAL no guarda columnas que no se usan. Las candidatas llegan como TransactionRow.
+            projected = [
+                {
+                    "from_bank": tx.from_bank,
+                    "from_account": tx.from_account,
+                    "payment_format": tx.payment_format,
+                    "amount_paid": tx.amount_paid,
+                }
+                for tx in batch
+            ]
+            # Van directo al WAL en disco (con fsync), no a memoria.
+            self.candidates_state.append_batch(
+                client_id, projected, msg_id=msg_id, sender=sender
+            )
             logging.info(
                 "Buffered %d candidate txs for client %s", len(batch), client_id
             )
@@ -220,17 +191,25 @@ class HistoricalAverageFilter:
         else:
             logging.warning("Unexpected msg_type %s for client %s", msg_type, client_id)
 
-    def _on_flush(self, client_id: str) -> None:
-        thresholds = self.thresholds_by_client.pop(client_id, {})
+    def on_flush(self, client_id: str) -> None:
+        thresholds = self.thresholds_by_client.get(client_id, {})
 
-        candidate_count = 0
-        emitted_count = 0
+        # Reanudar desde el ultimo checkpoint si el flush se cayo a mitad. El
+        # contador de salida (next_id) es por cliente y vive en el checkpoint,
+        # asi un re-flush re-deriva los mismos msg_id y el downstream deduplica.
+        checkpoint = self.candidates_state.load_results(client_id)
+        skip = checkpoint["records_consumed"] if checkpoint else 0
+        next_id = checkpoint["out_msg_id"] if checkpoint else 0
+
         result_batch = []
+        consumed = 0
         # Las candidatas se releen en streaming desde el WAL en disco; vienen
         # como dicts (no TransactionRow), asi que se accede por clave.
         for wal_batch in self.candidates_state.iter_wal_batches(client_id):
+            consumed += 1
+            if consumed <= skip:
+                continue
             for tx in wal_batch:
-                candidate_count += 1
                 threshold = thresholds.get(tx.get("payment_format"))
                 if threshold is None:
                     # No hay promedio para ese formato en [9/1, 9/5]; no se puede
@@ -250,38 +229,41 @@ class HistoricalAverageFilter:
                     # Emitir por chunks: un unico mensaje con todo el resultado
                     # supera el max message size de RabbitMQ con datasets grandes.
                     if len(result_batch) >= RESULT_BATCH_SIZE:
-                        self._send_result_batch(client_id, result_batch)
-                        emitted_count += len(result_batch)
+                        self._send_result_batch(client_id, result_batch, next_id)
+                        next_id += 1
                         result_batch = []
+            if consumed % CHECKPOINT_EVERY == 0:
+                # Vaciar el buffer antes de checkpointear: el checkpoint asume
+                # que no quedo resultado parcial sin emitir.
+                if result_batch:
+                    self._send_result_batch(client_id, result_batch, next_id)
+                    next_id += 1
+                    result_batch = []
+                self.candidates_state.save_results(
+                    client_id, {"records_consumed": consumed, "out_msg_id": next_id}
+                )
 
         if result_batch:
-            self._send_result_batch(client_id, result_batch)
-            emitted_count += len(result_batch)
-
-        logging.info(
-            "Flush client %s: %d candidates -> %d below threshold",
-            client_id,
-            candidate_count,
-            emitted_count,
-        )
+            self._send_result_batch(client_id, result_batch, next_id)
+            next_id += 1
 
         eof_msg = serialize(
-            build_eof_message(
-                client=client_id, msg_id=self._next_msg_id(), sender=self.sender_id
-            )
+            build_eof_message(client=client_id, msg_id=next_id, sender=self.sender_id)
         )
         self.output_mw.send(eof_msg, routing_key="eof_broadcast")
+        logging.info("Flush done for client %s", client_id)
 
-        # Estado del cliente ya consumido: liberar candidatas (WAL) y umbrales
-        # (snapshot) en disco. El conteo de EOFs lo limpia el EofCoordinator.
+        # Estado del cliente ya consumido: liberar candidatas (WAL + checkpoint) y
+        # umbrales (snapshot) en disco. El estado de EOF lo borra el EofCoordinator
+        # despues de este on_flush, asi el trigger es lo ultimo en irse.
+        self.thresholds_by_client.pop(client_id, None)
         self.candidates_state.delete_client(client_id)
         self.thresholds_state.delete_client(client_id)
 
-    def _send_result_batch(self, client_id: str, result: list) -> None:
+    def _send_result_batch(self, client_id: str, result: list, msg_id: int) -> None:
         # msg_type "batch": tipo generico ya usado entre workers (group,
         # aggregator). No dispara conversion a TransactionRow en el join, que lo
         # reenvuelve como q3_result (QueryResultStrategy 3).
-        msg_id = self._next_msg_id()
         out_msg = serialize(
             build_batch_message(
                 "batch",
@@ -295,31 +277,13 @@ class HistoricalAverageFilter:
         target_worker = (msg_id % self.config.num_downstream_workers) + 1
         self.output_mw.send(out_msg, routing_key=f"worker_{target_worker}")
 
-    def stop(self) -> None:
-        if self.input_mw:
-            self.input_mw.stop_consuming()
-            self.input_mw.close()
-        if self.output_mw:
-            self.output_mw.close()
-
-
 def main() -> int:
     config = init_config()
     logging.basicConfig(level=getattr(logging, config.log_level.upper(), logging.INFO))
     log_config(config)
     logging.getLogger("pika").setLevel(logging.WARNING)
 
-    worker = HistoricalAverageFilter(config)
-
-    def handle_sigterm(_signum, _frame):
-        logging.info("Received SIGTERM signal")
-        worker.stop()
-
-    signal.signal(signal.SIGTERM, handle_sigterm)
-    signal.signal(signal.SIGINT, handle_sigterm)
-
-    worker.start()
-    return 0
+    return run_worker(HistoricalAverageFilter(config))
 
 
 if __name__ == "__main__":

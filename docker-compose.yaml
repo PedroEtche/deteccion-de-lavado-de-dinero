@@ -305,6 +305,7 @@ services:
         condition: service_healthy
     volumes:
       - ./src/merge/config/accounts_config.yaml:/app/config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - WORKER_ID=1
       - EOF_EXPECTED=4
@@ -323,6 +324,7 @@ services:
         condition: service_healthy
     volumes:
       - ./src/merge/config/accounts_config.yaml:/app/config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - WORKER_ID=2
       - EOF_EXPECTED=4
@@ -341,6 +343,7 @@ services:
         condition: service_healthy
     volumes:
       - ./src/merge/config/accounts_config.yaml:/app/config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - WORKER_ID=3
       - EOF_EXPECTED=4

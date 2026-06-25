@@ -7,7 +7,7 @@ up:
 .PHONY: up
 
 down:
-	docker compose -f docker-compose.yaml stop -t 5
+	docker compose -f docker-compose.yaml stop -t 15
 	docker compose -f docker-compose.yaml down
 	# rm -f results/clients/client_*/q1.csv results/clients/client_*/q2.csv results/clients/client_*/q3.csv results/clients/client_*/q4.csv results/clients/client_*/q5.csv
 	rm -rf results/clients/client_*
@@ -25,6 +25,10 @@ test:
 	-python3 scripts/compare_results.py q4
 	-python3 scripts/compare_results.py q5
 .PHONY: test
+
+test_all:
+	python3 scripts/check_sizes.py
+.PHONY: test_all
 
 debug:
 	@echo "Levanto solo Rabbit + Gateawy + cliente para ver si los mensajes llegan"
@@ -120,6 +124,11 @@ q5_test_fixed:
 	docker compose -f docker-compose.yaml down
 .PHONY: q5_test_fixed
 
+chaos:
+	@echo "Chaos Monkey: espera a que levanten todos los containers y empieza a matarlos."
+	python3 scripts/chaos_monkey.py --wait
+.PHONY: chaos
+
 all_switch:
 	@echo Escenarios de prueba:
 	@echo "1) Pruebas con datos fixed: 1 cliente y 1 worker de cada"
@@ -129,7 +138,7 @@ all_switch:
 	@echo "5) Pruebas con datos fixed: 3 cliente, 2 workers y longitud de batches pequeñas"
 	@echo "6) Pruebas con datos LI-Small: 3 cliente, 2 workers"
 	@echo "7) Pruebas con datos Li-Medium: 3 cliente, 2 workers"
-	@echo "8) Pruebas con datos LI-Small: 3 cliente, 3 workers de cada uno"
+	@echo "8) Pruebas con datos fixed: 3 cliente, 3 workers de cada uno"
 	@echo "9) Pruebas con datos LI-Small: 3 cliente, 3 workers de cada uno"
 	@read -p "Selecciona uno: " option;	\
 	cp ./scenarios/all/$${option}.yaml docker-compose.yaml

@@ -6,7 +6,7 @@ from typing import Any, Dict
 
 import yaml
 
-from src.common.worker import BaseWorker
+from src.common.worker import StatefulWorker
 from src.common.state_manager import WorkerStateManager
 
 from .strategies import (
@@ -17,6 +17,7 @@ from .strategies import (
 )
 
 SNAPSHOT_BATCH = 1000
+RESULT_BATCH_SIZE = 5000
 
 CONFIG_PATH = "./config.yaml"
 
@@ -93,7 +94,7 @@ def log_config(config: MergeConfig) -> None:
     )
 
 
-class MergeWorker(BaseWorker):
+class MergeWorker(StatefulWorker):
     """
     Stateful Merge. Uses a strategy to accumulate data in memory.
     Flushes state only when expected_eofs is reached.
@@ -117,41 +118,74 @@ class MergeWorker(BaseWorker):
             self._recover_client_state(client_id)
 
     def _recover_client_state(self, client_id: str) -> None:
-        snapshot, wal_batches = self.state_manager.recover_client(client_id)
+        pending_results = self.state_manager.load_results(client_id)
+        if pending_results:
+            logging.warning("Crash detected during previous flush! Resending atomic results for %s", client_id)
+            self.execute_result(client_id, pending_results, "batch")
+            
+            self.strategy.clear_client_state(client_id)
+            self.state_manager.delete_client(client_id)
+            self.received_batches_per_client.pop(client_id, None)
+            return
+
+        snapshot, wal_batches, last_seen_msg = self.state_manager.recover_client(client_id)
 
         if snapshot:
             self.strategy.set_client_state(client_id, snapshot)
 
-        for batch in wal_batches:
-            self.strategy.merge_batch(batch, client_id, msg_type="batch")
+        self.duplicate_handler.restore_state(client_id, last_seen_msg)
+
+        for batch, msg_type in wal_batches:
+            self.strategy.merge_batch(batch, client_id, msg_type=msg_type or "batch")
 
         self.received_batches_per_client[client_id] = len(wal_batches)
         logging.info("Recovered client %s", client_id)
 
-    def process_batch(self, client_id: str, batch: list, msg_type: str) -> None:
+    def process_batch(self, client_id: str, batch: list, msg_type: str, msg_id: int, sender: str) -> None:
         count = self.received_batches_per_client.get(client_id, 0) + 1
         self.received_batches_per_client[client_id] = count
 
-        self.state_manager.append_batch(client_id, batch)
-
-        merged_batch = self.strategy.merge_batch(batch, client_id, msg_type)
-        self.send(client_id, merged_batch, "batch")
+        self.state_manager.append_batch(client_id, batch, msg_id=msg_id, sender=sender, msg_type=msg_type)
+        self.strategy.merge_batch(batch, client_id, msg_type)
 
         if count % SNAPSHOT_BATCH == 0:
             logging.info("Triggering checkpoint snapshot for client %s", client_id)
 
             current_state = self.strategy.get_client_state(client_id)
-            self.state_manager.save_snapshot(client_id, current_state)
+            current_last_seen_msg = self.duplicate_handler.get_state(client_id)
+            self.state_manager.save_snapshot(client_id, current_state, current_last_seen_msg)
 
             self.received_batches_per_client[client_id] = 0
 
     def flush_state(self, client_id: str) -> None:
         logging.info(
-            "All EOFs received. Flushing joiner state for client %s", client_id
+            "All EOFs received. Flushing merge state for client %s", client_id
         )
+
+        final_data = self.strategy.get_result_for_client(client_id)
+        
+        if not final_data:
+                logging.info("No data to flush for client %s", client_id)
+                self.strategy.clear_client_state(client_id)
+                self.state_manager.delete_client(client_id)
+                self.received_batches_per_client.pop(client_id, None)
+                return
+
+        dummy_group = [("merge_key", final_data)]
+        results_to_send = self.prepare_results(dummy_group, RESULT_BATCH_SIZE)
+        logging.info(
+            "Prepared %d total records in %d chunks for client %s", 
+            len(final_data), len(results_to_send), client_id
+        )
+
+        # atomic save of results in batches with msg_id
+        self.state_manager.save_results(client_id, results_to_send)
+
+        self.execute_result(client_id, results_to_send)
+
         self.strategy.clear_client_state(client_id)
         self.state_manager.delete_client(client_id)
-
+        self.received_batches_per_client.pop(client_id, None)
 
 def main() -> int:
     config = init_config()

@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 
 import yaml
 
-from src.common.worker import BaseWorker
+from src.common.worker import StatefulWorker
 from src.common.state_manager import WorkerStateManager
 
 from .strategies import (
@@ -94,14 +94,16 @@ def log_config(config: JoinConfig) -> None:
         config.output_exchange,
         str(config.strategy),
         config.expected_eofs,
-    )
+    ) 
 
 
-class JoinWorker(BaseWorker):
+class JoinWorker(StatefulWorker):
     def __init__(self, config: JoinConfig):
         super().__init__(config)
         self.strategy = config.strategy
-        self.strategy.register_join_callback(self.send_downstream)
+        self.strategy.register_join_callback(self._join_callback)
+
+        self._is_recovering = False
 
         self.received_batches_per_client = {}
 
@@ -117,24 +119,49 @@ class JoinWorker(BaseWorker):
             logging.info("Recovering state for client %s", client_id)
             self._recover_client_state(client_id)
 
+    def _join_callback(self, client_id: str, message: dict) -> None:
+        if not message:
+            return
+        
+        if self._is_recovering:
+            return
+
+        msg_id = self._next_msg_id()
+        message["msg_id"] = msg_id
+        message["sender"] = self.sender_id
+        
+        self._route_and_send(client_id, message, msg_id)
+
     def _recover_client_state(self, client_id: str) -> None:
-        snapshot, wal_batches = self.state_manager.recover_client(client_id)
+        pending_results = self.state_manager.load_results(client_id)
+        if pending_results:
+            logging.warning("Crash detected during previous flush! Resending atomic results for %s", client_id)
+            self._execute_join_results(client_id, pending_results)
+            
+            self.state_manager.delete_client(client_id)
+            self.received_batches_per_client.pop(client_id, None)
+            return
+
+        snapshot, wal_batches, last_seen_msg = self.state_manager.recover_client(client_id)
 
         if snapshot:
             self.strategy.set_client_state(client_id, snapshot)
 
-        for batch in wal_batches:
+        self.duplicate_handler.restore_state(client_id, last_seen_msg)
+
+        self._is_recovering = True
+        for batch, _msg_type in wal_batches:
             self.strategy.join_batch(batch, client_id)
+        self._is_recovering = False
 
         self.received_batches_per_client[client_id] = len(wal_batches)
-        logging.info("Recovered client %s", client_id)
+        logging.info("Recovered client %s with %d WAL batches", client_id, len(wal_batches))
 
-    def process_batch(self, client_id: str, batch: list, msg_type: str) -> None:
+    def process_batch(self, client_id: str, batch: list, msg_type: str, msg_id: int, sender: str) -> None:
         count = self.received_batches_per_client.get(client_id, 0) + 1
         self.received_batches_per_client[client_id] = count
 
-        self.state_manager.append_batch(client_id, batch)
-
+        self.state_manager.append_batch(client_id, batch, msg_id=msg_id, sender=sender)
         self.strategy.join_batch(batch, client_id)
 
         if count % SNAPSHOT_BATCH == 0:
@@ -142,14 +169,35 @@ class JoinWorker(BaseWorker):
 
             current_state = self.strategy.get_client_state(client_id)
             if current_state is not None:
-                self.state_manager.save_snapshot(client_id, current_state)
+                current_last_seen_msg = self.duplicate_handler.get_state(client_id)
+                self.state_manager.save_snapshot(client_id, current_state, current_last_seen_msg)
                 self.received_batches_per_client[client_id] = 0
 
     def flush_state(self, client_id: str) -> None:
         final_msg = self.strategy.flush(client_id)
-        self.send_downstream(client_id, final_msg)
+        
+        if not final_msg:
+            self.state_manager.delete_client(client_id)
+            self.received_batches_per_client.pop(client_id, None)
+            return
 
+        final_msg["msg_id"] = self._next_msg_id()
+        final_msg["sender"] = self.sender_id
+
+        self.state_manager.save_results(client_id, [final_msg])
+
+        self._execute_join_results(client_id, [final_msg])
+
+        # --- THE CLEANUP ---
         self.state_manager.delete_client(client_id)
+        self.received_batches_per_client.pop(client_id, None)
+        
+    def _execute_join_results(self, client_id: str, results: list) -> None:
+        """Translates the saved outbox dictionaries into messages directly."""
+        for message in results:
+            # Since final_msg is fully constructed by the strategy, 
+            # we just dispatch it using the exact locked msg_id.
+            self._route_and_send(client_id, message, msg_id=message["msg_id"])
 
 
 def main() -> int:

@@ -1,8 +1,8 @@
 import logging
 import socket
 import threading
+import time
 
-from src.common.communication.tcp import TCPSocket
 from src.common.communication.internal import (
     build_ack_message,
     build_hello_ack_message,
@@ -10,11 +10,17 @@ from src.common.communication.internal import (
     deserialize,
     serialize,
 )
+from src.common.communication.tcp import TCPSocket
 
 # Cada cuantos mensajes de datos se persiste el cursor de ingreso. Es solo una
 # palanca de performance: persistir de menos solo provoca re-envio (deduplicado
 # aguas abajo) tras una caida, nunca perdida. El EOF persiste siempre.
 PERSIST_EVERY = 500
+
+# Espera corta antes de reencolar un resultado que todavia no se pudo entregar
+# (cliente desconectado). Con prefetch=1 el broker reentrega de inmediato; sin
+# esta pausa el consumidor spinnea a full hasta que el cliente reconecte.
+_REQUEUE_BACKOFF = 0.5
 
 
 class WorkerRouter:
@@ -105,12 +111,16 @@ class ClientHandler:
         shutdown_event,
         state,
         expected_results,
+        reaper,
     ):
         self.tcp = TCPSocket(client_socket)
         self.registry = registry
         self.router = router
         self.sender_id = sender_id
         self._shutdown = shutdown_event
+        # Declara la caida del cliente (wipe downstream + limpieza de estado) cuando
+        # se detecta que el socket murio con el gateway vivo.
+        self.reaper = reaper
         # Estado durable del gateway: cursor de ingreso (reanudacion del stream) y
         # progreso de EOFs de resultado (permite cerrar a un cliente que, tras un
         # restart del gateway, reconecta y reenvia su EOF cuando los EOFs de
@@ -139,8 +149,15 @@ class ClientHandler:
                 try:
                     raw_bytes = self.tcp.recv_bytes()
                 except ConnectionError:
-                    logging.info("The client connection was closed")
-                    break
+                    # Con el gateway vivo, una caida del socket en la fase de datos
+                    # solo puede ser la muerte del cliente: lo damos por caido
+                    # (wipe + limpieza) y no esperamos resultados. En shutdown
+                    # ordenado salimos sin declarar caida.
+                    if self._shutdown.is_set():
+                        break
+                    logging.info("The client connection was closed; declaring crash")
+                    self.reaper.declare_crashed(client_id)
+                    return
 
                 message = deserialize(raw_bytes)
                 msg_type = message.get("type")
@@ -165,6 +182,10 @@ class ClientHandler:
                 )
             except Exception:
                 pass
+
+            # Completacion normal: limpiamos el estado durable del cliente. NO se
+            # emite wipe downstream (los workers se autolimpian con sus EOF).
+            self.reaper.note_completed(client_id)
 
         except socket.error:
             logging.error("The connection with the server was lost")
@@ -194,6 +215,9 @@ class ClientHandler:
         presented = message.get("client")
         session = self.registry.handshake(self.tcp, presented_uuid=presented)
         client_id = session.client_id
+        # Reconecto: si habia un timer de gracia post-restart corriendo para este
+        # cliente, lo cancelamos (ya no esta caido).
+        self.reaper.note_reconnect(client_id)
         # Sembramos el cursor de ingreso de la sesion desde el store durable y se
         # lo comunicamos al cliente: streamea desde resume_from + 1.
         resume_from = self.state.cursor_get(client_id)
@@ -301,3 +325,91 @@ class ClientHandler:
             )
             session.done.set()
         return True  # corta el loop de lectura: pasamos a esperar resultados
+
+
+class ResultConsumer:
+    """Consume los resultados que los workers devuelven y los reenvia al cliente
+    correcto. Cuenta los EOF de resultado por sesion (de forma DURABLE, via
+    GatewayState) y, al alcanzar expected_results, libera (done) al
+    thread del cliente para que cierre.
+
+    Tolerancia a fallos: si el resultado no se puede entregar todavia (el cliente
+    esta reconectando o aun no reconecto tras un restart del gateway), el mensaje
+    se reencola (nack) en vez de descartarse, para no perderlo. El progreso de
+    EOFs se persiste ANTES de ackear, asi una caida del gateway no lo pierde.
+    """
+
+    def __init__(self, result_mw, registry, expected_results, state, reaper):
+        self.result_mw = result_mw
+        self.registry = registry
+        self.expected_results = expected_results
+        self.state = state
+        # Declara la caida del cliente cuando un send falla con el gateway vivo.
+        self.reaper = reaper
+
+    def run(self):
+        self.result_mw.start_consuming(self._dispatch_result)
+
+    def _dispatch_result(self, message, ack, nack):
+        try:
+            decoded = deserialize(message)
+        except Exception:
+            logging.exception("Error decoding result message; discarding")
+            ack()
+            return
+
+        client_id = decoded.get("client")
+        is_eof = bool(decoded.get("eof"))
+
+        # El progreso de EOFs se persiste primero y es independiente de que el
+        # cliente tenga sesion viva: tras un restart del gateway el resultado
+        # puede llegar antes de que el cliente reconecte. record() es idempotente
+        # (set por tipo de query), asi que una reentrega no infla el conteo.
+        if is_eof:
+            count = self.state.result_record(client_id, decoded.get("type"))
+            logging.info(
+                "Result EOF %d/%d persisted for client %s (%s)",
+                count,
+                self.expected_results,
+                client_id,
+                decoded.get("type"),
+            )
+
+        session = self.registry.get(client_id)
+        if session is None:
+            # Sin sesion viva: dos casos distintos.
+            # - El gateway aun conoce el UUID (cliente dentro de su ventana de
+            #   gracia post-restart, todavia no reconecto): reencolar para
+            #   entregarlo cuando vuelva.
+            # - El gateway ya NO lo conoce (caido y olvidado, o completado): el
+            #   resultado es de un cliente muerto; ackear y descartar para no
+            #   reencolar para siempre.
+            if self.state.knows_uuid(client_id):
+                logging.info(
+                    "No session for client %s yet; requeueing result", client_id
+                )
+                time.sleep(_REQUEUE_BACKOFF)
+                nack()
+            else:
+                logging.info(
+                    "Result for unknown/forgotten client %s; discarding", client_id
+                )
+                ack()
+            return
+
+        try:
+            session.send(message)
+        except Exception:
+            # El send fallo con el gateway vivo: el cliente murio. Lo damos por
+            # caido (wipe + limpieza) y descartamos el resultado.
+            logging.warning(
+                "Could not forward result to client %s; declaring crash", client_id
+            )
+            self.reaper.declare_crashed(client_id)
+            ack()
+            return
+
+        if is_eof and self.state.results_complete(client_id, self.expected_results):
+            session.done.set()
+
+        ack()

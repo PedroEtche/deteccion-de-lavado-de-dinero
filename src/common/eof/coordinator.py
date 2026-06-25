@@ -49,7 +49,7 @@ class EofCoordinator:
         client_eofs += 1
 
         self.eofs_by_client[client_id] = client_eofs
-        self.state_manager.save_snapshot(client_id, client_eofs, {})
+        self.state_manager.save_eof_count(client_id, client_eofs)
 
         return self.check_eof_count(client_id)
 

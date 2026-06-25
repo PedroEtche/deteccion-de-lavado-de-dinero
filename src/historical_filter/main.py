@@ -125,6 +125,13 @@ class HistoricalAverageFilter(StreamWorker):
                 self.thresholds_by_client[client_id] = snapshot
                 logging.info("Recovered thresholds for client %s", client_id)
 
+        # Restaurar el watermark de dedup de las candidatas desde su WAL, asi una
+        # candidata reentregada tras una caida no se vuelve a appendear (duplicado).
+        for client_id in self.candidates_state.get_all_client_ids():
+            seen = self.candidates_state.recover_seen_msgs(client_id)
+            if seen:
+                self.duplicate_handler.restore_state(client_id, seen)
+
     def input_routing_keys(self) -> list:
         # Tres routing keys (la base por defecto solo bindea las dos primeras
         # variantes; aca agregamos data_broadcast):
@@ -196,6 +203,8 @@ class HistoricalAverageFilter(StreamWorker):
 
         result_batch = []
         consumed = 0
+        # Las candidatas se releen en streaming desde el WAL en disco; vienen
+        # como dicts (no TransactionRow), asi que se accede por clave.
         for wal_batch in self.candidates_state.iter_wal_batches(client_id):
             consumed += 1
             if consumed <= skip:
@@ -203,8 +212,12 @@ class HistoricalAverageFilter(StreamWorker):
             for tx in wal_batch:
                 threshold = thresholds.get(tx.get("payment_format"))
                 if threshold is None:
+                    # No hay promedio para ese formato en [9/1, 9/5]; no se puede
+                    # comparar, se descarta.
                     continue
                 if (tx.get("amount_paid") or 0.0) < threshold:
+                    # Proyeccion al resultado de Q3. El orden de columnas del CSV
+                    # lo define el orden de campos de Q3ResultRow.
                     result_batch.append(
                         Q3ResultRow(
                             from_bank=tx.get("from_bank"),
@@ -213,6 +226,8 @@ class HistoricalAverageFilter(StreamWorker):
                             amount_paid=tx.get("amount_paid"),
                         )
                     )
+                    # Emitir por chunks: un unico mensaje con todo el resultado
+                    # supera el max message size de RabbitMQ con datasets grandes.
                     if len(result_batch) >= RESULT_BATCH_SIZE:
                         self._send_result_batch(client_id, result_batch, next_id)
                         next_id += 1
@@ -238,13 +253,17 @@ class HistoricalAverageFilter(StreamWorker):
         self.output_mw.send(eof_msg, routing_key="eof_broadcast")
         logging.info("Flush done for client %s", client_id)
 
-        # Borrado al final (el estado de EOF lo borra el EofCoordinator despues de
-        # este on_flush, asi el trigger es lo ultimo en irse).
+        # Estado del cliente ya consumido: liberar candidatas (WAL + checkpoint) y
+        # umbrales (snapshot) en disco. El estado de EOF lo borra el EofCoordinator
+        # despues de este on_flush, asi el trigger es lo ultimo en irse.
         self.thresholds_by_client.pop(client_id, None)
         self.candidates_state.delete_client(client_id)
         self.thresholds_state.delete_client(client_id)
 
     def _send_result_batch(self, client_id: str, result: list, msg_id: int) -> None:
+        # msg_type "batch": tipo generico ya usado entre workers (group,
+        # aggregator). No dispara conversion a TransactionRow en el join, que lo
+        # reenvuelve como q3_result (QueryResultStrategy 3).
         out_msg = serialize(
             build_batch_message(
                 "batch",
@@ -254,6 +273,7 @@ class HistoricalAverageFilter(StreamWorker):
                 sender=self.sender_id,
             )
         )
+        # Round-robin determinista: worker destino = msg_id % N.
         target_worker = (msg_id % self.config.num_downstream_workers) + 1
         self.output_mw.send(out_msg, routing_key=f"worker_{target_worker}")
 

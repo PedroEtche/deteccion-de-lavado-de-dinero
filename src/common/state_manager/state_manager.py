@@ -84,12 +84,36 @@ class WorkerStateManager:
 
     def iter_wal_batches(self, client_id: str):
         wal_path = self._get_path(client_id, ".jsonl")
-        if not os.path.exists(wal_path): 
+        if not os.path.exists(wal_path):
             return
         with open(wal_path, "r", encoding="utf-8") as f:
             for line in f:
                 if line.strip():
                     yield json.loads(line)["batch"]
+
+    def recover_seen_msgs(self, client_id: str) -> Dict[str, int]:
+        """Reconstruye el watermark {sender: max_msg_id} leyendo el WAL en
+        streaming, sin materializar los batches, para WALs que no se truncan con
+        snapshot (ej: candidatas del historical_filter). Trunca un ultimo record
+        cortado por una caida a mitad de escritura."""
+        seen: Dict[str, int] = {}
+        wal_path = self._get_path(client_id, ".jsonl")
+        if not os.path.exists(wal_path):
+            return seen
+        good_offset = 0
+        with open(wal_path, "rb") as f:
+            for raw in f:
+                if not raw.endswith(b"\n"):
+                    break
+                line = raw.strip()
+                if line:
+                    record = json.loads(line)
+                    sender, msg_id = record["sender"], record["msg_id"]
+                    seen[sender] = max(seen.get(sender, 0), msg_id)
+                good_offset += len(raw)
+        with open(wal_path, "r+b") as f:
+            f.truncate(good_offset)
+        return seen
 
     def recover_client(self, client_id: str) -> Tuple[Dict[str, Any], List[Any], Dict[str, int]]:
         snap_data = self._read_json(self._get_path(client_id, ".json"), {})

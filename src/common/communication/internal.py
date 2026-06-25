@@ -353,9 +353,12 @@ def build_results_for_query(query_number: int, batch: list, eof: bool, client: s
     msg["eof"] = eof
     return msg
 
-def build_delete_client_message(client_id: str, sender: str):
-    """Wrapper for building delete client message"""
-    return build_message("delete_client", payload={"client_id": client_id}, sender=sender)
+def build_delete_client_message(*, client, msg_id=None, sender=None):
+    """Mensaje de borrado de cliente: instruye a los workers a borrar TODO el
+    estado del cliente. El `client` va top-level (como el resto de los mensajes)
+    para que el worker lo lea con `decoded.get("client")`. Se broadcastea por
+    `eof_broadcast`, igual que el EOF."""
+    return build_message("delete_client", client=client, msg_id=msg_id, sender=sender)
 
 def serialize(message):
     _validate_message(message, require_sender=True)

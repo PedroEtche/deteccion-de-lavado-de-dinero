@@ -76,17 +76,15 @@ class ClientReaper:
 
         logging.warning("Client %s declared crashed; wiping downstream", client_id)
 
-        # === WIPE DOWNSTREAM (NO IMPLEMENTADO) ===
-        # Aca se debe emitir el mensaje especial a TODOS los workers (broadcast por
-        # los 3 exchanges, como WorkerRouter.send_eof) para que borren toda la
-        # informacion del cliente `client_id`. Se invoca SOLO al declarar que el
-        # cliente se cayo:
+        # Wipe downstream: instruye a TODOS los workers a borrar el estado del
+        # cliente (broadcast por los 3 exchanges, como el EOF). Se emite SOLO al
+        # declarar caido al cliente:
         #   (1) gateway vivo: al detectar la caida del socket (ingress recv / egress
         #       send), o
-        #   (2) tras restart del gateway: cuando el timer de 30s expira sin
+        #   (2) tras restart del gateway: cuando el timer de gracia expira sin
         #       reconexion.
         # NO se emite en la finalizacion normal (ver note_completed).
-        # self._router.send_client_wipe(client_id)
+        self._router.send_delete_client(client_id)
 
         self._registry.remove(client_id)
         self._state.forget_client(client_id)

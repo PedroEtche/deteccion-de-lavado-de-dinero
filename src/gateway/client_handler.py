@@ -5,6 +5,7 @@ import time
 
 from src.common.communication.internal import (
     build_ack_message,
+    build_delete_client_message,
     build_hello_ack_message,
     build_results_done_message,
     deserialize,
@@ -89,6 +90,19 @@ class WorkerRouter:
             self.transactions_usd_mw.send(eof_message, routing_key=routing_key)
             self.transactions_date_mw.send(eof_message, routing_key=routing_key)
             self.accounts_mw.send(eof_message, routing_key=routing_key)
+
+    def send_delete_client(self, client_id: str):
+        """Broadcastea el borrado de un cliente a todos los workers (mismo fan-out
+        que el EOF: routing_key "eof_broadcast" en los 3 exchanges). Cada worker
+        borra TODO el estado del cliente y propaga el borrado aguas abajo."""
+        message = serialize(
+            build_delete_client_message(client=client_id, sender="gateway")
+        )
+        routing_key = "eof_broadcast"
+        with self._lock:
+            self.transactions_usd_mw.send(message, routing_key=routing_key)
+            self.transactions_date_mw.send(message, routing_key=routing_key)
+            self.accounts_mw.send(message, routing_key=routing_key)
 
 
 class ClientHandler:

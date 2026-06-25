@@ -380,7 +380,9 @@ class StreamWorker(BaseWorker):
         Atrapa el payload validado y deduplicado por BaseWorker y lo redirige
         al método handle_data de los workers ad-hoc.
         """
-        self.handle_data(client_id, msg_type, batch, msg_id, sender)
+        sender_chain = f"{sender}_{self.sender_id}"
+
+        self.handle_data(client_id, msg_type, batch, msg_id, sender_chain)
 
     def flush_state(self, client_id: str) -> None:
         """

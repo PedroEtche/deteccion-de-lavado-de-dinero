@@ -6,17 +6,17 @@ class ClientSession:
     """Estado de una conexion de cliente: su socket y un Event que se setea
     cuando ya llegaron todos los EOF de resultado.
 
-    El conteo de EOF de resultado NO vive aca: es durable y vive en
-    GatewayResultProgress (sobrevive a una caida del gateway). La sesion solo
-    refleja, via `done`, cuando el pipeline quedo completo."""
+    El conteo de EOF de resultado NO vive aca: es durable y vive en GatewayState
+    (sobrevive a una caida del gateway). La sesion solo refleja, via `done`, cuando
+    el pipeline quedo completo."""
 
     def __init__(self, client_id, tcp):
         self.client_id = client_id
         self.tcp = tcp
         self.done = threading.Event()
         # Cursor de ingreso en memoria: ultimo msg_id reenviado downstream. Se
-        # siembra en el handshake desde IngressCursorStore y avanza a medida que
-        # el cliente streamea. El valor durable vive en el store.
+        # siembra en el handshake desde GatewayState (cursor_get) y avanza a medida
+        # que el cliente streamea. El valor durable vive en GatewayState.
         self.last_msg_id = -1
         # Dos caminos escriben al socket del cliente: los ACKs (thread de
         # ingress) y los resultados (thread de egress). El lock serializa los
@@ -37,12 +37,10 @@ class ClientSession:
 class ClientRegistry:
     """Registro thread-safe de sesiones de cliente.
 
-    Seam de persistencia: `store` queda como punto de extension. Hoy es None
-    (todo en memoria, comportamiento identico al original). Mas adelante se le
-    inyecta un store basado en WorkerStateManager + DuplicateHandler sin tocar
-    a los llamadores.
-
-    """
+    Las sesiones viven en memoria (se rearman al reconectar). La identidad durable
+    la provee `store` (un GatewayState): asigna UUIDs nuevos y reconoce los que el
+    cliente presenta al reanudar. Si `store` es None, los UUIDs se generan en
+    memoria (sin durabilidad), util para tests."""
 
     def __init__(self, store=None):
         self._lock = threading.Lock()
@@ -72,11 +70,11 @@ class ClientRegistry:
 
         El UUID resuelto queda en `session.client_id`."""
         if presented_uuid is None:
-            client_id = self._store.assign() if self._store else str(uuid.uuid4())
+            client_id = self._store.assign_uuid() if self._store else str(uuid.uuid4())
         else:
             client_id = presented_uuid
             if self._store is not None:
-                self._store.register_existing(client_id)
+                self._store.register_uuid(client_id)
         return self.register(tcp, client_id=client_id)
 
     def get(self, client_id):

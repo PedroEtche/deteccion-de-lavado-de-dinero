@@ -6,12 +6,9 @@ from src.common import fail_recovery
 from src.common.middleware import MessageMiddlewareExchangeRabbitMQ
 
 from src.gateway.egress import ResultConsumer
-from src.gateway.identity import UuidRegistry
-from src.gateway.ingress import ClientHandler
-from src.gateway.ingress_cursor import IngressCursorStore
-from src.gateway.result_progress import GatewayResultProgress
-from src.gateway.router import WorkerRouter
+from src.gateway.ingress import ClientHandler, WorkerRouter
 from src.gateway.sessions import ClientRegistry
+from src.gateway.state import GatewayState
 
 
 class Gateway:
@@ -38,17 +35,13 @@ class Gateway:
         # para salir ordenadamente.
         self._shutdown = threading.Event()
 
-        # Registro de sesiones con autoridad de identidad durable: el store
-        # persiste a disco los UUIDs asignados (sobrevive a una caida del
-        # gateway). Se carga del disco al construirse (recovery).
-        self.registry = ClientRegistry(store=UuidRegistry())
-        # Progreso durable de EOFs de resultado por cliente (sobrevive a una
-        # caida del gateway). Compartido entre el egress (lo persiste) y el
-        # ingress (lo consulta para cerrar clientes ya completos al reanudar).
-        self.result_progress = GatewayResultProgress()
-        # Cursor durable de ingreso por cliente (uuid -> ultimo msg_id reenviado
-        # downstream): base de la reanudacion del streaming de datos.
-        self.ingress_cursor = IngressCursorStore()
+        # Estado durable del gateway (UUIDs asignados, cursor de ingreso por
+        # cliente y progreso de EOFs de resultado). Se carga del disco al
+        # construirse (recovery) y lo comparten el ingress (lo escribe/consulta) y
+        # el egress (persiste los EOF de resultado).
+        self.state = GatewayState()
+        # El registro de sesiones usa el state como autoridad de identidad durable.
+        self.registry = ClientRegistry(store=self.state)
         self.router = None
         self.result_consumer = None
 
@@ -92,7 +85,7 @@ class Gateway:
             self.result_mw,
             self.registry,
             self.expected_results,
-            self.result_progress,
+            self.state,
         )
 
     def run(self):
@@ -134,9 +127,8 @@ class Gateway:
                     router=self.router,
                     sender_id=self.sender_id,
                     shutdown_event=self._shutdown,
-                    progress=self.result_progress,
+                    state=self.state,
                     expected_results=self.expected_results,
-                    cursor=self.ingress_cursor,
                 )
                 client_thread = threading.Thread(target=handler.run, daemon=True)
                 client_thread.start()

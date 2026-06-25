@@ -12,7 +12,7 @@ _REQUEUE_BACKOFF = 0.5
 class ResultConsumer:
     """Consume los resultados que los workers devuelven y los reenvia al cliente
     correcto. Cuenta los EOF de resultado por sesion (de forma DURABLE, via
-    GatewayResultProgress) y, al alcanzar expected_results, libera (done) al
+    GatewayState) y, al alcanzar expected_results, libera (done) al
     thread del cliente para que cierre.
 
     Tolerancia a fallos: si el resultado no se puede entregar todavia (el cliente
@@ -21,11 +21,11 @@ class ResultConsumer:
     EOFs se persiste ANTES de ackear, asi una caida del gateway no lo pierde.
     """
 
-    def __init__(self, result_mw, registry, expected_results, progress):
+    def __init__(self, result_mw, registry, expected_results, state):
         self.result_mw = result_mw
         self.registry = registry
         self.expected_results = expected_results
-        self.progress = progress
+        self.state = state
 
     def run(self):
         self.result_mw.start_consuming(self._dispatch_result)
@@ -46,7 +46,7 @@ class ResultConsumer:
         # puede llegar antes de que el cliente reconecte. record() es idempotente
         # (set por tipo de query), asi que una reentrega no infla el conteo.
         if is_eof:
-            count = self.progress.record(client_id, decoded.get("type"))
+            count = self.state.result_record(client_id, decoded.get("type"))
             logging.info(
                 "Result EOF %d/%d persisted for client %s (%s)",
                 count,
@@ -79,7 +79,7 @@ class ResultConsumer:
             nack()
             return
 
-        if is_eof and self.progress.is_complete(client_id, self.expected_results):
+        if is_eof and self.state.results_complete(client_id, self.expected_results):
             session.done.set()
 
         ack()

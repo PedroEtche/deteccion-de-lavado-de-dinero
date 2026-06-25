@@ -1,5 +1,6 @@
 import logging
 import socket
+import threading
 
 from src.common.communication.tcp import TCPSocket
 from src.common.communication.internal import (
@@ -16,6 +17,74 @@ from src.common.communication.internal import (
 PERSIST_EVERY = 500
 
 
+class WorkerRouter:
+    """Rutea los mensajes de salida del gateway hacia los workers.
+
+    - accounts: broadcast a worker_1..N
+    - transactions: round-robin determinista por msg_id (a date y a usd)
+    - eof: broadcast a "eof_broadcast" en los 3 exchanges
+
+    El round-robin usa `(msg_id % N) + 1` (mismo esquema que BaseWorker): sin
+    contadores ni estado propio, y una reentrega del mismo msg_id cae siempre
+    en el mismo worker. El _lock protege los channels de pika (no son
+    thread-safe) frente a los multiples threads de cliente que publican a la vez.
+    """
+
+    def __init__(
+        self,
+        transactions_usd_mw,
+        transactions_date_mw,
+        accounts_mw,
+        transactions_usd_workers,
+        transactions_date_workers,
+        accounts_workers,
+    ):
+        self.transactions_usd_mw = transactions_usd_mw
+        self.transactions_date_mw = transactions_date_mw
+        self.accounts_mw = accounts_mw
+        self.transactions_usd_workers = transactions_usd_workers
+        self.transactions_date_workers = transactions_date_workers
+        self.accounts_workers = accounts_workers
+        self._lock = threading.Lock()
+
+    def send_accounts(self, serialized_message: bytes):
+        """Broadcasts data to accounts workers."""
+        with self._lock:
+            logging.info(
+                "Broadcasting accounts message to %d workers", self.accounts_workers
+            )
+            for worker_id in range(1, self.accounts_workers + 1):
+                self.accounts_mw.send(
+                    serialized_message,
+                    routing_key=f"worker_{worker_id}",
+                )
+
+    def send_transactions(self, serialized_message: bytes, msg_id: int):
+        """Sends data via deterministic Round-Robin (msg_id % N) to a worker."""
+        date_worker = (msg_id % self.transactions_date_workers) + 1
+        usd_worker = (msg_id % self.transactions_usd_workers) + 1
+        with self._lock:
+            logging.info(
+                "Routing transactions message to workers with Round-Robin strategy"
+            )
+            self.transactions_date_mw.send(
+                serialized_message,
+                routing_key=f"worker_{date_worker}",
+            )
+            self.transactions_usd_mw.send(
+                serialized_message,
+                routing_key=f"worker_{usd_worker}",
+            )
+
+    def send_eof(self, eof_message: bytes):
+        """Broadcasts EOF to all workers listening to the exchange."""
+        routing_key = "eof_broadcast"
+        with self._lock:
+            self.transactions_usd_mw.send(eof_message, routing_key=routing_key)
+            self.transactions_date_mw.send(eof_message, routing_key=routing_key)
+            self.accounts_mw.send(eof_message, routing_key=routing_key)
+
+
 class ClientHandler:
     """Maneja una conexion de cliente: lee mensajes, los despacha al pipeline y
     espera a que vuelvan todos los resultados antes de cerrar la conexion.
@@ -24,7 +93,7 @@ class ClientHandler:
     monotonico SIN ACK por batch. El gateway reenvia cada uno downstream
     (reutilizando el msg_id del cliente) y lleva un cursor durable del ultimo
     msg_id reenviado. Al reconectar, le responde al cliente desde donde retomar
-    (ver IngressCursorStore). El EOF si es stop-and-wait: barrera + flush.
+    (ver GatewayState.cursor_get). El EOF si es stop-and-wait: barrera + flush.
     """
 
     def __init__(
@@ -34,22 +103,20 @@ class ClientHandler:
         router,
         sender_id,
         shutdown_event,
-        progress,
+        state,
         expected_results,
-        cursor,
     ):
         self.tcp = TCPSocket(client_socket)
         self.registry = registry
         self.router = router
         self.sender_id = sender_id
         self._shutdown = shutdown_event
-        # Progreso durable de EOFs de resultado: permite cerrar a un cliente que,
-        # tras un restart del gateway, reconecta y reenvia su EOF cuando los EOFs
-        # de resultado ya estaban todos persistidos.
-        self.progress = progress
+        # Estado durable del gateway: cursor de ingreso (reanudacion del stream) y
+        # progreso de EOFs de resultado (permite cerrar a un cliente que, tras un
+        # restart del gateway, reconecta y reenvia su EOF cuando los EOFs de
+        # resultado ya estaban todos persistidos).
+        self.state = state
         self.expected_results = expected_results
-        # Cursor durable de ingreso (uuid -> ultimo msg_id reenviado downstream).
-        self.cursor = cursor
         self._handlers = {
             "raw_transactions": self._on_transactions,
             "raw_accounts": self._on_accounts,
@@ -129,7 +196,7 @@ class ClientHandler:
         client_id = session.client_id
         # Sembramos el cursor de ingreso de la sesion desde el store durable y se
         # lo comunicamos al cliente: streamea desde resume_from + 1.
-        resume_from = self.cursor.get(client_id)
+        resume_from = self.state.cursor_get(client_id)
         session.last_msg_id = resume_from
         logging.info(
             "Handshake with client %s (presented=%s, resume_from=%d)",
@@ -171,7 +238,7 @@ class ClientHandler:
         if msg_id > session.last_msg_id:
             session.last_msg_id = msg_id
         if msg_id % PERSIST_EVERY == 0:
-            self.cursor.record(client_id, session.last_msg_id)
+            self.state.cursor_record(client_id, session.last_msg_id)
 
     def _on_transactions(self, client_id, message, session):
         msg_id = message.get("msg_id")
@@ -196,21 +263,38 @@ class ClientHandler:
         return False
 
     def _on_eof(self, client_id, message, session):
-        logging.info("Inbound EOF for client %s; forwarding EOF downstream", client_id)
         msg_id = message.get("msg_id")
-        self.router.send_eof(self._forward(message))
-        # El EOF es barrera: persistimos el cursor (= msg_id del EOF) ANTES de
-        # ackear, asi un cliente que recibio el ack del EOF tiene garantizado que
-        # el gateway sabe, de forma durable, que termino de enviar.
-        if msg_id is not None and msg_id > session.last_msg_id:
-            session.last_msg_id = msg_id
-        self.cursor.record(client_id, session.last_msg_id)
+        # Solo forwardeamos un EOF NUEVO (msg_id > cursor). Un EOF reenviado (un
+        # cliente que reanudo directo a la fase de resultados re-manda su EOF para
+        # que le señalemos completitud) YA fue propagado: re-forwardearlo dispara
+        # re-flushes NO idempotentes aguas abajo (p.ej. q3 historical_filter
+        # re-procesa su WAL ya borrado) que corrompen el resultado. Igual lo
+        # ackeamos y evaluamos completitud para poder mandar results_done.
+        is_new = msg_id is None or msg_id > session.last_msg_id
+        if is_new:
+            logging.info(
+                "Inbound EOF for client %s; forwarding EOF downstream", client_id
+            )
+            self.router.send_eof(self._forward(message))
+            # El EOF es barrera: persistimos el cursor (= msg_id del EOF) ANTES de
+            # ackear, asi un cliente que recibio el ack del EOF tiene garantizado
+            # que el gateway sabe, de forma durable, que termino de enviar.
+            if msg_id is not None:
+                session.last_msg_id = msg_id
+            self.state.cursor_record(client_id, session.last_msg_id)
+        else:
+            logging.info(
+                "Duplicate EOF for client %s (msg_id=%s already forwarded); "
+                "acking without re-forwarding",
+                client_id,
+                msg_id,
+            )
         self._ack(client_id, message, session)
         # Si los EOF de resultado ya estaban todos persistidos (el gateway se
         # cayo y revivio, y el cliente reenvio su EOF para reanudar), no van a
         # volver a llegar por la cola: liberamos `done` aca para cerrar al
         # cliente en vez de dejarlo colgado esperando.
-        if self.progress.is_complete(client_id, self.expected_results):
+        if self.state.results_complete(client_id, self.expected_results):
             logging.info(
                 "Results already complete for client %s; closing on resumed EOF",
                 client_id,

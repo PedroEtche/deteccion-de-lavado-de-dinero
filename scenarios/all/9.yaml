@@ -25,6 +25,7 @@ services:
       rabbitmq:
         condition: service_healthy
     volumes:
+      - ./persisted_state:/app/state
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - PYTHONUNBUFFERED=1

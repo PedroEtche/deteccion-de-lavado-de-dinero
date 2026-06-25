@@ -6,6 +6,8 @@ results/20260528_163849_q3
 /data/LI-Small_accounts.csv
 /data/LI-Medium_Trans.csv
 /data/LI-Medium_accounts.csv
+/data/HI-Medium_Trans.csv
+/data/HI-Medium_accounts.csv
 .DS_Store
 /data/etc
 /data/datasets

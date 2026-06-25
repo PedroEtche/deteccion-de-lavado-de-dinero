@@ -2,15 +2,12 @@
 """
 Chequeo de consistencia por tamaño de los resultados de cada cliente.
 
-A diferencia de compare_results.py (que compara contra un CSV esperado fila por
-fila), este script solo verifica que la CANTIDAD de lineas de cada query coincida
-con el tamaño esperado. Pensado para correr con `make test_all`.
-
-Caso especial q5: debe tener exactamente 1 linea y su valor debe ser 9261.
+Verifica que la CANTIDAD de lineas de cada query coincida con lo esperado.
+Caso especial q5: debe tener 1 linea y su valor debe ser 9261.
 
 Exit codes:
     0  todos los clientes tienen los tamaños esperados
-    1  al menos un cliente no coincide (o falta un archivo que deberia existir)
+    1  al menos un cliente no coincide
 """
 
 import glob
@@ -18,17 +15,8 @@ import os
 import sys
 
 # Cantidad de lineas esperada por query.
-EXPECTED_LINES = {
-    "q1": 336253,
-    "q2": 15698,
-    "q3": 663650,
-    "q4": 0,
-    "q5": 1,
-}
-
-# La unica linea de q5 debe valer esto.
+EXPECTED_LINES = {"q1": 336253, "q2": 15698, "q3": 663650, "q4": 0, "q5": 1}
 Q5_EXPECTED_VALUE = "9261"
-
 CLIENTS_DIR = "./results/clients"
 
 # Colores ANSI (suprimidos si no es una TTY).
@@ -39,7 +27,7 @@ RESET = "\033[0m" if _USE_COLOR else ""
 
 
 def read_lines(path):
-    """Devuelve las lineas no vacias del archivo (lista de strings sin el \\n)."""
+    """Lineas no vacias del archivo."""
     with open(path, encoding="utf-8") as fh:
         return [line.strip() for line in fh if line.strip()]
 
@@ -50,33 +38,23 @@ def check_query(client_dir, query):
     expected = EXPECTED_LINES[query]
 
     if not os.path.exists(path):
-        # Un archivo ausente solo es valido cuando el tamaño esperado es 0.
+        # Un archivo ausente solo es valido cuando se esperan 0 lineas.
         if expected == 0:
             return True, f"{query}: 0 lineas (sin archivo)"
         return False, f"{query}: falta el archivo {path}"
 
-    try:
-        lines = read_lines(path)
-    except Exception as exc:
-        return False, f"{query}: error leyendo {path}: {exc}"
-
+    lines = read_lines(path)
     if len(lines) != expected:
         return False, f"{query}: {len(lines)} lineas, esperadas {expected}"
-
-    if query == "q5" and lines and lines[0] != Q5_EXPECTED_VALUE:
-        return False, f"{query}: valor {lines[0]!r}, esperado {Q5_EXPECTED_VALUE!r}"
-
+    if query == "q5" and lines[0] != Q5_EXPECTED_VALUE:
+        return False, f"{query}: valor {lines[0]}, esperado {Q5_EXPECTED_VALUE}"
     return True, f"{query}: {len(lines)} lineas"
 
 
 def main():
     client_dirs = sorted(glob.glob(f"{CLIENTS_DIR}/client_*"))
-
     if not client_dirs:
-        print(
-            f"\n{RED}FAIL{RESET}  no se encontraron clientes en {CLIENTS_DIR}/client_*\n",
-            file=sys.stderr,
-        )
+        print(f"{RED}FAIL{RESET}  no se encontraron clientes en {CLIENTS_DIR}/client_*")
         sys.exit(1)
 
     overall_ok = True
@@ -88,7 +66,6 @@ def main():
             if not ok:
                 overall_ok = False
 
-    print()
     sys.exit(0 if overall_ok else 1)
 
 

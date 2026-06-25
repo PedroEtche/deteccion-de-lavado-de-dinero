@@ -17,7 +17,7 @@ logs:
 	docker compose -f docker-compose.yaml logs
 .PHONY: logs
 
-test:
+test_fixed:
 	-python3 scripts/compare_results.py q1
 	-python3 scripts/compare_results.py q2
 	-python3 scripts/compare_results.py q3
@@ -28,6 +28,10 @@ test:
 test_all:
 	python3 scripts/check_sizes.py
 .PHONY: test_all
+
+compare_clients:
+	python3 scripts/compare_clients.py
+.PHONY: compare_clients
 
 debug:
 	@echo "Levanto solo Rabbit + Gateawy + cliente para ver si los mensajes llegan"
@@ -125,7 +129,7 @@ q5_test_fixed:
 
 chaos:
 	@echo "Chaos Monkey: espera a que levanten todos los containers y empieza a matarlos."
-	python3 scripts/chaos_monkey.py --wait
+	python3 scripts/chaos_monkey.py
 .PHONY: chaos
 
 all_switch:
@@ -139,6 +143,7 @@ all_switch:
 	@echo "7) Pruebas con datos Li-Medium: 3 cliente, 2 workers"
 	@echo "8) Pruebas con datos fixed: 3 cliente, 3 workers de cada uno"
 	@echo "9) Pruebas con datos LI-Small: 3 cliente, 3 workers de cada uno"
+	@echo "10) Pruebas con datos HI-Medium: 3 cliente, 3 workers de cada uno"
 	@read -p "Selecciona uno: " option;	\
 	cp ./scenarios/all/$${option}.yaml docker-compose.yaml
 .PHONY: q5_switch

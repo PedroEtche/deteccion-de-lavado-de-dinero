@@ -3,18 +3,10 @@
 ## Funcionalidades
 
 - Q2 falla con unkwons -> MV
-- Historical filter no bardee a pika -> MM
 - Persistir msg_ids en workers con estado -> MV
 - Escritura atomica de directorios (batches cuando llegan y msg_id) -> MV
 - Stateless solo persiste el EOF_count, Stateful persiste batches + last_msg_id_seen + msg_id_counter + state + EOF_count -> MV
 - Gateway + cliente tolerancia a fallos -> P
-- Sigterm gracefull -> MM
-
-## Performance
-
-### Gateway (`src/gateway/main.py`)
-- Puede que falte proyectar columnas entre los stages? revisar porque no estoy 100% (al menos q3)
-
 
 # Para el informe
 

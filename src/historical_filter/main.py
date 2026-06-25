@@ -24,8 +24,10 @@ CONFIG_PATH = "./config.yaml"
 AVERAGES_MSG_TYPE = "batch"
 CANDIDATES_MSG_TYPE = "raw_transactions"
 
-#
 RESULT_BATCH_SIZE = 5000
+
+# Cada cuantos records del WAL se persiste el progreso del flush.
+CHECKPOINT_EVERY = 200
 
 
 @dataclass
@@ -183,24 +185,26 @@ class HistoricalAverageFilter(StreamWorker):
             logging.warning("Unexpected msg_type %s for client %s", msg_type, client_id)
 
     def on_flush(self, client_id: str) -> None:
-        thresholds = self.thresholds_by_client.pop(client_id, {})
+        thresholds = self.thresholds_by_client.get(client_id, {})
 
-        candidate_count = 0
-        emitted_count = 0
+        # Reanudar desde el ultimo checkpoint si el flush se cayo a mitad. El
+        # contador de salida (next_id) es por cliente y vive en el checkpoint,
+        # asi un re-flush re-deriva los mismos msg_id y el downstream deduplica.
+        checkpoint = self.candidates_state.load_results(client_id)
+        skip = checkpoint["records_consumed"] if checkpoint else 0
+        next_id = checkpoint["out_msg_id"] if checkpoint else 0
+
         result_batch = []
-        # Las candidatas se releen en streaming desde el WAL en disco; vienen
-        # como dicts (no TransactionRow), asi que se accede por clave.
+        consumed = 0
         for wal_batch in self.candidates_state.iter_wal_batches(client_id):
+            consumed += 1
+            if consumed <= skip:
+                continue
             for tx in wal_batch:
-                candidate_count += 1
                 threshold = thresholds.get(tx.get("payment_format"))
                 if threshold is None:
-                    # No hay promedio para ese formato en [9/1, 9/5]; no se puede
-                    # comparar, se descarta.
                     continue
                 if (tx.get("amount_paid") or 0.0) < threshold:
-                    # Proyeccion al resultado de Q3. El orden de columnas del CSV
-                    # lo define el orden de campos de Q3ResultRow.
                     result_batch.append(
                         Q3ResultRow(
                             from_bank=tx.get("from_bank"),
@@ -209,41 +213,38 @@ class HistoricalAverageFilter(StreamWorker):
                             amount_paid=tx.get("amount_paid"),
                         )
                     )
-                    # Emitir por chunks: un unico mensaje con todo el resultado
-                    # supera el max message size de RabbitMQ con datasets grandes.
                     if len(result_batch) >= RESULT_BATCH_SIZE:
-                        self._send_result_batch(client_id, result_batch)
-                        emitted_count += len(result_batch)
+                        self._send_result_batch(client_id, result_batch, next_id)
+                        next_id += 1
                         result_batch = []
+            if consumed % CHECKPOINT_EVERY == 0:
+                # Vaciar el buffer antes de checkpointear: el checkpoint asume
+                # que no quedo resultado parcial sin emitir.
+                if result_batch:
+                    self._send_result_batch(client_id, result_batch, next_id)
+                    next_id += 1
+                    result_batch = []
+                self.candidates_state.save_results(
+                    client_id, {"records_consumed": consumed, "out_msg_id": next_id}
+                )
 
         if result_batch:
-            self._send_result_batch(client_id, result_batch)
-            emitted_count += len(result_batch)
-
-        logging.info(
-            "Flush client %s: %d candidates -> %d below threshold",
-            client_id,
-            candidate_count,
-            emitted_count,
-        )
+            self._send_result_batch(client_id, result_batch, next_id)
+            next_id += 1
 
         eof_msg = serialize(
-            build_eof_message(
-                client=client_id, msg_id=self._next_msg_id(), sender=self.sender_id
-            )
+            build_eof_message(client=client_id, msg_id=next_id, sender=self.sender_id)
         )
         self.output_mw.send(eof_msg, routing_key="eof_broadcast")
+        logging.info("Flush done for client %s", client_id)
 
-        # Estado del cliente ya consumido: liberar candidatas (WAL) y umbrales
-        # (snapshot) en disco. El conteo de EOFs lo limpia el EofCoordinator.
+        # Borrado al final (el estado de EOF lo borra el EofCoordinator despues de
+        # este on_flush, asi el trigger es lo ultimo en irse).
+        self.thresholds_by_client.pop(client_id, None)
         self.candidates_state.delete_client(client_id)
         self.thresholds_state.delete_client(client_id)
 
-    def _send_result_batch(self, client_id: str, result: list) -> None:
-        # msg_type "batch": tipo generico ya usado entre workers (group,
-        # aggregator). No dispara conversion a TransactionRow en el join, que lo
-        # reenvuelve como q3_result (QueryResultStrategy 3).
-        msg_id = self._next_msg_id()
+    def _send_result_batch(self, client_id: str, result: list, msg_id: int) -> None:
         out_msg = serialize(
             build_batch_message(
                 "batch",
@@ -253,7 +254,6 @@ class HistoricalAverageFilter(StreamWorker):
                 sender=self.sender_id,
             )
         )
-        # Round-robin determinista: worker destino = msg_id % N.
         target_worker = (msg_id % self.config.num_downstream_workers) + 1
         self.output_mw.send(out_msg, routing_key=f"worker_{target_worker}")
 

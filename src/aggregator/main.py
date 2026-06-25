@@ -182,9 +182,7 @@ class AggregatorWorker(StatefulWorker):
             
             self.execute_result(client_id, results)
 
-        self.strategy.clear_client_state(client_id)
-        self.state_manager.delete_client(client_id)
-        self.received_batches_per_client.pop(client_id, None)
+        self.clear_client_state(client_id)
 
     def clear_client_state(self, client_id: str) -> None:
         self.strategy.clear_client_state(client_id)

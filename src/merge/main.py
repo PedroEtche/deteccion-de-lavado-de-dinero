@@ -182,10 +182,7 @@ class MergeWorker(StatefulWorker):
         self.state_manager.save_results(client_id, results_to_send)
 
         self.execute_result(client_id, results_to_send)
-
-        self.strategy.clear_client_state(client_id)
-        self.state_manager.delete_client(client_id)
-        self.received_batches_per_client.pop(client_id, None)
+        self.clear_client_state(client_id)
 
     def clear_client_state(self, client_id):
         self.strategy.clear_client_state(client_id)

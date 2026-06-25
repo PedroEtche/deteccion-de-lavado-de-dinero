@@ -188,8 +188,7 @@ class JoinWorker(StatefulWorker):
 
         self._execute_join_results(client_id, [final_msg])
 
-        self.state_manager.delete_client(client_id)
-        self.received_batches_per_client.pop(client_id, None)
+        self.clear_client_state(client_id)
         
     def _execute_join_results(self, client_id: str, results: list) -> None:
         """Translates the saved outbox dictionaries into messages directly."""
@@ -197,7 +196,6 @@ class JoinWorker(StatefulWorker):
             self._route_and_send(client_id, message, msg_id=message["msg_id"])
 
     def clear_client_state(self, client_id: str) -> None:
-        self.strategy.clear_client_state(client_id)
         self.state_manager.delete_client(client_id)
         self.received_batches_per_client.pop(client_id, None)
 

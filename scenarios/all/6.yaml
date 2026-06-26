@@ -15,7 +15,6 @@ services:
     ports:
     - 5672:5672
     - 15672:15672
-
   gateway:
     build:
       context: .
@@ -27,16 +26,19 @@ services:
     environment:
     - PYTHONUNBUFFERED=1
     - MOM_HOST=rabbitmq
-    - TRANSACTIONS_USD_EXCHANGE=transactions_usd_exchange      # -> Filtro USD
-    - TRANSACTIONS_DATE_EXCHANGE=transactions_date_exchange    # -> router Q5 (todas las monedas)
-    - ACCOUNTS_EXCHANGE=merge_max_by_account_exchange          # -> merge de Q2
+    - TRANSACTIONS_USD_EXCHANGE=transactions_usd_exchange
+    - TRANSACTIONS_DATE_EXCHANGE=transactions_date_exchange
+    - ACCOUNTS_EXCHANGE=merge_max_by_account_exchange
     - RESULT_EXCHANGE=gateway_results_exchange
     - SERVER_PORT=5678
     - TRANSACTIONS_USD_WORKERS=2
     - TRANSACTIONS_DATE_WORKERS=2
     - ACCOUNTS_WORKERS=2
-    - EXPECTED_RESULTS=5    # Q1+Q2+Q3+Q4+Q5;
-
+    - EXPECTED_RESULTS=5
+    - FD_NODES=1:gateway,2:q1_join,3:q2_merge,4:q2_join,5:q3_averages_join,6:q3_result_join,7:q4_join_0,8:q5_join
+    - FD_NODE_ID=1
+    volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
   filtro_usd_1:
     build:
       context: .
@@ -47,12 +49,14 @@ services:
         condition: service_healthy
     volumes:
     - ./src/filter/config/usd_fanout_config.yaml:/app/config.yaml:ro
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - WORKER_ID=1
     - EOF_EXPECTED=1
     - NUM_DOWNSTREAM_WORKERS=2
     - STAGE_NAME=filtro_usd
-
+    - FD_NODES=1:filtro_usd_1,2:filtro_usd_2
+    - FD_NODE_ID=1
   filtro_usd_2:
     build:
       context: .
@@ -63,12 +67,14 @@ services:
         condition: service_healthy
     volumes:
     - ./src/filter/config/usd_fanout_config.yaml:/app/config.yaml:ro
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - WORKER_ID=2
     - EOF_EXPECTED=1
     - NUM_DOWNSTREAM_WORKERS=2
     - STAGE_NAME=filtro_usd
-
+    - FD_NODES=1:filtro_usd_1,2:filtro_usd_2
+    - FD_NODE_ID=2
   q1_filter_lt50_1:
     build:
       context: .
@@ -79,12 +85,14 @@ services:
         condition: service_healthy
     volumes:
     - ./src/filter/config/q1_lt50_input_config.yaml:/app/config.yaml:ro
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - WORKER_ID=1
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=1
     - STAGE_NAME=q1_filter_lt50
-
+    - FD_NODES=1:q1_filter_lt50_1,2:q1_filter_lt50_2
+    - FD_NODE_ID=1
   q1_filter_lt50_2:
     build:
       context: .
@@ -95,12 +103,14 @@ services:
         condition: service_healthy
     volumes:
     - ./src/filter/config/q1_lt50_input_config.yaml:/app/config.yaml:ro
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - WORKER_ID=2
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=1
     - STAGE_NAME=q1_filter_lt50
-
+    - FD_NODES=1:q1_filter_lt50_1,2:q1_filter_lt50_2
+    - FD_NODE_ID=2
   q1_join:
     build:
       context: .
@@ -111,13 +121,15 @@ services:
         condition: service_healthy
     volumes:
     - ./src/join/config/q1_config.yaml:/app/config.yaml:ro
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - WORKER_ID=1
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=1
     - QUERY_RESULT_NUMBER=1
     - STAGE_NAME=q1_join
-
+    - FD_NODES=1:gateway,2:q1_join,3:q2_merge,4:q2_join,5:q3_averages_join,6:q3_result_join,7:q4_join_0,8:q5_join
+    - FD_NODE_ID=2
   q2_group_1:
     build:
       context: .
@@ -128,13 +140,15 @@ services:
         condition: service_healthy
     volumes:
     - ./src/group/config/q2_bank_max_input_config.yaml:/app/config.yaml:ro
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - WORKER_ID=1
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=2
     - ROUTING_STRATEGY=sharded
     - STAGE_NAME=q2_group_bank_max
-
+    - FD_NODES=1:q2_group_1,2:q2_group_2
+    - FD_NODE_ID=1
   q2_group_2:
     build:
       context: .
@@ -145,13 +159,15 @@ services:
         condition: service_healthy
     volumes:
     - ./src/group/config/q2_bank_max_input_config.yaml:/app/config.yaml:ro
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - WORKER_ID=2
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=2
     - ROUTING_STRATEGY=sharded
     - STAGE_NAME=q2_group_bank_max
-
+    - FD_NODES=1:q2_group_1,2:q2_group_2
+    - FD_NODE_ID=2
   q2_aggregator_1:
     build:
       context: .
@@ -162,13 +178,15 @@ services:
         condition: service_healthy
     volumes:
     - ./src/aggregator/config/max_amount_per_bank_config.yaml:/app/config.yaml:ro
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - WORKER_ID=1
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=1
     - ROUTING_STRATEGY=round_robin
     - STAGE_NAME=q2_aggregator
-
+    - FD_NODES=1:q2_aggregator_1,2:q2_aggregator_2
+    - FD_NODE_ID=1
   q2_aggregator_2:
     build:
       context: .
@@ -179,13 +197,15 @@ services:
         condition: service_healthy
     volumes:
     - ./src/aggregator/config/max_amount_per_bank_config.yaml:/app/config.yaml:ro
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - WORKER_ID=2
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=1
     - ROUTING_STRATEGY=round_robin
     - STAGE_NAME=q2_aggregator
-
+    - FD_NODES=1:q2_aggregator_1,2:q2_aggregator_2
+    - FD_NODE_ID=2
   q2_merge:
     build:
       context: .
@@ -196,12 +216,14 @@ services:
         condition: service_healthy
     volumes:
     - ./src/merge/config/accounts_config.yaml:/app/config.yaml:ro
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - WORKER_ID=1
     - EOF_EXPECTED=3
     - NUM_DOWNSTREAM_WORKERS=1
     - STAGE_NAME=q2_merge
-
+    - FD_NODES=1:gateway,2:q1_join,3:q2_merge,4:q2_join,5:q3_averages_join,6:q3_result_join,7:q4_join_0,8:q5_join
+    - FD_NODE_ID=3
   q2_join:
     build:
       context: .
@@ -212,13 +234,15 @@ services:
         condition: service_healthy
     volumes:
     - ./src/join/config/q2_result.yaml:/app/config.yaml:ro
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - WORKER_ID=1
     - EOF_EXPECTED=1
     - NUM_DOWNSTREAM_WORKERS=1
     - QUERY_RESULT_NUMBER=2
     - STAGE_NAME=q2_join
-
+    - FD_NODES=1:gateway,2:q1_join,3:q2_merge,4:q2_join,5:q3_averages_join,6:q3_result_join,7:q4_join_0,8:q5_join
+    - FD_NODE_ID=4
   q3_q4_router_1:
     build:
       context: .
@@ -229,11 +253,13 @@ services:
         condition: service_healthy
     volumes:
     - ./src/transaction_router/config/q3_q4_dates_scaled.yaml:/app/config.yaml:ro
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
-    - EOF_EXPECTED=2        # filtro_usd
+    - EOF_EXPECTED=2
     - WORKER_ID=1
     - STAGE_NAME=q3_q4_router
-
+    - FD_NODES=1:q3_q4_router_1,2:q3_q4_router_2
+    - FD_NODE_ID=1
   q3_q4_router_2:
     build:
       context: .
@@ -244,11 +270,13 @@ services:
         condition: service_healthy
     volumes:
     - ./src/transaction_router/config/q3_q4_dates_scaled.yaml:/app/config.yaml:ro
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
-    - EOF_EXPECTED=2        # filtro_usd
+    - EOF_EXPECTED=2
     - WORKER_ID=2
     - STAGE_NAME=q3_q4_router
-
+    - FD_NODES=1:q3_q4_router_1,2:q3_q4_router_2
+    - FD_NODE_ID=2
   q3_group_1:
     build:
       context: .
@@ -259,13 +287,15 @@ services:
         condition: service_healthy
     volumes:
     - ./src/group/config/q3_payment_avg.yaml:/app/config.yaml:ro
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - WORKER_ID=1
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=2
     - ROUTING_STRATEGY=sharded
     - STAGE_NAME=q3_group
-
+    - FD_NODES=1:q3_group_1,2:q3_group_2
+    - FD_NODE_ID=1
   q3_group_2:
     build:
       context: .
@@ -276,13 +306,15 @@ services:
         condition: service_healthy
     volumes:
     - ./src/group/config/q3_payment_avg.yaml:/app/config.yaml:ro
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - WORKER_ID=2
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=2
     - ROUTING_STRATEGY=sharded
     - STAGE_NAME=q3_group
-
+    - FD_NODES=1:q3_group_1,2:q3_group_2
+    - FD_NODE_ID=2
   q3_aggregator_1:
     build:
       context: .
@@ -293,13 +325,15 @@ services:
         condition: service_healthy
     volumes:
     - ./src/aggregator/config/q3_payment_avg.yaml:/app/config.yaml:ro
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - WORKER_ID=1
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=1
     - ROUTING_STRATEGY=round_robin
     - STAGE_NAME=q3_aggregator
-
+    - FD_NODES=1:q3_aggregator_1,2:q3_aggregator_2
+    - FD_NODE_ID=1
   q3_aggregator_2:
     build:
       context: .
@@ -310,13 +344,15 @@ services:
         condition: service_healthy
     volumes:
     - ./src/aggregator/config/q3_payment_avg.yaml:/app/config.yaml:ro
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - WORKER_ID=2
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=1
     - ROUTING_STRATEGY=round_robin
     - STAGE_NAME=q3_aggregator
-
+    - FD_NODES=1:q3_aggregator_1,2:q3_aggregator_2
+    - FD_NODE_ID=2
   q3_averages_join:
     build:
       context: .
@@ -327,13 +363,15 @@ services:
         condition: service_healthy
     volumes:
     - ./src/join/config/q3_averages_broadcast_config.yaml:/app/config.yaml:ro
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - WORKER_ID=1
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=1
     - ROUTING_STRATEGY=broadcast
     - STAGE_NAME=q3_averages_join
-
+    - FD_NODES=1:gateway,2:q1_join,3:q2_merge,4:q2_join,5:q3_averages_join,6:q3_result_join,7:q4_join_0,8:q5_join
+    - FD_NODE_ID=5
   q3_historical_filter_1:
     build:
       context: .
@@ -344,12 +382,15 @@ services:
         condition: service_healthy
     volumes:
     - ./src/historical_filter/config/q3.yaml:/app/config.yaml:ro
+    - /var/run/docker.sock:/var/run/docker.sock
+    - ./persisted_state:/app/state
     environment:
     - WORKER_ID=1
     - EOF_EXPECTED=3
     - NUM_DOWNSTREAM_WORKERS=1
     - STAGE_NAME=q3_historical_filter
-
+    - FD_NODES=1:q3_historical_filter_1,2:q3_historical_filter_2
+    - FD_NODE_ID=1
   q3_historical_filter_2:
     build:
       context: .
@@ -360,12 +401,15 @@ services:
         condition: service_healthy
     volumes:
     - ./src/historical_filter/config/q3.yaml:/app/config.yaml:ro
+    - /var/run/docker.sock:/var/run/docker.sock
+    - ./persisted_state:/app/state
     environment:
     - WORKER_ID=2
     - EOF_EXPECTED=3
     - NUM_DOWNSTREAM_WORKERS=1
     - STAGE_NAME=q3_historical_filter
-
+    - FD_NODES=1:q3_historical_filter_1,2:q3_historical_filter_2
+    - FD_NODE_ID=2
   q3_result_join:
     build:
       context: .
@@ -376,13 +420,15 @@ services:
         condition: service_healthy
     volumes:
     - ./src/join/config/q3_result_config.yaml:/app/config.yaml:ro
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - WORKER_ID=1
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=1
     - QUERY_RESULT_NUMBER=3
     - STAGE_NAME=q3_result_join
-
+    - FD_NODES=1:gateway,2:q1_join,3:q2_merge,4:q2_join,5:q3_averages_join,6:q3_result_join,7:q4_join_0,8:q5_join
+    - FD_NODE_ID=6
   group_scatter_1:
     build:
       context: .
@@ -394,13 +440,15 @@ services:
     volumes:
     - ./src/group/config/q4_scatter_group.yaml:/app/config.yaml:ro
     - ./persisted_state:/app/state
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - EOF_EXPECTED=2
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=2
     - ROUTING_STRATEGY=sharded
     - STAGE_NAME=group_scatter
-
+    - FD_NODES=1:group_scatter_1,2:group_scatter_2
+    - FD_NODE_ID=1
   group_scatter_2:
     build:
       context: .
@@ -412,13 +460,15 @@ services:
     volumes:
     - ./src/group/config/q4_scatter_group.yaml:/app/config.yaml:ro
     - ./persisted_state:/app/state
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - EOF_EXPECTED=2
     - WORKER_ID=2
     - NUM_DOWNSTREAM_WORKERS=2
     - ROUTING_STRATEGY=sharded
     - STAGE_NAME=group_scatter
-
+    - FD_NODES=1:group_scatter_1,2:group_scatter_2
+    - FD_NODE_ID=2
   aggregator_scatter_group_1:
     build:
       context: .
@@ -430,13 +480,15 @@ services:
     volumes:
     - ./src/aggregator/config/q4_scatter_aggregator.yaml:/app/config.yaml:ro
     - ./persisted_state:/app/state
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - EOF_EXPECTED=2
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=2
     - ROUTING_STRATEGY=sharded
     - STAGE_NAME=scatter_aggregator
-
+    - FD_NODES=1:aggregator_scatter_group_1,2:aggregator_scatter_group_2
+    - FD_NODE_ID=1
   aggregator_scatter_group_2:
     build:
       context: .
@@ -448,13 +500,15 @@ services:
     volumes:
     - ./src/aggregator/config/q4_scatter_aggregator.yaml:/app/config.yaml:ro
     - ./persisted_state:/app/state
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - EOF_EXPECTED=2
     - WORKER_ID=2
     - NUM_DOWNSTREAM_WORKERS=2
     - ROUTING_STRATEGY=sharded
     - STAGE_NAME=scatter_aggregator
-
+    - FD_NODES=1:aggregator_scatter_group_1,2:aggregator_scatter_group_2
+    - FD_NODE_ID=2
   merge_with_self_1:
     build:
       context: .
@@ -466,12 +520,14 @@ services:
     volumes:
     - ./src/merge/config/selfmerge.yaml:/app/config.yaml:ro
     - ./persisted_state:/app/state
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - EOF_EXPECTED=2
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=2
     - STAGE_NAME=self_merge
-
+    - FD_NODES=1:merge_with_self_1,2:merge_with_self_2
+    - FD_NODE_ID=1
   merge_with_self_2:
     build:
       context: .
@@ -483,12 +539,14 @@ services:
     volumes:
     - ./src/merge/config/selfmerge.yaml:/app/config.yaml:ro
     - ./persisted_state:/app/state
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - EOF_EXPECTED=2
     - WORKER_ID=2
     - NUM_DOWNSTREAM_WORKERS=2
     - STAGE_NAME=self_merge
-
+    - FD_NODES=1:merge_with_self_1,2:merge_with_self_2
+    - FD_NODE_ID=2
   group_account_pair_1:
     build:
       context: .
@@ -500,12 +558,14 @@ services:
     volumes:
     - ./src/group/config/account_pair_count.yaml:/app/config.yaml:ro
     - ./persisted_state:/app/state
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - EOF_EXPECTED=2
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=2
     - STAGE_NAME=group_account_pair
-    
+    - FD_NODES=1:group_account_pair_1,2:group_account_pair_2
+    - FD_NODE_ID=1
   aggregator_account_pair_1:
     build:
       context: .
@@ -517,12 +577,14 @@ services:
     volumes:
     - ./src/aggregator/config/account_pairs_aggregator.yaml:/app/config.yaml:ro
     - ./persisted_state:/app/state
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - EOF_EXPECTED=2
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=2
     - STAGE_NAME=aggregator_account_pair
-
+    - FD_NODES=1:aggregator_account_pair_1,2:aggregator_account_pair_2
+    - FD_NODE_ID=1
   aggregator_account_pair_2:
     build:
       context: .
@@ -534,12 +596,14 @@ services:
     volumes:
     - ./src/aggregator/config/account_pairs_aggregator.yaml:/app/config.yaml:ro
     - ./persisted_state:/app/state
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - EOF_EXPECTED=2
     - WORKER_ID=2
     - NUM_DOWNSTREAM_WORKERS=2
     - STAGE_NAME=aggregator_account_pair
-
+    - FD_NODES=1:aggregator_account_pair_1,2:aggregator_account_pair_2
+    - FD_NODE_ID=2
   group_account_pair_2:
     build:
       context: .
@@ -551,12 +615,14 @@ services:
     volumes:
     - ./src/group/config/account_pair_count.yaml:/app/config.yaml:ro
     - ./persisted_state:/app/state
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - EOF_EXPECTED=2
     - WORKER_ID=2
     - NUM_DOWNSTREAM_WORKERS=2
     - STAGE_NAME=group_account_pair
-
+    - FD_NODES=1:group_account_pair_1,2:group_account_pair_2
+    - FD_NODE_ID=2
   group_by_accounts_1:
     build:
       context: .
@@ -568,13 +634,15 @@ services:
     volumes:
     - ./src/group/config/group_by_accounts.yaml:/app/config.yaml:ro
     - ./persisted_state:/app/state
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - EOF_EXPECTED=2
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=2
     - ROUTING_STRATEGY=sharded
     - STAGE_NAME=group_accounts
-
+    - FD_NODES=1:group_by_accounts_1,2:group_by_accounts_2
+    - FD_NODE_ID=1
   group_by_accounts_2:
     build:
       context: .
@@ -586,13 +654,15 @@ services:
     volumes:
     - ./src/group/config/group_by_accounts.yaml:/app/config.yaml:ro
     - ./persisted_state:/app/state
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - EOF_EXPECTED=2
     - WORKER_ID=2
     - NUM_DOWNSTREAM_WORKERS=2
     - ROUTING_STRATEGY=sharded
     - STAGE_NAME=group_accounts
-
+    - FD_NODES=1:group_by_accounts_1,2:group_by_accounts_2
+    - FD_NODE_ID=2
   aggregator_accounts_1:
     build:
       context: .
@@ -604,12 +674,14 @@ services:
     volumes:
     - ./src/aggregator/config/q4_aggregator_accounts.yaml:/app/config.yaml:ro
     - ./persisted_state:/app/state
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - EOF_EXPECTED=2
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=1
     - STAGE_NAME=aggregator_accounts
-
+    - FD_NODES=1:aggregator_accounts_1,2:aggregator_accounts_2
+    - FD_NODE_ID=1
   aggregator_accounts_2:
     build:
       context: .
@@ -621,12 +693,14 @@ services:
     volumes:
     - ./src/aggregator/config/q4_aggregator_accounts.yaml:/app/config.yaml:ro
     - ./persisted_state:/app/state
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - EOF_EXPECTED=2
     - WORKER_ID=2
     - NUM_DOWNSTREAM_WORKERS=1
     - STAGE_NAME=aggregator_accounts
-
+    - FD_NODES=1:aggregator_accounts_1,2:aggregator_accounts_2
+    - FD_NODE_ID=2
   q4_join_0:
     build:
       context: .
@@ -638,13 +712,15 @@ services:
     volumes:
     - ./src/join/config/q4_result.yaml:/app/config.yaml:ro
     - ./persisted_state:/app/state
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - EOF_EXPECTED=2
     - WORKER_ID=1
     - NUM_DOWNSTREAM_WORKERS=1
     - QUERY_RESULT_NUMBER=4
     - STAGE_NAME=join_query_result
-
+    - FD_NODES=1:gateway,2:q1_join,3:q2_merge,4:q2_join,5:q3_averages_join,6:q3_result_join,7:q4_join_0,8:q5_join
+    - FD_NODE_ID=7
   q5_router_1:
     build:
       context: .
@@ -655,11 +731,13 @@ services:
         condition: service_healthy
     volumes:
     - ./src/transaction_router/config/q5_dates_scaled.yaml:/app/config.yaml:ro
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - WORKER_ID=1
     - EOF_EXPECTED=1
     - STAGE_NAME=q5_router
-
+    - FD_NODES=1:q5_router_1,2:q5_router_2
+    - FD_NODE_ID=1
   q5_router_2:
     build:
       context: .
@@ -670,11 +748,13 @@ services:
         condition: service_healthy
     volumes:
     - ./src/transaction_router/config/q5_dates_scaled.yaml:/app/config.yaml:ro
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - WORKER_ID=2
     - EOF_EXPECTED=1
     - STAGE_NAME=q5_router
-
+    - FD_NODES=1:q5_router_1,2:q5_router_2
+    - FD_NODE_ID=2
   q5_converter_1:
     build:
       context: .
@@ -685,12 +765,14 @@ services:
         condition: service_healthy
     volumes:
     - ./src/filter/config/currency_conversion_config.yaml:/app/config.yaml:ro
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - WORKER_ID=1
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=1
     - STAGE_NAME=q5_converter
-
+    - FD_NODES=1:q5_converter_1,2:q5_converter_2
+    - FD_NODE_ID=1
   q5_converter_2:
     build:
       context: .
@@ -701,12 +783,14 @@ services:
         condition: service_healthy
     volumes:
     - ./src/filter/config/currency_conversion_config.yaml:/app/config.yaml:ro
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - WORKER_ID=2
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=1
     - STAGE_NAME=q5_converter
-
+    - FD_NODES=1:q5_converter_1,2:q5_converter_2
+    - FD_NODE_ID=2
   q5_join:
     build:
       context: .
@@ -717,18 +801,23 @@ services:
         condition: service_healthy
     volumes:
     - ./src/join/config/q5_join_count_config.yaml:/app/config.yaml:ro
+    - /var/run/docker.sock:/var/run/docker.sock
     environment:
     - WORKER_ID=1
     - EOF_EXPECTED=2
     - NUM_DOWNSTREAM_WORKERS=1
     - QUERY_RESULT_NUMBER=5
     - STAGE_NAME=q5_join
-
+    - FD_NODES=1:gateway,2:q1_join,3:q2_merge,4:q2_join,5:q3_averages_join,6:q3_result_join,7:q4_join_0,8:q5_join
+    - FD_NODE_ID=8
   client_0:
     build:
       context: .
       dockerfile: src/client/Dockerfile
-    command: ["sh", "-c", "sleep 15 && python -m src.client.main"]
+    command:
+    - sh
+    - -c
+    - sleep 15 && python -m src.client.main
     container_name: client_0
     depends_on:
     - gateway
@@ -744,12 +833,14 @@ services:
     - ACCOUNTS_PATH=/data/small_accounts.csv
     - TRANSACTIONS_PATH=/data/small_trans.csv
     - BATCH_SIZE=5000
-
   client_1:
     build:
       context: .
       dockerfile: src/client/Dockerfile
-    command: ["sh", "-c", "sleep 15 && python -m src.client.main"]
+    command:
+    - sh
+    - -c
+    - sleep 15 && python -m src.client.main
     container_name: client_1
     depends_on:
     - gateway
@@ -765,12 +856,14 @@ services:
     - ACCOUNTS_PATH=/data/small_accounts.csv
     - TRANSACTIONS_PATH=/data/small_trans.csv
     - BATCH_SIZE=5000
-
   client_2:
     build:
       context: .
       dockerfile: src/client/Dockerfile
-    command: ["sh", "-c", "sleep 15 && python -m src.client.main"]
+    command:
+    - sh
+    - -c
+    - sleep 15 && python -m src.client.main
     container_name: client_2
     depends_on:
     - gateway

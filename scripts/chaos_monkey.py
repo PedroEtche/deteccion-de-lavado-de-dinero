@@ -9,6 +9,7 @@ EXCLUDE_PATTERNS = ["rabbitmq", "gateway", "client_"]
 INTERVAL = 5  # segundos entre kills
 COMPOSE_FILE = "docker-compose.yaml"
 WAIT_TIMEOUT = 300  # max segundos a esperar a que todo este arriba
+VICTIM = 3
 
 
 def now():
@@ -74,6 +75,7 @@ def main():
     wait_for_up()
 
     kill_count = 0
+    victims = []
     try:
         while True:
             eligible = [c for c in running_containers() if not is_excluded(c)]
@@ -82,17 +84,26 @@ def main():
                 time.sleep(INTERVAL)
                 continue
 
-            victim = random.choice(eligible)
-            result = subprocess.run(
-                ["docker", "kill", "--signal=KILL", victim],
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode == 0:
-                kill_count += 1
-                print(f"[{now()}] [chaos] SIGKILL -> {victim}  (kill #{kill_count})")
-            else:
-                print(f"[{now()}] [chaos] Fallo al matar {victim} (quiza ya murio).")
+            victims = []
+            for _ in range(VICTIM):
+                victim = random.choice(eligible)
+                victims.append(victim)
+
+            for v in victims:
+                result = subprocess.run(
+                    ["docker", "kill", "--signal=KILL", v],
+                    capture_output=True,
+                    text=True,
+                )
+                if result.returncode == 0:
+                    kill_count += 1
+                    print(
+                        f"[{now()}] [chaos] SIGKILL -> {victims}  (kill #{kill_count})"
+                    )
+                else:
+                    print(
+                        f"[{now()}] [chaos] Fallo al matar {victims} (quiza ya murio)."
+                    )
 
             time.sleep(INTERVAL)
     except KeyboardInterrupt:

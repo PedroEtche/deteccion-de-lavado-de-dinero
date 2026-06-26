@@ -66,10 +66,20 @@ def send_csv(sock, csv_path, batch_size, stream, *, sender):
         raise ValueError(f"Unknown stream: {stream}")
 
     with open(csv_path, "r", encoding=_ENCODING, newline="") as handle:
-        reader = csv.DictReader(handle)
+        reader = csv.reader(handle)
+
+        header = next(reader, None)
+        if header is None:
+            return
+        # El dataset real (IBM AML) trae dos columnas llamadas "Account"
+        # (origen y destino). csv.DictReader colapsaria ambas en una sola key
+        # perdiendo la cuenta destino. Deduplicamos el header estilo pandas
+        # ("Account", "Account.1", ...) para que coincida con el field_map.
+        fieldnames = _dedupe_fieldnames(header)
 
         batch = []
-        for raw_row in reader:
+        for values in reader:
+            raw_row = dict(zip(fieldnames, values))
             row = _map_row(raw_row, field_map, row_cls)
             batch.append(row)
             if len(batch) >= batch_size:
@@ -111,6 +121,23 @@ def receive_streams(sock):
 # --------------------------------------------------------------------
 # HELPERS
 # --------------------------------------------------------------------
+
+
+def _dedupe_fieldnames(header):
+    """Renombra columnas repetidas estilo pandas: la primera ocurrencia queda
+    igual y las siguientes reciben sufijo ".1", ".2", ... Asi un header con dos
+    "Account" pasa a ["Account", "Account.1"], que es lo que espera el field_map."""
+    seen = {}
+    result = []
+    for name in header:
+        name = name.strip()
+        if name in seen:
+            seen[name] += 1
+            result.append(f"{name}.{seen[name]}")
+        else:
+            seen[name] = 0
+            result.append(name)
+    return result
 
 
 def _map_row(raw_row, field_map, row_cls):

@@ -849,6 +849,7 @@ services:
       - EOF_EXPECTED=3
       - WORKER_ID=1
       - NUM_DOWNSTREAM_WORKERS=3
+      - ROUTING_STRATEGY=sharded
       - STAGE_NAME=group_account_pair
       - FD_NODES=1:group_account_pair_1,2:group_account_pair_2,3:group_account_pair_3
       - FD_NODE_ID=1
@@ -869,6 +870,7 @@ services:
       - EOF_EXPECTED=3
       - WORKER_ID=2
       - NUM_DOWNSTREAM_WORKERS=3
+      - ROUTING_STRATEGY=sharded
       - STAGE_NAME=group_account_pair
       - FD_NODES=1:group_account_pair_1,2:group_account_pair_2,3:group_account_pair_3
       - FD_NODE_ID=2
@@ -889,6 +891,7 @@ services:
       - EOF_EXPECTED=3
       - WORKER_ID=3
       - NUM_DOWNSTREAM_WORKERS=3
+      - ROUTING_STRATEGY=sharded
       - STAGE_NAME=group_account_pair
       - FD_NODES=1:group_account_pair_1,2:group_account_pair_2,3:group_account_pair_3
       - FD_NODE_ID=3
@@ -1240,62 +1243,14 @@ services:
     depends_on:
       - gateway
     volumes:
-      - ./data/LI-Small_Trans.csv:/data/small_trans.csv
-      - ./data/LI-Small_accounts.csv:/data/small_accounts.csv
+      - ./data/HI-Medium_Trans.csv:/data/small_trans.csv
+      - ./data/HI-Medium_accounts.csv:/data/small_accounts.csv
       - ./results/clients/client_0:/results/clients/client_0
     environment:
       - PYTHONUNBUFFERED=1
       - SERVER_HOST=gateway
       - SERVER_PORT=5678
       - OUTPUT_PATH=/results/clients/client_0/
-      - ACCOUNTS_PATH=/data/small_accounts.csv
-      - TRANSACTIONS_PATH=/data/small_trans.csv
-      - BATCH_SIZE=5000
-
-  client_1:
-    build:
-      context: .
-      dockerfile: src/client/Dockerfile
-    command:
-      - sh
-      - -c
-      - sleep 15 && python -m src.client.main
-    container_name: client_1
-    depends_on:
-      - gateway
-    volumes:
-      - ./data/LI-Small_Trans.csv:/data/small_trans.csv
-      - ./data/LI-Small_accounts.csv:/data/small_accounts.csv
-      - ./results/clients/client_1:/results/clients/client_1
-    environment:
-      - PYTHONUNBUFFERED=1
-      - SERVER_HOST=gateway
-      - SERVER_PORT=5678
-      - OUTPUT_PATH=/results/clients/client_1/
-      - ACCOUNTS_PATH=/data/small_accounts.csv
-      - TRANSACTIONS_PATH=/data/small_trans.csv
-      - BATCH_SIZE=5000
-
-  client_2:
-    build:
-      context: .
-      dockerfile: src/client/Dockerfile
-    command:
-      - sh
-      - -c
-      - sleep 15 && python -m src.client.main
-    container_name: client_2
-    depends_on:
-      - gateway
-    volumes:
-      - ./data/LI-Small_Trans.csv:/data/small_trans.csv
-      - ./data/LI-Small_accounts.csv:/data/small_accounts.csv
-      - ./results/clients/client_2:/results/clients/client_2
-    environment:
-      - PYTHONUNBUFFERED=1
-      - SERVER_HOST=gateway
-      - SERVER_PORT=5678
-      - OUTPUT_PATH=/results/clients/client_2/
       - ACCOUNTS_PATH=/data/small_accounts.csv
       - TRANSACTIONS_PATH=/data/small_trans.csv
       - BATCH_SIZE=5000
